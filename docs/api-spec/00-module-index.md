@@ -46,7 +46,7 @@
 | 1 | 公共类型与 Trait | 01-common-types.md | `process/utils/`, `common/types/`, `common/utils/`, `common/platform/` | ⬜ 待提炼（所有模块完成后） |
 | 2 | 数据模型与存储 | 02-database.md | `process/services/database/` | ✅ 已完成 |
 | 3 | 认证与用户管理 | 03-auth.md | `process/webserver/auth/`, `process/bridge/authBridge.ts` | ✅ 已完成 |
-| 4 | 系统设置 | 04-system-settings.md | `process/bridge/systemSettingsBridge.ts`, `process/bridge/modelBridge.ts`, `process/services/i18n/`, `common/config/` | ⬜ 未开始 |
+| 4 | 系统设置 | 04-system-settings.md | `process/bridge/systemSettingsBridge.ts`, `process/bridge/modelBridge.ts`, `common/config/` | ✅ 已完成 |
 | 5 | 会话与消息管理 | 05-conversation.md | `process/bridge/conversationBridge.ts`, `process/bridge/acpConversationBridge.ts`, `process/bridge/geminiConversationBridge.ts`, `process/task/`, `common/chat/` | ⬜ 未开始 |
 | 6 | AI 后端集成 | 06-ai-agent.md | `process/agent/`, `process/task/*AgentManager.ts`, `process/worker/`, `process/bridge/bedrockBridge.ts`, `process/bridge/geminiBridge.ts`, `process/bridge/remoteAgentBridge.ts`, `common/api/` | ⬜ 未开始 |
 | 7 | 实时通信（WebSocket） | 07-realtime.md | `process/webserver/websocket/` | ⬜ 未开始 |
@@ -77,6 +77,7 @@
 | `common/adapter/` | Electron/Browser/Standalone 通信适配层（Rust 单运行时不需要） |
 | `common/platform/Electron*` | Electron 平台实现（`IPlatformServices` 接口定义可作为架构参考） |
 | `common/electronSafe.ts` | Electron 环境检测 |
+| `process/services/i18n/` | 主进程 i18n 服务。原项目用于托盘菜单、桌面宠物菜单等 Electron 原生 UI 的翻译。Rust 后端不做翻译，仅存储用户语言偏好并广播变更，翻译由前端自行处理 |
 | `server/` | 空目录，无内容 |
 
 **Electron / Rust 边界原则**：不迁移的功能仍保留在 Electron 薄层中。但要注意区分"触发动作"和"处理逻辑"——例如 `dialogBridge` 中"弹出文件选择对话框"是 Electron 原生能力，但"用户选完文件后的处理"属于业务逻辑，应由 Rust 后端提供 API。梳理每个模块时需按此原则划分：Electron 层只保留原生 OS 交互，所有业务逻辑迁入 Rust。
