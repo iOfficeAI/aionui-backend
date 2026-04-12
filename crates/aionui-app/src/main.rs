@@ -3,7 +3,7 @@ use clap::Parser;
 use tokio::net::TcpListener;
 use tracing::info;
 
-use aionui_app::{AppConfig, create_router};
+use aionui_app::{AppConfig, AppServices, create_router};
 
 #[derive(Parser)]
 #[command(name = "aionui-backend", about = "AionUi Backend Server")]
@@ -15,6 +15,10 @@ struct Cli {
     /// Port number to listen on.
     #[arg(long, default_value_t = aionui_common::constants::DEFAULT_PORT)]
     port: u16,
+
+    /// Data directory for database and file storage.
+    #[arg(long, default_value = "data")]
+    data_dir: String,
 }
 
 fn init_tracing() {
@@ -36,9 +40,21 @@ async fn main() -> Result<()> {
     let config = AppConfig {
         host: cli.host,
         port: cli.port,
+        data_dir: cli.data_dir,
     };
 
-    let router = create_router();
+    // Initialize database and all services
+    info!("Initializing database at {}", config.database_path().display());
+    let database = aionui_db::init_database(&config.database_path()).await?;
+    let services = AppServices::from_database(database).await?;
+
+    // Check bootstrap status
+    let has_users = services.user_repo.has_users().await?;
+    if !has_users {
+        info!("No configured users detected — initial setup required via /api/auth/status");
+    }
+
+    let router = create_router(&services);
     let addr = config.socket_addr();
     let listener = TcpListener::bind(&addr).await?;
 
@@ -48,6 +64,8 @@ async fn main() -> Result<()> {
         .with_graceful_shutdown(shutdown_signal())
         .await?;
 
+    // Graceful shutdown: close database connections
+    services.database.close().await;
     info!("Server shut down gracefully");
 
     Ok(())

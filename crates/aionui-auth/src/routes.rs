@@ -171,8 +171,8 @@ async fn login_handler(
         ));
     }
 
-    // Safe: password_valid is true only when found_user is Some
-    let user = found_user.expect("user must exist when password is valid");
+    let user = found_user
+        .ok_or_else(|| AppError::Unauthorized("Invalid username or password".into()))?;
 
     let token = state
         .jwt_service
