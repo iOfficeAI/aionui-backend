@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 aionui-common.workspace = true
 sqlx = { workspace = true, features = ["migrate"] }
+async-trait.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
