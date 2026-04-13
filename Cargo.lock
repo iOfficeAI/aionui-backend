@@ -61,6 +61,7 @@ dependencies = [
  "aionui-db",
  "aionui-realtime",
  "aionui-system",
+ "async-trait",
  "aws-sdk-bedrockruntime",
  "dashmap",
  "ed25519-dalek",
@@ -70,6 +71,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tokio-tungstenite 0.26.2",
+ "tracing",
 ]
 
 [[package]]
