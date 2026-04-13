@@ -1,4 +1,5 @@
 mod auth;
+mod confirmation;
 mod conversation;
 mod lifecycle;
 mod provider;
@@ -11,6 +12,9 @@ pub use conversation::{
     CreateConversationRequest, ListConversationsQuery, ListMessagesQuery, MessageListResponse,
     MessageResponse, MessageSearchItem, MessageSearchResponse, SearchMessagesQuery,
     SendMessageRequest, UpdateConversationRequest,
+};
+pub use confirmation::{
+    ApprovalCheckQuery, ApprovalCheckResponse, ConfirmRequest, ConfirmationListResponse,
 };
 pub use auth::{
     AuthStatusResponse, ChangePasswordRequest, LoginRequest, LoginResponse, PublicUser,

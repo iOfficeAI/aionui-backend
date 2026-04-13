@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -78,6 +79,9 @@ struct AcpState {
     model_info: Option<AcpModelInfo>,
     /// Whether this session has sent at least one message.
     has_messages: bool,
+    /// Session-level approval memory (action key → always allowed).
+    /// Cleared when the agent is killed, not persisted.
+    approval_memory: HashMap<String, bool>,
 }
 
 /// Inject optional `files` and `injectSkills` into a JSON payload's `data` object.
@@ -87,6 +91,15 @@ fn inject_files_and_skills(payload: &mut Value, data: &SendMessageData) {
     }
     if !data.inject_skills.is_empty() {
         payload["data"]["injectSkills"] = json!(data.inject_skills);
+    }
+}
+
+/// Build the approval memory key from action and optional command_type.
+fn approval_key(action: Option<&str>, command_type: Option<&str>) -> String {
+    match (action, command_type) {
+        (Some(a), Some(ct)) => format!("{a}:{ct}"),
+        (Some(a), None) => a.to_owned(),
+        _ => String::new(),
     }
 }
 
@@ -150,6 +163,7 @@ impl AcpAgentManager {
                 confirmations: Vec::new(),
                 model_info: None,
                 has_messages: false,
+                approval_memory: HashMap::new(),
             }),
             last_activity: AtomicI64::new(now_ms()),
             session_lock: Mutex::new(()),
@@ -309,6 +323,17 @@ impl AcpAgentManager {
                 if let Ok(info) = serde_json::from_value::<AcpModelInfo>(data.clone()) {
                     let mut state = self.state.write().await;
                     state.model_info = Some(info);
+                }
+            }
+            AgentStreamEvent::AcpPermission(data) => {
+                // Parse as Confirmation and add to pending list
+                if let Ok(conf) = serde_json::from_value::<Confirmation>(data.clone()) {
+                    self.add_confirmation(conf).await;
+                } else {
+                    debug!(
+                        conversation_id = %self.conversation_id,
+                        "Failed to parse AcpPermission as Confirmation"
+                    );
                 }
             }
             _ => {}
@@ -591,6 +616,7 @@ impl crate::agent_manager::IAgentManager for AcpAgentManager {
         msg_id: &str,
         call_id: &str,
         data: serde_json::Value,
+        always_allow: bool,
     ) -> Result<(), AppError> {
         let payload = json!({
             "type": protocol::CONFIRM_MESSAGE,
@@ -601,14 +627,20 @@ impl crate::agent_manager::IAgentManager for AcpAgentManager {
             }
         });
 
-        // Remove the confirmation from the pending list
-        // Use try_write to avoid deadlock in sync context
+        // Remove the confirmation from the pending list and optionally
+        // record in approval memory.
         if let Ok(mut state) = self.state.try_write() {
+            if always_allow {
+                // Find the confirmation before removing it to read action/command_type
+                if let Some(conf) = state.confirmations.iter().find(|c| c.call_id == call_id) {
+                    let key = approval_key(conf.action.as_deref(), conf.command_type.as_deref());
+                    state.approval_memory.insert(key, true);
+                }
+            }
             state.confirmations.retain(|c| c.call_id != call_id);
         }
 
         // Send confirmation to the CLI process.
-        // We need to block on the async send in this sync context.
         // Use tokio::spawn to avoid blocking the current thread.
         let process = Arc::clone(&self.process);
         tokio::spawn(async move {
@@ -624,6 +656,16 @@ impl crate::agent_manager::IAgentManager for AcpAgentManager {
         match self.state.try_read() {
             Ok(guard) => guard.confirmations.clone(),
             Err(_) => Vec::new(),
+        }
+    }
+
+    fn check_approval(&self, action: &str, command_type: Option<&str>) -> bool {
+        match self.state.try_read() {
+            Ok(guard) => {
+                let key = approval_key(Some(action), command_type);
+                guard.approval_memory.get(&key).copied().unwrap_or(false)
+            }
+            Err(_) => false,
         }
     }
 
@@ -972,6 +1014,7 @@ mod tests {
                 }],
                 model_info: None,
                 has_messages: false,
+                approval_memory: HashMap::new(),
             }),
         };
 
@@ -1020,6 +1063,7 @@ mod tests {
                 ],
                 model_info: None,
                 has_messages: false,
+                approval_memory: HashMap::new(),
             }),
         };
 
@@ -1105,6 +1149,155 @@ mod tests {
         assert_eq!(info.model_name, Some("Claude Sonnet 4".into()));
     }
 
+    // ── approval_key tests ────────────────────────────────────────────
+
+    #[test]
+    fn approval_key_with_action_and_command_type() {
+        assert_eq!(
+            approval_key(Some("edit_file"), Some("bash")),
+            "edit_file:bash"
+        );
+    }
+
+    #[test]
+    fn approval_key_with_action_only() {
+        assert_eq!(approval_key(Some("edit_file"), None), "edit_file");
+    }
+
+    #[test]
+    fn approval_key_with_no_action() {
+        assert_eq!(approval_key(None, Some("bash")), "");
+        assert_eq!(approval_key(None, None), "");
+    }
+
+    // ── approval memory tests ────────────────────────────────────────
+
+    #[test]
+    fn confirm_with_always_allow_stores_approval() {
+        let state = RwLock::new(AcpState {
+            status: None,
+            session_id: None,
+            confirmations: vec![Confirmation {
+                id: "c1".into(),
+                call_id: "call-1".into(),
+                title: Some("Allow edit".into()),
+                action: Some("edit_file".into()),
+                description: "Edit main.rs".into(),
+                command_type: Some("bash".into()),
+                options: vec![],
+            }],
+            model_info: None,
+            has_messages: false,
+            approval_memory: HashMap::new(),
+        });
+
+        // Simulate the confirm logic with always_allow=true
+        {
+            let mut guard = state.try_write().unwrap();
+            let call_id = "call-1";
+            if let Some(conf) = guard.confirmations.iter().find(|c| c.call_id == call_id) {
+                let key = approval_key(conf.action.as_deref(), conf.command_type.as_deref());
+                guard.approval_memory.insert(key, true);
+            }
+            guard.confirmations.retain(|c| c.call_id != call_id);
+        }
+
+        let guard = state.try_read().unwrap();
+        assert!(guard.confirmations.is_empty());
+        assert_eq!(guard.approval_memory.get("edit_file:bash"), Some(&true));
+    }
+
+    #[test]
+    fn confirm_without_always_allow_does_not_store_approval() {
+        let state = RwLock::new(AcpState {
+            status: None,
+            session_id: None,
+            confirmations: vec![Confirmation {
+                id: "c1".into(),
+                call_id: "call-1".into(),
+                title: Some("Allow edit".into()),
+                action: Some("edit_file".into()),
+                description: "Edit main.rs".into(),
+                command_type: None,
+                options: vec![],
+            }],
+            model_info: None,
+            has_messages: false,
+            approval_memory: HashMap::new(),
+        });
+
+        // Simulate the confirm logic with always_allow=false
+        {
+            let mut guard = state.try_write().unwrap();
+            // always_allow is false, so we skip the approval_memory insert
+            guard.confirmations.retain(|c| c.call_id != "call-1");
+        }
+
+        let guard = state.try_read().unwrap();
+        assert!(guard.confirmations.is_empty());
+        assert!(guard.approval_memory.is_empty());
+    }
+
+    #[test]
+    fn check_approval_returns_true_after_always_allow() {
+        let state = RwLock::new(AcpState {
+            status: None,
+            session_id: None,
+            confirmations: Vec::new(),
+            model_info: None,
+            has_messages: false,
+            approval_memory: HashMap::from([
+                ("edit_file:bash".into(), true),
+                ("read_file".into(), true),
+            ]),
+        });
+
+        let guard = state.try_read().unwrap();
+        let key1 = approval_key(Some("edit_file"), Some("bash"));
+        assert!(guard.approval_memory.get(&key1).copied().unwrap_or(false));
+
+        let key2 = approval_key(Some("read_file"), None);
+        assert!(guard.approval_memory.get(&key2).copied().unwrap_or(false));
+
+        let key3 = approval_key(Some("delete_file"), None);
+        assert!(!guard.approval_memory.get(&key3).copied().unwrap_or(false));
+    }
+
+    // ── AcpPermission event → add confirmation test ──────────────────
+
+    #[tokio::test]
+    async fn update_state_from_acp_permission_event() {
+        let manager = make_test_state_with_permission();
+        let event = AgentStreamEvent::AcpPermission(json!({
+            "id": "c1",
+            "callId": "call-1",
+            "title": "Allow file edit",
+            "action": "edit_file",
+            "description": "Edit main.rs",
+            "commandType": "bash",
+            "options": []
+        }));
+        manager.update_state_from_event(&event).await;
+
+        let state = manager.state.read().await;
+        assert_eq!(state.confirmations.len(), 1);
+        assert_eq!(state.confirmations[0].call_id, "call-1");
+        assert_eq!(state.confirmations[0].action, Some("edit_file".into()));
+        assert_eq!(state.confirmations[0].command_type, Some("bash".into()));
+    }
+
+    #[tokio::test]
+    async fn update_state_from_acp_permission_invalid_data() {
+        let manager = make_test_state_with_permission();
+        let event = AgentStreamEvent::AcpPermission(json!({
+            "invalid": "data"
+        }));
+        manager.update_state_from_event(&event).await;
+
+        let state = manager.state.read().await;
+        assert!(state.confirmations.is_empty());
+    }
+
     /// Helper for testing state update logic without spawning a real process.
     struct TestStateHolder {
         state: RwLock<AcpState>,
@@ -1150,6 +1343,43 @@ mod tests {
                 confirmations: Vec::new(),
                 model_info: None,
                 has_messages: false,
+                approval_memory: HashMap::new(),
+            }),
+        }
+    }
+
+    /// Helper that also handles AcpPermission events (mirrors AcpAgentManager logic).
+    struct TestStateHolderWithPermission {
+        state: RwLock<AcpState>,
+    }
+
+    impl TestStateHolderWithPermission {
+        async fn update_state_from_event(&self, event: &AgentStreamEvent) {
+            match event {
+                AgentStreamEvent::AcpPermission(data) => {
+                    if let Ok(conf) = serde_json::from_value::<Confirmation>(data.clone()) {
+                        let mut guard = self.state.write().await;
+                        if let Some(existing) = guard.confirmations.iter_mut().find(|c| c.call_id == conf.call_id) {
+                            *existing = conf;
+                        } else {
+                            guard.confirmations.push(conf);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn make_test_state_with_permission() -> TestStateHolderWithPermission {
+        TestStateHolderWithPermission {
+            state: RwLock::new(AcpState {
+                status: None,
+                session_id: None,
+                confirmations: Vec::new(),
+                model_info: None,
+                has_messages: false,
+                approval_memory: HashMap::new(),
             }),
         }
     }
@@ -1184,6 +1414,7 @@ mod tests {
                 confirmations: Vec::new(),
                 model_info: None,
                 has_messages: false,
+                approval_memory: HashMap::new(),
             }),
         }
     }

@@ -2,10 +2,11 @@ use std::sync::Arc;
 
 use aionui_ai_agent::{BuildTaskOptions, IWorkerTaskManager, SendMessageData};
 use aionui_api_types::{
-    CloneConversationRequest, ConversationListResponse, ConversationResponse,
-    CreateConversationRequest, ListConversationsQuery, ListMessagesQuery, MessageListResponse,
-    MessageResponse, MessageSearchResponse, SearchMessagesQuery, SendMessageRequest,
-    UpdateConversationRequest, WebSocketMessage,
+    ApprovalCheckResponse, CloneConversationRequest, ConfirmRequest, ConfirmationListResponse,
+    ConversationListResponse, ConversationResponse, CreateConversationRequest,
+    ListConversationsQuery, ListMessagesQuery, MessageListResponse, MessageResponse,
+    MessageSearchResponse, SearchMessagesQuery, SendMessageRequest, UpdateConversationRequest,
+    WebSocketMessage,
 };
 use aionui_common::{
     generate_id, now_ms, AppError, ConversationSource, ConversationStatus, PaginatedResult,
@@ -374,6 +375,102 @@ impl ConversationService {
             total: result.total,
             has_more: result.has_more,
         })
+    }
+
+    // ── Confirmation System ──────────────────────────────────────────
+
+    /// Get the list of pending confirmations for a conversation.
+    pub async fn list_confirmations(
+        &self,
+        user_id: &str,
+        conversation_id: &str,
+        task_manager: &Arc<dyn IWorkerTaskManager>,
+    ) -> Result<ConfirmationListResponse, AppError> {
+        self.repo
+            .get(conversation_id)
+            .await?
+            .filter(|r| r.user_id == user_id)
+            .ok_or_else(|| {
+                AppError::NotFound(format!("Conversation {conversation_id} not found"))
+            })?;
+
+        let agent = match task_manager.get_task(conversation_id) {
+            Some(a) => a,
+            None => return Ok(Vec::new()),
+        };
+
+        Ok(agent.get_confirmations())
+    }
+
+    /// Confirm a pending tool call.
+    ///
+    /// Sends the confirmation result to the agent and broadcasts a
+    /// `confirmation.remove` WebSocket event.
+    pub async fn confirm(
+        &self,
+        user_id: &str,
+        conversation_id: &str,
+        call_id: &str,
+        req: ConfirmRequest,
+        task_manager: &Arc<dyn IWorkerTaskManager>,
+    ) -> Result<(), AppError> {
+        self.repo
+            .get(conversation_id)
+            .await?
+            .filter(|r| r.user_id == user_id)
+            .ok_or_else(|| {
+                AppError::NotFound(format!("Conversation {conversation_id} not found"))
+            })?;
+
+        let agent = task_manager
+            .get_task(conversation_id)
+            .ok_or_else(|| AppError::NotFound("No active agent for this conversation".into()))?;
+
+        // Verify the confirmation exists
+        let confirmations = agent.get_confirmations();
+        let conf = confirmations
+            .iter()
+            .find(|c| c.call_id == call_id)
+            .ok_or_else(|| {
+                AppError::NotFound(format!("Confirmation {call_id} not found"))
+            })?;
+        let conf_id = conf.id.clone();
+
+        agent.confirm(&req.msg_id, call_id, req.data, req.always_allow)?;
+
+        // Broadcast confirmation.remove
+        let payload = serde_json::json!({
+            "conversationId": conversation_id,
+            "id": conf_id,
+        });
+        let msg = WebSocketMessage::new("confirmation.remove", payload);
+        self.broadcaster.broadcast(msg);
+
+        Ok(())
+    }
+
+    /// Check whether an action has been auto-approved in the current session.
+    pub async fn check_approval(
+        &self,
+        user_id: &str,
+        conversation_id: &str,
+        action: &str,
+        command_type: Option<&str>,
+        task_manager: &Arc<dyn IWorkerTaskManager>,
+    ) -> Result<ApprovalCheckResponse, AppError> {
+        self.repo
+            .get(conversation_id)
+            .await?
+            .filter(|r| r.user_id == user_id)
+            .ok_or_else(|| {
+                AppError::NotFound(format!("Conversation {conversation_id} not found"))
+            })?;
+
+        let approved = task_manager
+            .get_task(conversation_id)
+            .is_some_and(|agent| agent.check_approval(action, command_type));
+
+        Ok(ApprovalCheckResponse { approved })
     }
 
     // ── Message Flow ─────────────────────────────────────────────────

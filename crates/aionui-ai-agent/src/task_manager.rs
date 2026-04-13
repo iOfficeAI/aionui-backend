@@ -203,11 +203,15 @@ mod tests {
             _msg_id: &str,
             _call_id: &str,
             _data: serde_json::Value,
+            _always_allow: bool,
         ) -> Result<(), AppError> {
             Ok(())
         }
         fn get_confirmations(&self) -> Vec<Confirmation> {
             vec![]
+        }
+        fn check_approval(&self, _action: &str, _command_type: Option<&str>) -> bool {
+            false
         }
         fn kill(&self, _reason: Option<AgentKillReason>) -> Result<(), AppError> {
             Ok(())

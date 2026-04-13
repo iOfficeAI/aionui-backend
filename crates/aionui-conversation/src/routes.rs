@@ -5,7 +5,8 @@ use axum::routing::{get, post};
 use axum::Router;
 
 use aionui_api_types::{
-    ApiResponse, CloneConversationRequest, ConversationListResponse, ConversationResponse,
+    ApiResponse, ApprovalCheckQuery, ApprovalCheckResponse, CloneConversationRequest,
+    ConfirmRequest, ConfirmationListResponse, ConversationListResponse, ConversationResponse,
     CreateConversationRequest, ListConversationsQuery, ListMessagesQuery, MessageListResponse,
     MessageSearchResponse, SearchMessagesQuery, SendMessageRequest, UpdateConversationRequest,
 };
@@ -14,24 +15,9 @@ use aionui_common::AppError;
 
 use crate::state::ConversationRouterState;
 
-/// Build the conversation router (CRUD + message flow + extended operations).
+/// Build the conversation router (CRUD + message flow + confirmation + extended operations).
 ///
 /// All routes require authentication (applied by the caller).
-///
-/// Endpoints:
-/// - `POST   /api/conversations`              — create a conversation (201)
-/// - `GET    /api/conversations`              — list conversations (cursor pagination)
-/// - `POST   /api/conversations/clone`        — clone a conversation (201)
-/// - `GET    /api/conversations/:id`          — get a single conversation
-/// - `PATCH  /api/conversations/:id`          — partial update (extra merge)
-/// - `DELETE /api/conversations/:id`          — delete a conversation
-/// - `POST   /api/conversations/:id/reset`    — reset a conversation
-/// - `GET    /api/conversations/:id/associated` — list associated conversations
-/// - `GET    /api/conversations/:id/messages`  — list messages (page pagination)
-/// - `POST   /api/conversations/:id/messages`  — send a user message (202)
-/// - `POST   /api/conversations/:id/stop`      — stop streaming response
-/// - `POST   /api/conversations/:id/warmup`    — pre-initialize agent
-/// - `GET    /api/messages/search`            — search messages across conversations
 pub fn conversation_routes(state: ConversationRouterState) -> Router {
     Router::new()
         .route("/api/conversations", post(create).get(list))
@@ -49,6 +35,19 @@ pub fn conversation_routes(state: ConversationRouterState) -> Router {
         )
         .route("/api/conversations/{id}/stop", post(stop_stream))
         .route("/api/conversations/{id}/warmup", post(warmup))
+        // Confirmation system
+        .route(
+            "/api/conversations/{id}/confirmations",
+            get(list_confirmations),
+        )
+        .route(
+            "/api/conversations/{id}/confirmations/{callId}/confirm",
+            post(confirm),
+        )
+        .route(
+            "/api/conversations/{id}/approvals/check",
+            get(check_approval),
+        )
         .route("/api/messages/search", get(search_messages))
         .with_state(state)
 }
@@ -199,6 +198,70 @@ async fn search_messages(
     let result = state
         .conversation_service
         .search_messages(&user.id, query)
+        .await?;
+    Ok(Json(ApiResponse::ok(result)))
+}
+
+// ── Confirmation handlers ─────────────────────────────────────────
+
+async fn list_confirmations(
+    State(state): State<ConversationRouterState>,
+    Extension(user): Extension<CurrentUser>,
+    Path(id): Path<String>,
+) -> Result<Json<ApiResponse<ConfirmationListResponse>>, AppError> {
+    let items = state
+        .conversation_service
+        .list_confirmations(&user.id, &id, &state.worker_task_manager)
+        .await?;
+    Ok(Json(ApiResponse::ok(items)))
+}
+
+#[derive(serde::Deserialize)]
+struct ConfirmPathParams {
+    id: String,
+    #[serde(rename = "callId")]
+    call_id: String,
+}
+
+async fn confirm(
+    State(state): State<ConversationRouterState>,
+    Extension(user): Extension<CurrentUser>,
+    Path(params): Path<ConfirmPathParams>,
+    body: Result<Json<ConfirmRequest>, JsonRejection>,
+) -> Result<Json<ApiResponse<()>>, AppError> {
+    let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
+    state
+        .conversation_service
+        .confirm(
+            &user.id,
+            &params.id,
+            &params.call_id,
+            req,
+            &state.worker_task_manager,
+        )
+        .await?;
+    Ok(Json(ApiResponse::success()))
+}
+
+async fn check_approval(
+    State(state): State<ConversationRouterState>,
+    Extension(user): Extension<CurrentUser>,
+    Path(id): Path<String>,
+    Query(query): Query<ApprovalCheckQuery>,
+) -> Result<Json<ApiResponse<ApprovalCheckResponse>>, AppError> {
+    if query.action.trim().is_empty() {
+        return Err(AppError::BadRequest("action must not be empty".into()));
+    }
+
+    let result = state
+        .conversation_service
+        .check_approval(
+            &user.id,
+            &id,
+            &query.action,
+            query.command_type.as_deref(),
+            &state.worker_task_manager,
+        )
         .await?;
     Ok(Json(ApiResponse::ok(result)))
 }

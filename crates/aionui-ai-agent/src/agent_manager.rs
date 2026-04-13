@@ -47,15 +47,25 @@ pub trait IAgentManager: Send + Sync {
     async fn stop(&self) -> Result<(), AppError>;
 
     /// Submit a confirmation response for a pending tool call.
+    ///
+    /// If `always_allow` is `true`, the confirmation's `action` (and optional
+    /// `command_type`) are recorded in the session-level approval memory so
+    /// that future identical requests can be auto-approved by the frontend.
     fn confirm(
         &self,
         msg_id: &str,
         call_id: &str,
         data: serde_json::Value,
+        always_allow: bool,
     ) -> Result<(), AppError>;
 
     /// Get the list of pending confirmation items.
     fn get_confirmations(&self) -> Vec<Confirmation>;
+
+    /// Check whether an action has been marked "always allow" in this session.
+    ///
+    /// The approval memory is session-level (cleared when the agent is killed).
+    fn check_approval(&self, action: &str, command_type: Option<&str>) -> bool;
 
     /// Terminate the agent process.
     ///

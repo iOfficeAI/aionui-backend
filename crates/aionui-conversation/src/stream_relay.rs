@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use aionui_ai_agent::AgentStreamEvent;
 use aionui_api_types::WebSocketMessage;
-use aionui_common::{generate_id, now_ms, ConversationStatus};
+use aionui_common::{generate_id, now_ms, Confirmation, ConversationStatus};
 use aionui_db::IConversationRepository;
 use aionui_db::models::MessageRow;
 use aionui_realtime::EventBroadcaster;
@@ -49,6 +49,7 @@ impl StreamRelay {
             match rx.recv().await {
                 Ok(event) => {
                     self.forward_to_websocket(&event);
+                    self.maybe_broadcast_confirmation(&event);
 
                     if let AgentStreamEvent::Text(ref data) = event {
                         text_buffer.push_str(&data.content);
@@ -81,6 +82,38 @@ impl StreamRelay {
                     );
                 }
             }
+        }
+    }
+
+    /// Broadcast a `confirmation.add` WebSocket event when permission events arrive.
+    fn maybe_broadcast_confirmation(&self, event: &AgentStreamEvent) {
+        let data = match event {
+            AgentStreamEvent::AcpPermission(d) | AgentStreamEvent::CodexPermission(d) => d,
+            _ => return,
+        };
+
+        // Try to parse as Confirmation to build a well-typed event payload
+        if let Ok(conf) = serde_json::from_value::<Confirmation>(data.clone()) {
+            let payload = json!({
+                "conversationId": self.conversation_id,
+                "id": conf.id,
+                "callId": conf.call_id,
+                "title": conf.title,
+                "action": conf.action,
+                "description": conf.description,
+                "commandType": conf.command_type,
+                "options": conf.options,
+            });
+            let msg = WebSocketMessage::new("confirmation.add", payload);
+            self.broadcaster.broadcast(msg);
+        } else {
+            // Fallback: broadcast raw data with conversation ID
+            let payload = json!({
+                "conversationId": self.conversation_id,
+                "data": data,
+            });
+            let msg = WebSocketMessage::new("confirmation.add", payload);
+            self.broadcaster.broadcast(msg);
         }
     }
 

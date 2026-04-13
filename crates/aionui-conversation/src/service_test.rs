@@ -844,6 +844,8 @@ struct MockAgent {
     conversation_id: String,
     event_tx: broadcast::Sender<AgentStreamEvent>,
     stopped: Mutex<bool>,
+    confirmations: Mutex<Vec<Confirmation>>,
+    approval_memory: Mutex<std::collections::HashMap<String, bool>>,
 }
 
 impl MockAgent {
@@ -853,6 +855,19 @@ impl MockAgent {
             conversation_id: conversation_id.to_owned(),
             event_tx,
             stopped: Mutex::new(false),
+            confirmations: Mutex::new(vec![]),
+            approval_memory: Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+
+    fn with_confirmations(conversation_id: &str, confirmations: Vec<Confirmation>) -> Self {
+        let (event_tx, _) = broadcast::channel(64);
+        Self {
+            conversation_id: conversation_id.to_owned(),
+            event_tx,
+            stopped: Mutex::new(false),
+            confirmations: Mutex::new(confirmations),
+            approval_memory: Mutex::new(std::collections::HashMap::new()),
         }
     }
 }
@@ -891,13 +906,38 @@ impl IAgentManager for MockAgent {
     fn confirm(
         &self,
         _msg_id: &str,
-        _call_id: &str,
+        call_id: &str,
         _data: serde_json::Value,
+        always_allow: bool,
     ) -> Result<(), AppError> {
+        let mut confs = self.confirmations.lock().unwrap();
+        if always_allow {
+            if let Some(conf) = confs.iter().find(|c| c.call_id == call_id) {
+                let key = match (conf.action.as_deref(), conf.command_type.as_deref()) {
+                    (Some(a), Some(ct)) => format!("{a}:{ct}"),
+                    (Some(a), None) => a.to_owned(),
+                    _ => String::new(),
+                };
+                self.approval_memory.lock().unwrap().insert(key, true);
+            }
+        }
+        confs.retain(|c| c.call_id != call_id);
         Ok(())
     }
     fn get_confirmations(&self) -> Vec<Confirmation> {
-        vec![]
+        self.confirmations.lock().unwrap().clone()
+    }
+    fn check_approval(&self, action: &str, command_type: Option<&str>) -> bool {
+        let key = match command_type {
+            Some(ct) => format!("{action}:{ct}"),
+            None => action.to_owned(),
+        };
+        self.approval_memory
+            .lock()
+            .unwrap()
+            .get(&key)
+            .copied()
+            .unwrap_or(false)
     }
     fn kill(&self, _reason: Option<AgentKillReason>) -> Result<(), AppError> {
         Ok(())
@@ -915,6 +955,13 @@ impl MockTaskManager {
         Self {
             agents: Mutex::new(std::collections::HashMap::new()),
         }
+    }
+
+    fn insert_agent(&self, conversation_id: &str, agent: AgentManagerHandle) {
+        self.agents
+            .lock()
+            .unwrap()
+            .insert(conversation_id.to_owned(), agent);
     }
 }
 
@@ -1160,6 +1207,286 @@ async fn warmup_wrong_user_returns_not_found() {
     let conv = svc.create("user_1", make_create_req()).await.unwrap();
     let err = svc
         .warmup("user_2", &conv.id, &task_mgr)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, AppError::NotFound(_)));
+}
+
+// ── Confirmation system tests ────────────────────────────────────
+
+fn make_test_confirmations() -> Vec<Confirmation> {
+    vec![
+        Confirmation {
+            id: "c1".into(),
+            call_id: "call-1".into(),
+            title: Some("Allow file edit".into()),
+            action: Some("edit_file".into()),
+            description: "Edit main.rs".into(),
+            command_type: Some("bash".into()),
+            options: vec![],
+        },
+        Confirmation {
+            id: "c2".into(),
+            call_id: "call-2".into(),
+            title: Some("Read file".into()),
+            action: Some("read_file".into()),
+            description: "Read config.toml".into(),
+            command_type: None,
+            options: vec![],
+        },
+    ]
+}
+
+#[tokio::test]
+async fn list_confirmations_empty_when_no_agent() {
+    let (svc, _broadcaster, _repo) = make_service();
+    let task_mgr: Arc<dyn IWorkerTaskManager> = Arc::new(MockTaskManager::new());
+
+    let conv = svc.create("user_1", make_create_req()).await.unwrap();
+    let result = svc
+        .list_confirmations("user_1", &conv.id, &task_mgr)
+        .await
+        .unwrap();
+    assert!(result.is_empty());
+}
+
+#[tokio::test]
+async fn list_confirmations_returns_items() {
+    let (svc, _broadcaster, _repo) = make_service();
+    let task_mgr = Arc::new(MockTaskManager::new());
+
+    let conv = svc.create("user_1", make_create_req()).await.unwrap();
+
+    let agent: AgentManagerHandle =
+        Arc::new(MockAgent::with_confirmations(&conv.id, make_test_confirmations()));
+    task_mgr.insert_agent(&conv.id, agent);
+
+    let result = svc
+        .list_confirmations("user_1", &conv.id, &(task_mgr as Arc<dyn IWorkerTaskManager>))
+        .await
+        .unwrap();
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0].call_id, "call-1");
+    assert_eq!(result[1].call_id, "call-2");
+}
+
+#[tokio::test]
+async fn list_confirmations_not_found() {
+    let (svc, _broadcaster, _repo) = make_service();
+    let task_mgr: Arc<dyn IWorkerTaskManager> = Arc::new(MockTaskManager::new());
+
+    let err = svc
+        .list_confirmations("user_1", "no-such-id", &task_mgr)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, AppError::NotFound(_)));
+}
+
+#[tokio::test]
+async fn list_confirmations_wrong_user() {
+    let (svc, _broadcaster, _repo) = make_service();
+    let task_mgr: Arc<dyn IWorkerTaskManager> = Arc::new(MockTaskManager::new());
+
+    let conv = svc.create("user_1", make_create_req()).await.unwrap();
+    let err = svc
+        .list_confirmations("user_2", &conv.id, &task_mgr)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, AppError::NotFound(_)));
+}
+
+#[tokio::test]
+async fn confirm_removes_confirmation_and_broadcasts() {
+    let (svc, broadcaster, _repo) = make_service();
+    let task_mgr = Arc::new(MockTaskManager::new());
+
+    let conv = svc.create("user_1", make_create_req()).await.unwrap();
+    broadcaster.take_events(); // clear create event
+
+    let agent: AgentManagerHandle =
+        Arc::new(MockAgent::with_confirmations(&conv.id, make_test_confirmations()));
+    task_mgr.insert_agent(&conv.id, agent);
+
+    let req = aionui_api_types::ConfirmRequest {
+        msg_id: "msg-1".into(),
+        data: json!({ "value": "allow" }),
+        always_allow: false,
+    };
+    svc.confirm(
+        "user_1",
+        &conv.id,
+        "call-1",
+        req,
+        &(task_mgr.clone() as Arc<dyn IWorkerTaskManager>),
+    )
+    .await
+    .unwrap();
+
+    // Confirmation should be removed from the agent
+    let remaining = task_mgr
+        .get_task(&conv.id)
+        .unwrap()
+        .get_confirmations();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].call_id, "call-2");
+
+    // Should broadcast confirmation.remove event
+    let events = broadcaster.take_events();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].name, "confirmation.remove");
+    assert_eq!(events[0].data["conversationId"], conv.id);
+    assert_eq!(events[0].data["id"], "c1");
+}
+
+#[tokio::test]
+async fn confirm_with_always_allow_stores_approval() {
+    let (svc, _broadcaster, _repo) = make_service();
+    let task_mgr = Arc::new(MockTaskManager::new());
+
+    let conv = svc.create("user_1", make_create_req()).await.unwrap();
+
+    let agent: AgentManagerHandle =
+        Arc::new(MockAgent::with_confirmations(&conv.id, make_test_confirmations()));
+    task_mgr.insert_agent(&conv.id, agent);
+
+    let req = aionui_api_types::ConfirmRequest {
+        msg_id: "msg-1".into(),
+        data: json!({ "value": "allow" }),
+        always_allow: true,
+    };
+    let task_mgr_arc: Arc<dyn IWorkerTaskManager> = task_mgr.clone();
+    svc.confirm("user_1", &conv.id, "call-1", req, &task_mgr_arc)
+        .await
+        .unwrap();
+
+    // check_approval should now return true for edit_file:bash
+    let agent = task_mgr.get_task(&conv.id).unwrap();
+    assert!(agent.check_approval("edit_file", Some("bash")));
+    assert!(!agent.check_approval("delete_file", None));
+}
+
+#[tokio::test]
+async fn confirm_nonexistent_call_id_returns_not_found() {
+    let (svc, _broadcaster, _repo) = make_service();
+    let task_mgr = Arc::new(MockTaskManager::new());
+
+    let conv = svc.create("user_1", make_create_req()).await.unwrap();
+
+    let agent: AgentManagerHandle =
+        Arc::new(MockAgent::with_confirmations(&conv.id, make_test_confirmations()));
+    task_mgr.insert_agent(&conv.id, agent);
+
+    let req = aionui_api_types::ConfirmRequest {
+        msg_id: "msg-1".into(),
+        data: json!({ "value": "allow" }),
+        always_allow: false,
+    };
+    let err = svc
+        .confirm(
+            "user_1",
+            &conv.id,
+            "nonexistent-call",
+            req,
+            &(task_mgr as Arc<dyn IWorkerTaskManager>),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, AppError::NotFound(_)));
+}
+
+#[tokio::test]
+async fn confirm_no_agent_returns_not_found() {
+    let (svc, _broadcaster, _repo) = make_service();
+    let task_mgr: Arc<dyn IWorkerTaskManager> = Arc::new(MockTaskManager::new());
+
+    let conv = svc.create("user_1", make_create_req()).await.unwrap();
+
+    let req = aionui_api_types::ConfirmRequest {
+        msg_id: "msg-1".into(),
+        data: json!({ "value": "allow" }),
+        always_allow: false,
+    };
+    let err = svc
+        .confirm("user_1", &conv.id, "call-1", req, &task_mgr)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, AppError::NotFound(_)));
+}
+
+#[tokio::test]
+async fn check_approval_returns_false_when_not_set() {
+    let (svc, _broadcaster, _repo) = make_service();
+    let task_mgr = Arc::new(MockTaskManager::new());
+
+    let conv = svc.create("user_1", make_create_req()).await.unwrap();
+
+    let agent: AgentManagerHandle = Arc::new(MockAgent::new(&conv.id));
+    task_mgr.insert_agent(&conv.id, agent);
+
+    let result = svc
+        .check_approval(
+            "user_1",
+            &conv.id,
+            "edit_file",
+            None,
+            &(task_mgr as Arc<dyn IWorkerTaskManager>),
+        )
+        .await
+        .unwrap();
+    assert!(!result.approved);
+}
+
+#[tokio::test]
+async fn check_approval_returns_true_after_always_allow() {
+    let (svc, _broadcaster, _repo) = make_service();
+    let task_mgr = Arc::new(MockTaskManager::new());
+
+    let conv = svc.create("user_1", make_create_req()).await.unwrap();
+
+    let agent: AgentManagerHandle =
+        Arc::new(MockAgent::with_confirmations(&conv.id, make_test_confirmations()));
+    task_mgr.insert_agent(&conv.id, agent);
+
+    // Confirm with always_allow
+    let req = aionui_api_types::ConfirmRequest {
+        msg_id: "msg-1".into(),
+        data: json!({ "value": "allow" }),
+        always_allow: true,
+    };
+    let task_mgr_arc: Arc<dyn IWorkerTaskManager> = task_mgr.clone();
+    svc.confirm("user_1", &conv.id, "call-1", req, &task_mgr_arc)
+        .await
+        .unwrap();
+
+    // Now check_approval should return true
+    let result = svc
+        .check_approval("user_1", &conv.id, "edit_file", Some("bash"), &task_mgr_arc)
+        .await
+        .unwrap();
+    assert!(result.approved);
+}
+
+#[tokio::test]
+async fn check_approval_returns_false_when_no_agent() {
+    let (svc, _broadcaster, _repo) = make_service();
+    let task_mgr: Arc<dyn IWorkerTaskManager> = Arc::new(MockTaskManager::new());
+
+    let conv = svc.create("user_1", make_create_req()).await.unwrap();
+
+    let result = svc
+        .check_approval("user_1", &conv.id, "edit_file", None, &task_mgr)
+        .await
+        .unwrap();
+    assert!(!result.approved);
+}
+
+#[tokio::test]
+async fn check_approval_not_found() {
+    let (svc, _broadcaster, _repo) = make_service();
+    let task_mgr: Arc<dyn IWorkerTaskManager> = Arc::new(MockTaskManager::new());
+
+    let err = svc
+        .check_approval("user_1", "no-such-id", "edit_file", None, &task_mgr)
         .await
         .unwrap_err();
     assert!(matches!(err, AppError::NotFound(_)));
