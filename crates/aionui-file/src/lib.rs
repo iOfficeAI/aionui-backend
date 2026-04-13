@@ -10,7 +10,8 @@ pub use traits::{
     ISnapshotService, SnapshotServiceRef,
 };
 pub use types::{
-    CompareResult, ContentUpdateEvent, CopyResult, DirOrFile, FileChangeInfo,
-    FileMetadata, FileWatchEvent, OfficeFileAddedEvent, SnapshotInfo,
-    SnapshotMode, WorkspaceFlatFile, ZipEntry,
+    CompareResult, ContentUpdateEvent, ContentUpdateOperation, CopyResult,
+    DirOrFile, FileChangeInfo, FileMetadata, FileWatchEvent,
+    OfficeFileAddedEvent, SnapshotInfo, SnapshotMode, WorkspaceFlatFile,
+    ZipEntry,
 };

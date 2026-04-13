@@ -7,13 +7,13 @@ use ignore::WalkBuilder;
 use tracing::warn;
 
 use aionui_api_types::WebSocketMessage;
-use aionui_common::{AppError, FileChangeOperation};
+use aionui_common::AppError;
 use aionui_realtime::EventBroadcaster;
 
 use crate::path_safety::{has_traversal, validate_path, validate_path_for_write};
 use crate::types::{
-    ContentUpdateEvent, CopyResult, DirOrFile, FileMetadata,
-    WorkspaceFlatFile, ZipEntry,
+    ContentUpdateEvent, ContentUpdateOperation, CopyResult, DirOrFile,
+    FileMetadata, WorkspaceFlatFile, ZipEntry,
 };
 
 /// Maximum number of files returned by `list_workspace_files`.
@@ -555,7 +555,7 @@ impl crate::traits::IFileService for FileService {
             content,
             workspace: workspace.to_owned(),
             relative_path,
-            operation: FileChangeOperation::Modify,
+            operation: ContentUpdateOperation::Write,
         };
         let payload = serde_json::to_value(&event).unwrap_or_default();
         let msg = WebSocketMessage::new(

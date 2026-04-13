@@ -306,7 +306,7 @@ async fn write_file_emits_content_update_event() {
     assert_eq!(event.name, "fileStream.contentUpdate");
     assert_eq!(event.data["content"], "event content");
     assert_eq!(event.data["workspace"], ws);
-    assert_eq!(event.data["operation"], "modify");
+    assert_eq!(event.data["operation"], "write");
     // filePath should be the canonical path
     assert!(
         event.data["filePath"]

@@ -2,6 +2,22 @@ use aionui_common::FileChangeOperation;
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
+// contentUpdate operation (distinct from snapshot FileChangeOperation)
+// ---------------------------------------------------------------------------
+
+/// Operation type for `fileStream.contentUpdate` events.
+///
+/// API Spec mandates exactly two values: `write` and `delete`.
+/// This is intentionally separate from [`FileChangeOperation`] which tracks
+/// git-style changes (Create/Modify/Delete) in the snapshot system.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ContentUpdateOperation {
+    Write,
+    Delete,
+}
+
+// ---------------------------------------------------------------------------
 // File tree / directory browsing
 // ---------------------------------------------------------------------------
 
@@ -59,7 +75,7 @@ pub struct ContentUpdateEvent {
     pub content: Option<String>,
     pub workspace: String,
     pub relative_path: String,
-    pub operation: FileChangeOperation,
+    pub operation: ContentUpdateOperation,
 }
 
 /// Payload for the `fileWatch.fileChanged` WebSocket event.
@@ -145,14 +161,14 @@ mod tests {
             content: Some("fn main() {}".into()),
             workspace: "/ws".into(),
             relative_path: "src/main.rs".into(),
-            operation: FileChangeOperation::Modify,
+            operation: ContentUpdateOperation::Write,
         };
         let json = serde_json::to_value(&event).unwrap();
         assert_eq!(json["filePath"], "/ws/src/main.rs");
         assert_eq!(json["content"], "fn main() {}");
         assert_eq!(json["workspace"], "/ws");
         assert_eq!(json["relativePath"], "src/main.rs");
-        assert_eq!(json["operation"], "modify");
+        assert_eq!(json["operation"], "write");
     }
 
     #[test]
@@ -162,7 +178,7 @@ mod tests {
             content: None,
             workspace: "/ws".into(),
             relative_path: "old.txt".into(),
-            operation: FileChangeOperation::Delete,
+            operation: ContentUpdateOperation::Delete,
         };
         let json = serde_json::to_value(&event).unwrap();
         assert!(json.get("content").is_none());
@@ -198,12 +214,12 @@ mod tests {
             "content": "hello",
             "workspace": "/ws",
             "relativePath": "a.txt",
-            "operation": "create"
+            "operation": "write"
         });
         let event: ContentUpdateEvent = serde_json::from_value(raw).unwrap();
         assert_eq!(event.file_path, "/ws/a.txt");
         assert_eq!(event.content.as_deref(), Some("hello"));
-        assert_eq!(event.operation, FileChangeOperation::Create);
+        assert_eq!(event.operation, ContentUpdateOperation::Write);
     }
 
     #[test]
