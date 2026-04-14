@@ -67,7 +67,7 @@ impl ExtensionStateStore {
     /// Load persisted states from disk into memory.
     ///
     /// If the file does not exist, an empty map is used (all extensions will
-    /// default to enabled). Parse errors are logged and treated as empty.
+    /// default to enabled). Parse errors are propagated as `ExtensionError`.
     pub async fn load(&self) -> Result<HashMap<String, ExtensionState>, ExtensionError> {
         let states = load_states_from_file(&self.inner.file_path)?;
         let mut guard = self.inner.states.lock().await;

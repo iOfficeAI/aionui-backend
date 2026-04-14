@@ -70,6 +70,9 @@ pub enum ExtensionError {
     #[error("Lifecycle hook script not found: {0}")]
     HookNotFound(String),
 
+    #[error("Extension not found: {0}")]
+    NotFound(String),
+
     #[error("State persistence failed: {0}")]
     StatePersistence(String),
 
@@ -112,6 +115,9 @@ impl From<ExtensionError> for AppError {
                 AppError::NotFound(format!("Hook script not found: {path}"))
             }
             ExtensionError::ResolutionFailed { .. } => AppError::Internal(err.to_string()),
+            ExtensionError::NotFound(name) => {
+                AppError::NotFound(format!("Extension not found: {name}"))
+            }
             ExtensionError::StatePersistence(msg) => AppError::Internal(msg),
             ExtensionError::Io(e) => AppError::Internal(e.to_string()),
             ExtensionError::JsonParse(e) => AppError::BadRequest(e.to_string()),
