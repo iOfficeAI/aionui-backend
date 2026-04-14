@@ -5,14 +5,17 @@ use axum::routing::{get, post};
 use axum::Router;
 
 use aionui_api_types::{
-    ApiResponse, BatchImportMcpServersRequest, CreateMcpServerRequest, DetectedMcpServerResponse,
-    McpServerResponse, McpSyncResult, RemoveFromAgentsRequest, SyncToAgentsRequest,
+    ApiResponse, BatchImportMcpServersRequest, CreateMcpServerRequest,
+    DetectedMcpServerResponse, McpConnectionTestResult, McpServerResponse, McpSyncResult,
+    RemoveFromAgentsRequest, SyncToAgentsRequest, TestMcpConnectionRequest,
     UpdateMcpServerRequest,
 };
 use aionui_common::AppError;
 
+use crate::connection_test::McpConnectionTestService;
 use crate::service::McpConfigService;
 use crate::sync_service::McpSyncService;
+use crate::types::McpServerTransport;
 
 // ---------------------------------------------------------------------------
 // Router state
@@ -23,6 +26,7 @@ use crate::sync_service::McpSyncService;
 pub struct McpRouterState {
     pub config_service: McpConfigService,
     pub sync_service: McpSyncService,
+    pub connection_test_service: McpConnectionTestService,
 }
 
 // ---------------------------------------------------------------------------
@@ -45,6 +49,8 @@ pub fn mcp_routes(state: McpRouterState) -> Router {
             get(get_server).put(edit_server).delete(delete_server),
         )
         .route("/api/mcp/servers/{id}/toggle", post(toggle_server))
+        // Connection test route
+        .route("/api/mcp/test-connection", post(test_connection))
         // Agent sync routes
         .route("/api/mcp/agent-configs", get(get_agent_configs))
         .route("/api/mcp/sync-to-agents", post(sync_to_agents))
@@ -148,6 +154,27 @@ async fn batch_import(
     let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
     let servers = state.config_service.batch_import(req).await?;
     Ok(Json(ApiResponse::ok(servers)))
+}
+
+// ---------------------------------------------------------------------------
+// Connection Test Handler
+// ---------------------------------------------------------------------------
+
+/// `POST /api/mcp/test-connection` — test MCP server connectivity.
+///
+/// Creates a temporary MCP client, connects, lists tools, and closes.
+/// Always returns 200; failures are encoded in the response body.
+async fn test_connection(
+    State(state): State<McpRouterState>,
+    body: Result<Json<TestMcpConnectionRequest>, JsonRejection>,
+) -> Result<Json<ApiResponse<McpConnectionTestResult>>, AppError> {
+    let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
+    let transport = McpServerTransport::from(req.transport);
+    let result = state
+        .connection_test_service
+        .test_connection(&req.name, &transport)
+        .await;
+    Ok(Json(ApiResponse::ok(result)))
 }
 
 // ---------------------------------------------------------------------------

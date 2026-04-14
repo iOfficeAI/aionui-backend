@@ -28,8 +28,8 @@ use aionui_file::{
 };
 use aionui_mcp::{
     AionrsAdapter, AionuiAdapter, ClaudeAdapter, CodeBuddyAdapter, CodexAdapter, GeminiAdapter,
-    IFlowAdapter, McpAgentAdapter, McpConfigService, McpRouterState, McpSyncService,
-    OpencodeAdapter, QwenAdapter, mcp_routes,
+    IFlowAdapter, McpAgentAdapter, McpConfigService, McpConnectionTestService, McpRouterState,
+    McpSyncService, OpencodeAdapter, QwenAdapter, mcp_routes,
 };
 use aionui_realtime::{
     BroadcastEventBus, NoopMessageRouter, WebSocketManager, WsHandlerState, ws_upgrade_handler,
@@ -323,6 +323,7 @@ pub fn build_mcp_state(services: &AppServices) -> McpRouterState {
     McpRouterState {
         config_service: McpConfigService::new(repo.clone()),
         sync_service: McpSyncService::new(repo, adapters),
+        connection_test_service: McpConnectionTestService::new(reqwest::Client::new()),
     }
 }
 

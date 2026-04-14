@@ -1,5 +1,6 @@
 pub mod adapter;
 pub mod adapters;
+pub mod connection_test;
 pub mod error;
 pub mod routes;
 pub mod service;
@@ -11,6 +12,7 @@ pub use adapters::{
     AionrsAdapter, AionuiAdapter, ClaudeAdapter, CodeBuddyAdapter, CodexAdapter, GeminiAdapter,
     IFlowAdapter, OpencodeAdapter, QwenAdapter,
 };
+pub use connection_test::McpConnectionTestService;
 pub use error::McpError;
 pub use routes::{McpRouterState, mcp_routes};
 pub use service::McpConfigService;
