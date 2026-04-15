@@ -37,6 +37,8 @@ use aionui_mcp::{
     McpSyncService, OpencodeAdapter, QwenAdapter, mcp_routes,
 };
 use aionui_channel::{ChannelRouterState, channel_routes};
+#[cfg(feature = "weixin")]
+use aionui_channel::weixin_login_route;
 use aionui_realtime::{
     BroadcastEventBus, NoopMessageRouter, WebSocketManager, WsHandlerState, ws_upgrade_handler,
 };
@@ -377,7 +379,7 @@ pub fn build_channel_state(services: &AppServices) -> ChannelRouterState {
     ));
 
     let plugin_factory: Arc<aionui_channel::manager::PluginFactory> =
-        Arc::new(Box::new(|pt| aionui_channel::plugins::create_plugin(pt)));
+        Arc::new(Box::new(aionui_channel::plugins::create_plugin));
 
     ChannelRouterState {
         manager,
@@ -533,6 +535,9 @@ pub fn create_router_with_all_state(
         .route_layer(from_fn_with_state(auth_mw_state.clone(), auth_middleware));
 
     // Channel routes protected by auth middleware
+    #[cfg(feature = "weixin")]
+    let weixin_login_authenticated = weixin_login_route(states.channel.clone())
+        .route_layer(from_fn_with_state(auth_mw_state.clone(), auth_middleware));
     let channel_authenticated = channel_routes(states.channel)
         .route_layer(from_fn_with_state(auth_mw_state, auth_middleware));
 
@@ -542,7 +547,7 @@ pub fn create_router_with_all_state(
         .route("/ws", get(ws_upgrade_handler))
         .with_state(ws_state);
 
-    Router::new()
+    let router = Router::new()
         .route("/health", get(health_check))
         .merge(auth_routes(auth_state))
         .merge(system_authenticated)
@@ -556,7 +561,13 @@ pub fn create_router_with_all_state(
         .merge(extension_authenticated)
         .merge(hub_authenticated)
         .merge(skill_authenticated)
-        .merge(channel_authenticated)
+        .merge(channel_authenticated);
+
+    // Conditionally merge WeChat login SSE route (feature-gated)
+    #[cfg(feature = "weixin")]
+    let router = router.merge(weixin_login_authenticated);
+
+    router
         .layer(middleware::from_fn_with_state(
             services.cookie_config.clone(),
             csrf_middleware,
