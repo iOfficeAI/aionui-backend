@@ -170,9 +170,11 @@ dependencies = [
  "aionui-conversation",
  "aionui-db",
  "aionui-realtime",
+ "async-trait",
  "reqwest",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-tungstenite 0.26.2",
 ]
