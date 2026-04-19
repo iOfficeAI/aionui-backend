@@ -1,6 +1,8 @@
 pub mod error;
+pub mod events;
 pub mod mailbox;
 pub mod mcp;
+pub mod prompts;
 pub mod scheduler;
 pub mod service;
 pub mod session;
@@ -10,8 +12,10 @@ pub(crate) mod test_utils;
 pub mod types;
 
 pub use error::TeamError;
+pub use events::TeamEventEmitter;
 pub use mailbox::Mailbox;
 pub use mcp::{TeamMcpServer, TeamMcpStdioConfig};
+pub use prompts::{build_lead_prompt, build_teammate_prompt, build_wake_payload};
 pub use scheduler::{SchedulerAction, TeammateManager, WakePayload, WAKE_TIMEOUT_MS};
 pub use service::TeamSessionService;
 pub use session::TeamSession;

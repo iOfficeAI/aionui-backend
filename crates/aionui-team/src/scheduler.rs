@@ -1,13 +1,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use aionui_api_types::WebSocketMessage;
 use aionui_realtime::EventBroadcaster;
-use serde_json::json;
 use tokio::sync::Mutex;
 use tracing::debug;
 
 use crate::error::TeamError;
+use crate::events::TeamEventEmitter;
 use crate::mailbox::Mailbox;
 use crate::task_board::TaskBoard;
 use crate::types::{
@@ -87,7 +86,7 @@ pub struct TeammateManager {
     slots: Mutex<HashMap<String, AgentSlot>>,
     mailbox: Arc<Mailbox>,
     task_board: Arc<TaskBoard>,
-    broadcaster: Arc<dyn EventBroadcaster>,
+    events: TeamEventEmitter,
 }
 
 impl TeammateManager {
@@ -108,12 +107,13 @@ impl TeammateManager {
                 },
             );
         }
+        let events = TeamEventEmitter::new(team_id.clone(), broadcaster);
         Self {
             team_id,
             slots: Mutex::new(slots),
             mailbox,
             task_board,
-            broadcaster,
+            events,
         }
     }
 
@@ -130,7 +130,7 @@ impl TeammateManager {
             slot.status = status;
             slot.agent.status = Some(status);
         }
-        self.broadcast_agent_status(slot_id, status);
+        self.events.broadcast_agent_status(slot_id, status);
         debug!(team_id = %self.team_id, slot_id, %status, "agent status changed");
         Ok(())
     }
@@ -324,7 +324,7 @@ impl TeammateManager {
                 status: TeammateStatus::Idle,
             },
         );
-        self.broadcast_agent_spawned(agent);
+        self.events.broadcast_agent_spawned(agent);
         debug!(
             team_id = %self.team_id,
             slot_id = %agent.slot_id,
@@ -340,7 +340,7 @@ impl TeammateManager {
             .remove(slot_id)
             .ok_or_else(|| TeamError::AgentNotFound(slot_id.to_owned()))?;
         drop(slots);
-        self.broadcast_agent_removed(slot_id);
+        self.events.broadcast_agent_removed(slot_id);
         debug!(team_id = %self.team_id, slot_id, "agent removed from scheduler");
         Ok(())
     }
@@ -357,7 +357,7 @@ impl TeammateManager {
             .ok_or_else(|| TeamError::AgentNotFound(slot_id.to_owned()))?;
         slot.agent.name = new_name.to_owned();
         drop(slots);
-        self.broadcast_agent_renamed(slot_id, new_name);
+        self.events.broadcast_agent_renamed(slot_id, new_name);
         debug!(team_id = %self.team_id, slot_id, new_name, "agent renamed");
         Ok(())
     }
@@ -553,55 +553,6 @@ impl TeammateManager {
         Ok(Some(lead_id))
     }
 
-    // -----------------------------------------------------------------------
-    // Event broadcasting
-    // -----------------------------------------------------------------------
-
-    fn broadcast_agent_status(&self, slot_id: &str, status: TeammateStatus) {
-        let event = WebSocketMessage::new(
-            "team.agent.status",
-            json!({
-                "teamId": self.team_id,
-                "slotId": slot_id,
-                "status": status.to_string(),
-            }),
-        );
-        self.broadcaster.broadcast(event);
-    }
-
-    fn broadcast_agent_spawned(&self, agent: &TeamAgent) {
-        let event = WebSocketMessage::new(
-            "team.agent.spawned",
-            json!({
-                "teamId": self.team_id,
-                "agent": agent.to_response(),
-            }),
-        );
-        self.broadcaster.broadcast(event);
-    }
-
-    fn broadcast_agent_removed(&self, slot_id: &str) {
-        let event = WebSocketMessage::new(
-            "team.agent.removed",
-            json!({
-                "teamId": self.team_id,
-                "slotId": slot_id,
-            }),
-        );
-        self.broadcaster.broadcast(event);
-    }
-
-    fn broadcast_agent_renamed(&self, slot_id: &str, name: &str) {
-        let event = WebSocketMessage::new(
-            "team.agent.renamed",
-            json!({
-                "teamId": self.team_id,
-                "slotId": slot_id,
-                "name": name,
-            }),
-        );
-        self.broadcaster.broadcast(event);
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -611,6 +562,7 @@ impl TeammateManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aionui_api_types::WebSocketMessage;
     use crate::test_utils::MockTeamRepo;
 
     struct RecordingBroadcaster {
