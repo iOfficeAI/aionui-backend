@@ -111,6 +111,8 @@ mime_guess = "2"
 
 # Cron
 cron = "0.15"
+chrono = "0.4"
+chrono-tz = "0.10"
 
 # Shell
 open = "5"
