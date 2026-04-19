@@ -9,6 +9,7 @@ mod extension;
 mod file;
 mod lifecycle;
 mod mcp;
+mod office;
 mod provider;
 mod remote_agent;
 mod response;
@@ -107,4 +108,12 @@ pub use cron::{
     CronJobPayloadDto, CronJobRemovedPayload, CronJobResponse, CronJobStateDto,
     CronJobTargetDto, CronScheduleDto, HasSkillResponse, ListCronJobsQuery, RunNowResponse,
     SaveCronSkillRequest, UpdateCronJobRequest,
+};
+pub use office::{
+    CellCoord, CellRange, ConversionResultDto, ConversionTarget, DetectStarOfficeRequest,
+    DocumentConversionRequest, DocumentConversionResponse, ExcelSheetData, ExcelSheetImage,
+    ExcelWorkbookData, GetSnapshotContentRequest, ListSnapshotsRequest, PptJsonData, PptSlideData,
+    PreviewHistoryTargetDto, PreviewSnapshotInfoDto, PreviewState, PreviewStatusEvent,
+    PreviewUrlResponse, SaveSnapshotRequest, SnapshotContentResponse, StarOfficeDetectResponse,
+    StartPreviewRequest, StopPreviewRequest,
 };
