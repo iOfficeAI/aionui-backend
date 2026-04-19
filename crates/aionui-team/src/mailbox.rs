@@ -97,128 +97,13 @@ impl Mailbox {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aionui_db::models::{TeamRow, TeamTaskRow};
-    use aionui_db::{UpdateTaskParams, UpdateTeamParams};
-    use aionui_db::{DbError, ITeamRepository};
-    use std::sync::Mutex;
-
-    // -- Mock Repository ------------------------------------------------------
-
-    #[derive(Default)]
-    struct MockState {
-        messages: Vec<MailboxMessageRow>,
-    }
-
-    struct MockRepo {
-        state: Mutex<MockState>,
-    }
-
-    impl MockRepo {
-        fn new() -> Self {
-            Self {
-                state: Mutex::new(MockState::default()),
-            }
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl ITeamRepository for MockRepo {
-        async fn create_team(&self, _row: &TeamRow) -> Result<(), DbError> {
-            Ok(())
-        }
-        async fn list_teams(&self) -> Result<Vec<TeamRow>, DbError> {
-            Ok(vec![])
-        }
-        async fn get_team(&self, _id: &str) -> Result<Option<TeamRow>, DbError> {
-            Ok(None)
-        }
-        async fn update_team(&self, _id: &str, _p: &UpdateTeamParams) -> Result<(), DbError> {
-            Ok(())
-        }
-        async fn delete_team(&self, _id: &str) -> Result<(), DbError> {
-            Ok(())
-        }
-
-        async fn write_message(&self, row: &MailboxMessageRow) -> Result<(), DbError> {
-            self.state.lock().unwrap().messages.push(row.clone());
-            Ok(())
-        }
-
-        async fn read_unread_and_mark(
-            &self,
-            team_id: &str,
-            to_agent_id: &str,
-        ) -> Result<Vec<MailboxMessageRow>, DbError> {
-            let mut state = self.state.lock().unwrap();
-            let mut result = vec![];
-            for msg in &mut state.messages {
-                if msg.team_id == team_id && msg.to_agent_id == to_agent_id && !msg.read {
-                    msg.read = true;
-                    result.push(msg.clone());
-                }
-            }
-            Ok(result)
-        }
-
-        async fn get_history(
-            &self,
-            team_id: &str,
-            to_agent_id: &str,
-            limit: Option<i64>,
-        ) -> Result<Vec<MailboxMessageRow>, DbError> {
-            let state = self.state.lock().unwrap();
-            let iter = state
-                .messages
-                .iter()
-                .filter(|m| m.team_id == team_id && m.to_agent_id == to_agent_id);
-            let msgs: Vec<_> = match limit {
-                Some(n) => iter.take(n as usize).cloned().collect(),
-                None => iter.cloned().collect(),
-            };
-            Ok(msgs)
-        }
-
-        async fn delete_mailbox_by_team(&self, team_id: &str) -> Result<(), DbError> {
-            self.state
-                .lock()
-                .unwrap()
-                .messages
-                .retain(|m| m.team_id != team_id);
-            Ok(())
-        }
-
-        async fn create_task(&self, _row: &TeamTaskRow) -> Result<(), DbError> {
-            Ok(())
-        }
-        async fn find_task_by_id(
-            &self,
-            _tid: &str,
-            _id: &str,
-        ) -> Result<Option<TeamTaskRow>, DbError> {
-            Ok(None)
-        }
-        async fn update_task(&self, _id: &str, _p: &UpdateTaskParams) -> Result<(), DbError> {
-            Ok(())
-        }
-        async fn list_tasks(&self, _tid: &str) -> Result<Vec<TeamTaskRow>, DbError> {
-            Ok(vec![])
-        }
-        async fn append_to_blocks(&self, _id: &str, _bid: &str) -> Result<(), DbError> {
-            Ok(())
-        }
-        async fn remove_from_blocked_by(&self, _id: &str, _uid: &str) -> Result<(), DbError> {
-            Ok(())
-        }
-        async fn delete_tasks_by_team(&self, _tid: &str) -> Result<(), DbError> {
-            Ok(())
-        }
-    }
+    use crate::test_utils::MockTeamRepo;
 
     // -- Tests ----------------------------------------------------------------
 
     #[tokio::test]
     async fn write_and_read_unread() {
-        let repo = Arc::new(MockRepo::new());
+        let repo = Arc::new(MockTeamRepo::new());
         let mailbox = Mailbox::new(repo);
 
         mailbox
@@ -248,7 +133,7 @@ mod tests {
 
     #[tokio::test]
     async fn write_idle_notification_with_summary() {
-        let repo = Arc::new(MockRepo::new());
+        let repo = Arc::new(MockTeamRepo::new());
         let mailbox = Mailbox::new(repo);
 
         let msg = mailbox
@@ -269,7 +154,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_history_includes_read_messages() {
-        let repo = Arc::new(MockRepo::new());
+        let repo = Arc::new(MockTeamRepo::new());
         let mailbox = Mailbox::new(repo);
 
         mailbox
@@ -289,7 +174,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_history_with_limit() {
-        let repo = Arc::new(MockRepo::new());
+        let repo = Arc::new(MockTeamRepo::new());
         let mailbox = Mailbox::new(repo);
 
         for i in 0..5 {
@@ -312,7 +197,7 @@ mod tests {
 
     #[tokio::test]
     async fn delete_by_team_removes_all() {
-        let repo = Arc::new(MockRepo::new());
+        let repo = Arc::new(MockTeamRepo::new());
         let mailbox = Mailbox::new(repo);
 
         mailbox
@@ -335,7 +220,7 @@ mod tests {
 
     #[tokio::test]
     async fn read_unread_empty_when_no_messages() {
-        let repo = Arc::new(MockRepo::new());
+        let repo = Arc::new(MockTeamRepo::new());
         let mailbox = Mailbox::new(repo);
 
         let unread = mailbox.read_unread("t1", "a1").await.unwrap();
@@ -344,7 +229,7 @@ mod tests {
 
     #[tokio::test]
     async fn read_unread_scoped_to_agent() {
-        let repo = Arc::new(MockRepo::new());
+        let repo = Arc::new(MockTeamRepo::new());
         let mailbox = Mailbox::new(repo);
 
         mailbox

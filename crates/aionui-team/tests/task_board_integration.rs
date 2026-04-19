@@ -14,19 +14,18 @@ use std::sync::Arc;
 use aionui_db::{init_database_memory, ITeamRepository, SqliteTeamRepository};
 use aionui_team::{TaskBoard, TaskStatus, TaskUpdate};
 
-async fn setup() -> TaskBoard {
+async fn setup() -> (TaskBoard, aionui_db::Database) {
     let db = init_database_memory().await.unwrap();
     let repo = Arc::new(SqliteTeamRepository::new(db.pool().clone()))
         as Arc<dyn ITeamRepository>;
-    std::mem::forget(db);
-    TaskBoard::new(repo)
+    (TaskBoard::new(repo), db)
 }
 
 // -- TK: Create tasks ---------------------------------------------------------
 
 #[tokio::test]
 async fn tk1_create_task_no_dependencies() {
-    let board = setup().await;
+    let (board, _db) = setup().await;
     let task = board
         .create_task("t1", "Implement feature", None, None, &[])
         .await
@@ -39,7 +38,7 @@ async fn tk1_create_task_no_dependencies() {
 
 #[tokio::test]
 async fn tk2_create_task_with_single_dependency() {
-    let board = setup().await;
+    let (board, _db) = setup().await;
     let task_a = board
         .create_task("t1", "Task A", None, None, &[])
         .await
@@ -57,7 +56,7 @@ async fn tk2_create_task_with_single_dependency() {
 
 #[tokio::test]
 async fn tk3_create_task_with_multiple_dependencies() {
-    let board = setup().await;
+    let (board, _db) = setup().await;
     let a = board
         .create_task("t1", "A", None, None, &[])
         .await
@@ -81,7 +80,7 @@ async fn tk3_create_task_with_multiple_dependencies() {
 
 #[tokio::test]
 async fn tk4_create_task_nonexistent_dependency_fails() {
-    let board = setup().await;
+    let (board, _db) = setup().await;
     let result = board
         .create_task("t1", "X", None, None, &["nonexistent".into()])
         .await;
@@ -92,7 +91,7 @@ async fn tk4_create_task_nonexistent_dependency_fails() {
 
 #[tokio::test]
 async fn tu1_update_status_pending_to_in_progress() {
-    let board = setup().await;
+    let (board, _db) = setup().await;
     let task = board
         .create_task("t1", "Work", None, None, &[])
         .await
@@ -113,7 +112,7 @@ async fn tu1_update_status_pending_to_in_progress() {
 
 #[tokio::test]
 async fn tu2_update_status_to_completed_triggers_unblock() {
-    let board = setup().await;
+    let (board, _db) = setup().await;
     let a = board
         .create_task("t1", "A", None, None, &[])
         .await
@@ -142,7 +141,7 @@ async fn tu2_update_status_to_completed_triggers_unblock() {
 
 #[tokio::test]
 async fn tu3_update_description() {
-    let board = setup().await;
+    let (board, _db) = setup().await;
     let task = board
         .create_task("t1", "Work", None, None, &[])
         .await
@@ -163,7 +162,7 @@ async fn tu3_update_description() {
 
 #[tokio::test]
 async fn tu4_update_owner() {
-    let board = setup().await;
+    let (board, _db) = setup().await;
     let task = board
         .create_task("t1", "Work", None, None, &[])
         .await
@@ -184,7 +183,7 @@ async fn tu4_update_owner() {
 
 #[tokio::test]
 async fn tu5_update_nonexistent_task_fails() {
-    let board = setup().await;
+    let (board, _db) = setup().await;
     let result = board
         .update_task("t1", "nonexistent", &TaskUpdate::default())
         .await;
@@ -195,7 +194,7 @@ async fn tu5_update_nonexistent_task_fails() {
 
 #[tokio::test]
 async fn cu1_complete_unblocks_single_downstream() {
-    let board = setup().await;
+    let (board, _db) = setup().await;
     let a = board
         .create_task("t1", "A", None, None, &[])
         .await
@@ -224,7 +223,7 @@ async fn cu1_complete_unblocks_single_downstream() {
 
 #[tokio::test]
 async fn cu2_complete_unblocks_multiple_downstream() {
-    let board = setup().await;
+    let (board, _db) = setup().await;
     let a = board
         .create_task("t1", "A", None, None, &[])
         .await
@@ -259,7 +258,7 @@ async fn cu2_complete_unblocks_multiple_downstream() {
 
 #[tokio::test]
 async fn cu3_partial_unblock_preserves_other_deps() {
-    let board = setup().await;
+    let (board, _db) = setup().await;
     let a = board
         .create_task("t1", "A", None, None, &[])
         .await
@@ -292,7 +291,7 @@ async fn cu3_partial_unblock_preserves_other_deps() {
 
 #[tokio::test]
 async fn cu4_complete_no_downstream_is_noop() {
-    let board = setup().await;
+    let (board, _db) = setup().await;
     let task = board
         .create_task("t1", "Solo", None, None, &[])
         .await
@@ -315,7 +314,7 @@ async fn cu4_complete_no_downstream_is_noop() {
 
 #[tokio::test]
 async fn tt1_list_all_tasks() {
-    let board = setup().await;
+    let (board, _db) = setup().await;
     board
         .create_task("t1", "A", None, None, &[])
         .await
@@ -330,14 +329,14 @@ async fn tt1_list_all_tasks() {
 
 #[tokio::test]
 async fn tt2_list_empty() {
-    let board = setup().await;
+    let (board, _db) = setup().await;
     let tasks = board.list_tasks("t1").await.unwrap();
     assert!(tasks.is_empty());
 }
 
 #[tokio::test]
 async fn tt3_list_includes_dependency_info() {
-    let board = setup().await;
+    let (board, _db) = setup().await;
     let a = board
         .create_task("t1", "A", None, None, &[])
         .await
@@ -357,7 +356,7 @@ async fn tt3_list_includes_dependency_info() {
 
 #[tokio::test]
 async fn dc4_blocked_by_blocks_bidirectional_consistency() {
-    let board = setup().await;
+    let (board, _db) = setup().await;
     let a = board
         .create_task("t1", "A", None, None, &[])
         .await

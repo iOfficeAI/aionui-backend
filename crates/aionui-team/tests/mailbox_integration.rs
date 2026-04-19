@@ -13,19 +13,18 @@ use std::sync::Arc;
 use aionui_db::{init_database_memory, ITeamRepository, SqliteTeamRepository};
 use aionui_team::{Mailbox, MailboxMessageType};
 
-async fn setup() -> Mailbox {
+async fn setup() -> (Mailbox, aionui_db::Database) {
     let db = init_database_memory().await.unwrap();
     let repo = Arc::new(SqliteTeamRepository::new(db.pool().clone()))
         as Arc<dyn ITeamRepository>;
-    std::mem::forget(db);
-    Mailbox::new(repo)
+    (Mailbox::new(repo), db)
 }
 
 // -- MW: Write messages -------------------------------------------------------
 
 #[tokio::test]
 async fn mw1_write_text_message() {
-    let mailbox = setup().await;
+    let (mailbox, _db) = setup().await;
     let msg = mailbox
         .write("t1", "a1", "user", MailboxMessageType::Message, "hello", None)
         .await
@@ -38,7 +37,7 @@ async fn mw1_write_text_message() {
 
 #[tokio::test]
 async fn mw2_write_idle_notification_with_summary() {
-    let mailbox = setup().await;
+    let (mailbox, _db) = setup().await;
     let msg = mailbox
         .write(
             "t1",
@@ -56,7 +55,7 @@ async fn mw2_write_idle_notification_with_summary() {
 
 #[tokio::test]
 async fn mw3_write_shutdown_request() {
-    let mailbox = setup().await;
+    let (mailbox, _db) = setup().await;
     let msg = mailbox
         .write(
             "t1",
@@ -75,7 +74,7 @@ async fn mw3_write_shutdown_request() {
 
 #[tokio::test]
 async fn mr1_read_unread_returns_all_and_marks() {
-    let mailbox = setup().await;
+    let (mailbox, _db) = setup().await;
     for i in 0..3 {
         mailbox
             .write(
@@ -95,7 +94,7 @@ async fn mr1_read_unread_returns_all_and_marks() {
 
 #[tokio::test]
 async fn mr2_second_read_returns_empty() {
-    let mailbox = setup().await;
+    let (mailbox, _db) = setup().await;
     mailbox
         .write("t1", "a1", "user", MailboxMessageType::Message, "x", None)
         .await
@@ -107,7 +106,7 @@ async fn mr2_second_read_returns_empty() {
 
 #[tokio::test]
 async fn mr4_no_unread_messages() {
-    let mailbox = setup().await;
+    let (mailbox, _db) = setup().await;
     let unread = mailbox.read_unread("t1", "a1").await.unwrap();
     assert!(unread.is_empty());
 }
@@ -116,7 +115,7 @@ async fn mr4_no_unread_messages() {
 
 #[tokio::test]
 async fn mh1_get_history_no_limit() {
-    let mailbox = setup().await;
+    let (mailbox, _db) = setup().await;
     for i in 0..5 {
         mailbox
             .write(
@@ -137,7 +136,7 @@ async fn mh1_get_history_no_limit() {
 
 #[tokio::test]
 async fn mh2_get_history_with_limit() {
-    let mailbox = setup().await;
+    let (mailbox, _db) = setup().await;
     for i in 0..10 {
         mailbox
             .write(
@@ -157,7 +156,7 @@ async fn mh2_get_history_with_limit() {
 
 #[tokio::test]
 async fn mh3_empty_history() {
-    let mailbox = setup().await;
+    let (mailbox, _db) = setup().await;
     let history = mailbox.get_history("t1", "a1", None).await.unwrap();
     assert!(history.is_empty());
 }
@@ -166,7 +165,7 @@ async fn mh3_empty_history() {
 
 #[tokio::test]
 async fn md1_delete_by_team_removes_all_messages() {
-    let mailbox = setup().await;
+    let (mailbox, _db) = setup().await;
     mailbox
         .write("t1", "a1", "user", MailboxMessageType::Message, "x", None)
         .await
@@ -184,7 +183,7 @@ async fn md1_delete_by_team_removes_all_messages() {
 
 #[tokio::test]
 async fn md2_delete_by_team_does_not_affect_other_teams() {
-    let mailbox = setup().await;
+    let (mailbox, _db) = setup().await;
     mailbox
         .write("t1", "a1", "user", MailboxMessageType::Message, "x", None)
         .await
@@ -202,7 +201,7 @@ async fn md2_delete_by_team_does_not_affect_other_teams() {
 
 #[tokio::test]
 async fn read_unread_scoped_to_target_agent() {
-    let mailbox = setup().await;
+    let (mailbox, _db) = setup().await;
     mailbox
         .write("t1", "a1", "user", MailboxMessageType::Message, "for-a1", None)
         .await

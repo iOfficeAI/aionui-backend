@@ -149,165 +149,7 @@ impl TaskBoard {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aionui_db::models::{MailboxMessageRow, TeamRow};
-    use aionui_db::UpdateTeamParams;
-    use aionui_db::{DbError, ITeamRepository};
-    use std::sync::Mutex;
-
-    // -- Mock Repository ------------------------------------------------------
-
-    #[derive(Default)]
-    struct MockState {
-        tasks: Vec<TeamTaskRow>,
-    }
-
-    struct MockRepo {
-        state: Mutex<MockState>,
-    }
-
-    impl MockRepo {
-        fn new() -> Self {
-            Self {
-                state: Mutex::new(MockState::default()),
-            }
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl ITeamRepository for MockRepo {
-        async fn create_team(&self, _row: &TeamRow) -> Result<(), DbError> {
-            Ok(())
-        }
-        async fn list_teams(&self) -> Result<Vec<TeamRow>, DbError> {
-            Ok(vec![])
-        }
-        async fn get_team(&self, _id: &str) -> Result<Option<TeamRow>, DbError> {
-            Ok(None)
-        }
-        async fn update_team(&self, _id: &str, _p: &UpdateTeamParams) -> Result<(), DbError> {
-            Ok(())
-        }
-        async fn delete_team(&self, _id: &str) -> Result<(), DbError> {
-            Ok(())
-        }
-        async fn write_message(&self, _row: &MailboxMessageRow) -> Result<(), DbError> {
-            Ok(())
-        }
-        async fn read_unread_and_mark(
-            &self,
-            _tid: &str,
-            _aid: &str,
-        ) -> Result<Vec<MailboxMessageRow>, DbError> {
-            Ok(vec![])
-        }
-        async fn get_history(
-            &self,
-            _tid: &str,
-            _aid: &str,
-            _l: Option<i64>,
-        ) -> Result<Vec<MailboxMessageRow>, DbError> {
-            Ok(vec![])
-        }
-        async fn delete_mailbox_by_team(&self, _tid: &str) -> Result<(), DbError> {
-            Ok(())
-        }
-
-        async fn create_task(&self, row: &TeamTaskRow) -> Result<(), DbError> {
-            self.state.lock().unwrap().tasks.push(row.clone());
-            Ok(())
-        }
-
-        async fn find_task_by_id(
-            &self,
-            team_id: &str,
-            task_id: &str,
-        ) -> Result<Option<TeamTaskRow>, DbError> {
-            let state = self.state.lock().unwrap();
-            let found = state
-                .tasks
-                .iter()
-                .find(|t| t.team_id == team_id && t.id == task_id)
-                .cloned();
-            Ok(found)
-        }
-
-        async fn update_task(&self, task_id: &str, params: &UpdateTaskParams) -> Result<(), DbError> {
-            let mut state = self.state.lock().unwrap();
-            let task = state
-                .tasks
-                .iter_mut()
-                .find(|t| t.id == task_id)
-                .ok_or_else(|| DbError::NotFound(task_id.to_owned()))?;
-            if let Some(ref s) = params.status {
-                task.status = s.clone();
-            }
-            if let Some(ref d) = params.description {
-                task.description = Some(d.clone());
-            }
-            if let Some(ref o) = params.owner {
-                task.owner = Some(o.clone());
-            }
-            if let Some(ref b) = params.blocked_by {
-                task.blocked_by = b.clone();
-            }
-            if let Some(ref m) = params.metadata {
-                task.metadata = Some(m.clone());
-            }
-            task.updated_at = now_ms();
-            Ok(())
-        }
-
-        async fn list_tasks(&self, team_id: &str) -> Result<Vec<TeamTaskRow>, DbError> {
-            let state = self.state.lock().unwrap();
-            let tasks = state
-                .tasks
-                .iter()
-                .filter(|t| t.team_id == team_id)
-                .cloned()
-                .collect();
-            Ok(tasks)
-        }
-
-        async fn append_to_blocks(&self, task_id: &str, blocked_task_id: &str) -> Result<(), DbError> {
-            let mut state = self.state.lock().unwrap();
-            let task = state
-                .tasks
-                .iter_mut()
-                .find(|t| t.id == task_id)
-                .ok_or_else(|| DbError::NotFound(task_id.to_owned()))?;
-            let mut blocks: Vec<String> = serde_json::from_str(&task.blocks).unwrap_or_default();
-            blocks.push(blocked_task_id.to_owned());
-            task.blocks = serde_json::to_string(&blocks).unwrap();
-            Ok(())
-        }
-
-        async fn remove_from_blocked_by(
-            &self,
-            task_id: &str,
-            unblocked_task_id: &str,
-        ) -> Result<(), DbError> {
-            let mut state = self.state.lock().unwrap();
-            let task = state
-                .tasks
-                .iter_mut()
-                .find(|t| t.id == task_id)
-                .ok_or_else(|| DbError::NotFound(task_id.to_owned()))?;
-            let mut blocked_by: Vec<String> =
-                serde_json::from_str(&task.blocked_by).unwrap_or_default();
-            blocked_by.retain(|id| id != unblocked_task_id);
-            task.blocked_by = serde_json::to_string(&blocked_by).unwrap();
-            Ok(())
-        }
-
-        async fn delete_tasks_by_team(&self, team_id: &str) -> Result<(), DbError> {
-            self.state
-                .lock()
-                .unwrap()
-                .tasks
-                .retain(|t| t.team_id != team_id);
-            Ok(())
-        }
-    }
+    use crate::test_utils::MockTeamRepo;
 
     // -- Helper ---------------------------------------------------------------
 
@@ -322,7 +164,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_task_no_dependencies() {
-        let repo = Arc::new(MockRepo::new());
+        let repo = Arc::new(MockTeamRepo::new());
         let board = TaskBoard::new(repo);
 
         let task = create_simple_task(&board, "t1", "Implement feature").await;
@@ -334,7 +176,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_task_with_owner_and_description() {
-        let repo = Arc::new(MockRepo::new());
+        let repo = Arc::new(MockTeamRepo::new());
         let board = TaskBoard::new(repo);
 
         let task = board
@@ -347,7 +189,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_task_with_dependencies() {
-        let repo = Arc::new(MockRepo::new());
+        let repo = Arc::new(MockTeamRepo::new());
         let board = TaskBoard::new(repo.clone());
 
         let task_a = create_simple_task(&board, "t1", "Task A").await;
@@ -369,7 +211,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_task_nonexistent_dependency_fails() {
-        let repo = Arc::new(MockRepo::new());
+        let repo = Arc::new(MockTeamRepo::new());
         let board = TaskBoard::new(repo);
 
         let result = board
@@ -380,7 +222,7 @@ mod tests {
 
     #[tokio::test]
     async fn update_task_status() {
-        let repo = Arc::new(MockRepo::new());
+        let repo = Arc::new(MockTeamRepo::new());
         let board = TaskBoard::new(repo);
 
         let task = create_simple_task(&board, "t1", "Work").await;
@@ -400,7 +242,7 @@ mod tests {
 
     #[tokio::test]
     async fn update_task_description_and_owner() {
-        let repo = Arc::new(MockRepo::new());
+        let repo = Arc::new(MockTeamRepo::new());
         let board = TaskBoard::new(repo);
 
         let task = create_simple_task(&board, "t1", "Work").await;
@@ -422,7 +264,7 @@ mod tests {
 
     #[tokio::test]
     async fn update_nonexistent_task_fails() {
-        let repo = Arc::new(MockRepo::new());
+        let repo = Arc::new(MockTeamRepo::new());
         let board = TaskBoard::new(repo);
 
         let result = board
@@ -433,7 +275,7 @@ mod tests {
 
     #[tokio::test]
     async fn complete_task_unblocks_downstream() {
-        let repo = Arc::new(MockRepo::new());
+        let repo = Arc::new(MockTeamRepo::new());
         let board = TaskBoard::new(repo);
 
         let task_a = create_simple_task(&board, "t1", "A").await;
@@ -463,7 +305,7 @@ mod tests {
 
     #[tokio::test]
     async fn complete_task_unblocks_multiple_downstream() {
-        let repo = Arc::new(MockRepo::new());
+        let repo = Arc::new(MockTeamRepo::new());
         let board = TaskBoard::new(repo);
 
         let task_a = create_simple_task(&board, "t1", "A").await;
@@ -497,7 +339,7 @@ mod tests {
 
     #[tokio::test]
     async fn partial_unblock_preserves_other_dependencies() {
-        let repo = Arc::new(MockRepo::new());
+        let repo = Arc::new(MockTeamRepo::new());
         let board = TaskBoard::new(repo);
 
         let task_a = create_simple_task(&board, "t1", "A").await;
@@ -534,7 +376,7 @@ mod tests {
 
     #[tokio::test]
     async fn complete_task_no_downstream_is_noop() {
-        let repo = Arc::new(MockRepo::new());
+        let repo = Arc::new(MockTeamRepo::new());
         let board = TaskBoard::new(repo);
 
         let task = create_simple_task(&board, "t1", "Standalone").await;
@@ -554,7 +396,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_tasks_empty() {
-        let repo = Arc::new(MockRepo::new());
+        let repo = Arc::new(MockTeamRepo::new());
         let board = TaskBoard::new(repo);
 
         let tasks = board.list_tasks("t1").await.unwrap();
@@ -563,7 +405,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_tasks_returns_all() {
-        let repo = Arc::new(MockRepo::new());
+        let repo = Arc::new(MockTeamRepo::new());
         let board = TaskBoard::new(repo);
 
         create_simple_task(&board, "t1", "A").await;

@@ -167,6 +167,7 @@ pub struct MailboxMessage {
     pub team_id: String,
     pub to_agent_id: String,
     pub from_agent_id: String,
+    #[serde(rename = "type")]
     pub msg_type: MailboxMessageType,
     pub content: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -612,6 +613,25 @@ mod tests {
             created_at: 0,
         };
         assert!(MailboxMessage::from_row(&row).is_none());
+    }
+
+    #[test]
+    fn mailbox_message_serializes_type_field() {
+        let msg = MailboxMessage {
+            id: "m1".into(),
+            team_id: "t1".into(),
+            to_agent_id: "a1".into(),
+            from_agent_id: "a2".into(),
+            msg_type: MailboxMessageType::Message,
+            content: "hello".into(),
+            summary: None,
+            read: false,
+            created_at: 1000,
+        };
+        let json = serde_json::to_value(&msg).unwrap();
+        assert!(json.get("type").is_some(), "field must serialize as 'type'");
+        assert!(json.get("msgType").is_none(), "must not serialize as 'msgType'");
+        assert_eq!(json["type"], "message");
     }
 
     // -- TeamTask from_row ----------------------------------------------------
