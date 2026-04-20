@@ -22,6 +22,12 @@ pub enum OfficeError {
 
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
+
+    #[error("conversion error: {0}")]
+    Conversion(String),
+
+    #[error("external tool not found: {0}")]
+    ToolNotFound(String),
 }
 
 impl From<OfficeError> for AppError {
@@ -42,6 +48,12 @@ impl From<OfficeError> for AppError {
             OfficeError::Io(e) => AppError::Internal(format!("IO error: {e}")),
             OfficeError::Snapshot(msg) => AppError::Internal(format!("snapshot error: {msg}")),
             OfficeError::Json(e) => AppError::Internal(format!("JSON error: {e}")),
+            OfficeError::Conversion(msg) => {
+                AppError::Internal(format!("conversion error: {msg}"))
+            }
+            OfficeError::ToolNotFound(tool) => {
+                AppError::BadRequest(format!("{tool} is not installed"))
+            }
         }
     }
 }
@@ -82,6 +94,18 @@ mod tests {
     }
 
     #[test]
+    fn conversion_error_maps_to_internal() {
+        let err: AppError = OfficeError::Conversion("bad format".into()).into();
+        assert!(matches!(err, AppError::Internal(msg) if msg.contains("bad format")));
+    }
+
+    #[test]
+    fn tool_not_found_maps_to_bad_request() {
+        let err: AppError = OfficeError::ToolNotFound("pandoc".into()).into();
+        assert!(matches!(err, AppError::BadRequest(msg) if msg.contains("pandoc")));
+    }
+
+    #[test]
     fn display_messages() {
         assert_eq!(
             OfficeError::OfficecliNotFound.to_string(),
@@ -94,6 +118,14 @@ mod tests {
         assert_eq!(
             OfficeError::PortTimeout("/a.docx".into()).to_string(),
             "port readiness timeout for /a.docx"
+        );
+        assert_eq!(
+            OfficeError::Conversion("bad data".into()).to_string(),
+            "conversion error: bad data"
+        );
+        assert_eq!(
+            OfficeError::ToolNotFound("pandoc".into()).to_string(),
+            "external tool not found: pandoc"
         );
     }
 }
