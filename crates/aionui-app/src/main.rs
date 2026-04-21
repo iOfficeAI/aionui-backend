@@ -19,6 +19,10 @@ struct Cli {
     /// Data directory for database and file storage.
     #[arg(long, default_value = "data")]
     data_dir: String,
+
+    /// Run in local embedded mode (skip authentication, use system_default_user).
+    #[arg(long)]
+    local: bool,
 }
 
 fn init_tracing() {
@@ -40,6 +44,7 @@ async fn main() -> Result<()> {
         host: cli.host,
         port: cli.port,
         data_dir: cli.data_dir,
+        local: cli.local,
     };
 
     // Initialize database and all services
@@ -49,7 +54,12 @@ async fn main() -> Result<()> {
     );
     let database = aionui_db::init_database(&config.database_path()).await?;
     let services =
-        AppServices::from_database_with_data_dir(database, config.data_dir.clone()).await?;
+        AppServices::from_database_with_data_dir(database, config.data_dir.clone(), config.local)
+            .await?;
+
+    if config.local {
+        info!("Running in local mode — authentication is disabled");
+    }
 
     // Check bootstrap status
     let has_users = services.user_repo.has_users().await?;

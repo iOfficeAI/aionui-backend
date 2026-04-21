@@ -59,6 +59,8 @@ pub struct AppConfig {
     pub host: String,
     pub port: u16,
     pub data_dir: String,
+    /// Run in local embedded mode (skip authentication, use system_default_user).
+    pub local: bool,
 }
 
 impl AppConfig {
@@ -79,6 +81,7 @@ impl Default for AppConfig {
             host: aionui_common::constants::DEFAULT_HOST.to_string(),
             port: aionui_common::constants::DEFAULT_PORT,
             data_dir: "data".to_string(),
+            local: false,
         }
     }
 }
@@ -96,6 +99,8 @@ pub struct AppServices {
     /// Raw JWT secret string, used to derive encryption keys.
     pub jwt_secret_raw: String,
     pub data_dir: String,
+    /// When `true`, skip JWT authentication and use a fixed default user.
+    pub local: bool,
 }
 
 impl AppServices {
@@ -112,12 +117,13 @@ impl AppServices {
     /// Resolves JWT secret (env → db → generate), constructs all shared
     /// services, and persists a newly generated secret to the database.
     pub async fn from_database(database: Database) -> anyhow::Result<Self> {
-        Self::from_database_with_data_dir(database, "data".to_string()).await
+        Self::from_database_with_data_dir(database, "data".to_string(), false).await
     }
 
     pub async fn from_database_with_data_dir(
         database: Database,
         data_dir: String,
+        local: bool,
     ) -> anyhow::Result<Self> {
         let user_repo: Arc<dyn IUserRepository> =
             Arc::new(SqliteUserRepository::new(database.pool().clone()));
@@ -166,6 +172,7 @@ impl AppServices {
             worker_task_manager,
             jwt_secret_raw: secret,
             data_dir,
+            local,
         })
     }
 }
@@ -606,6 +613,7 @@ pub fn create_router_with_all_state(
     let auth_mw_state = AuthState {
         jwt_service: services.jwt_service.clone(),
         user_repo: services.user_repo.clone(),
+        local: services.local,
     };
 
     // System routes protected by auth middleware
@@ -736,6 +744,7 @@ mod tests {
             host: "0.0.0.0".to_string(),
             port: 3000,
             data_dir: "data".to_string(),
+            local: false,
         };
         assert_eq!(config.socket_addr(), "0.0.0.0:3000");
     }
@@ -746,6 +755,7 @@ mod tests {
             host: "127.0.0.1".to_string(),
             port: 25808,
             data_dir: "/tmp/aionui".to_string(),
+            local: false,
         };
         assert_eq!(
             config.database_path(),

@@ -35,7 +35,7 @@ async fn build_office_app() -> (axum::Router, AppServices, tempfile::TempDir) {
     let data_dir = tmp.path().to_str().unwrap().to_string();
 
     let db = aionui_db::init_database_memory().await.unwrap();
-    let services = AppServices::from_database_with_data_dir(db, data_dir)
+    let services = AppServices::from_database_with_data_dir(db, data_dir, false)
         .await
         .unwrap();
     let mut states = build_module_states(&services).await;

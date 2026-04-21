@@ -27,6 +27,8 @@ pub struct CurrentUser {
 pub struct AuthState {
     pub jwt_service: Arc<JwtService>,
     pub user_repo: Arc<dyn IUserRepository>,
+    /// When `true`, skip JWT verification and inject a fixed default user.
+    pub local: bool,
 }
 
 /// Authentication middleware that verifies JWT tokens and injects `CurrentUser`.
@@ -45,6 +47,15 @@ pub async fn auth_middleware(
     mut request: Request,
     next: Next,
 ) -> Result<Response, AppError> {
+    // In local mode, skip JWT verification and inject a fixed default user.
+    if state.local {
+        request.extensions_mut().insert(CurrentUser {
+            id: "system_default_user".to_string(),
+            username: "system_default_user".to_string(),
+        });
+        return Ok(next.run(request).await);
+    }
+
     let token = extract_token_from_headers(request.headers())
         .ok_or_else(|| AppError::Forbidden("Authentication required".into()))?;
 
@@ -66,4 +77,52 @@ pub async fn auth_middleware(
     });
 
     Ok(next.run(request).await)
+}
+
+/// Local-mode authentication middleware that skips JWT verification.
+///
+/// Injects a fixed `CurrentUser` with id and username `system_default_user`.
+/// Used when the server runs as an embedded subprocess inside Electron.
+pub async fn local_auth_middleware(mut request: Request, next: Next) -> Response {
+    request.extensions_mut().insert(CurrentUser {
+        id: "system_default_user".to_string(),
+        username: "system_default_user".to_string(),
+    });
+    next.run(request).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::Router;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use axum::routing::get;
+    use tower::ServiceExt;
+
+    async fn echo_user(request: Request<Body>) -> String {
+        let user = request.extensions().get::<CurrentUser>().unwrap();
+        format!("{}:{}", user.id, user.username)
+    }
+
+    #[tokio::test]
+    async fn test_local_auth_middleware_injects_default_user() {
+        let app = Router::new()
+            .route("/test", get(echo_user))
+            .route_layer(axum::middleware::from_fn(local_auth_middleware));
+
+        let response = app
+            .oneshot(Request::builder().uri("/test").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert_eq!(
+            std::str::from_utf8(&body).unwrap(),
+            "system_default_user:system_default_user"
+        );
+    }
 }
