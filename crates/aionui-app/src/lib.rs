@@ -31,10 +31,11 @@ use aionui_common::AcpBackend;
 use aionui_conversation::{ConversationRouterState, ConversationService, conversation_routes};
 use aionui_cron::{CronEventEmitter, CronRouterState, cron_routes};
 use aionui_db::{
-    Database, IAssistantOverrideRepository, IAssistantRepository, IUserRepository,
-    SqliteAssistantOverrideRepository, SqliteAssistantRepository, SqliteClientPreferenceRepository,
-    SqliteConversationRepository, SqliteProviderRepository, SqliteRemoteAgentRepository,
-    SqliteSettingsRepository, SqliteUserRepository,
+    Database, IAssistantOverrideRepository, IAssistantRepository, IClientPreferenceRepository,
+    IProviderRepository, IUserRepository, SqliteAssistantOverrideRepository,
+    SqliteAssistantRepository, SqliteClientPreferenceRepository, SqliteConversationRepository,
+    SqliteProviderRepository, SqliteRemoteAgentRepository, SqliteSettingsRepository,
+    SqliteUserRepository,
 };
 use aionui_extension::{
     AssistantRuleDispatcher, ExtensionRegistry, ExtensionRouterState, ExtensionStateStore,
@@ -58,7 +59,8 @@ use aionui_realtime::{
 use aionui_shell::{ShellRouterState, shell_routes};
 use aionui_system::{
     ClientPrefService, ModelFetchService, ProtocolDetectionService, ProviderService,
-    SettingsService, SystemRouterState, VersionCheckService, system_routes,
+    SettingsService, SystemRouterState, VersionCheckService, migrate_legacy_providers,
+    system_routes,
 };
 use aionui_team::{TeamRouterState, TeamSessionService, team_routes};
 
@@ -162,6 +164,30 @@ impl AppServices {
         }
 
         let encryption_key = derive_encryption_key(&secret);
+
+        // One-shot startup migration: lift legacy `client_preferences.model.config`
+        // rows (camelCase IProvider[] from the pre-backend frontend) into the
+        // canonical `providers` table. No-op after the first successful run or
+        // when the providers table is already populated. Non-fatal on failure:
+        // startup continues so the rest of the app remains usable and the legacy
+        // data stays in place for a retry.
+        {
+            let provider_repo: Arc<dyn IProviderRepository> =
+                Arc::new(SqliteProviderRepository::new(database.pool().clone()));
+            let client_pref_repo: Arc<dyn IClientPreferenceRepository> = Arc::new(
+                SqliteClientPreferenceRepository::new(database.pool().clone()),
+            );
+            if let Err(e) = migrate_legacy_providers(
+                provider_repo.as_ref(),
+                client_pref_repo.as_ref(),
+                &encryption_key,
+            )
+            .await
+            {
+                tracing::warn!("Legacy provider migration failed (continuing startup): {e}");
+            }
+        }
+
         let remote_agent_repo = Arc::new(SqliteRemoteAgentRepository::new(database.pool().clone()));
         let agent_registry = Arc::new(AgentRegistry::new());
         let factory = build_agent_factory(AgentFactoryDeps {
