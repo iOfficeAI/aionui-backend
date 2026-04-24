@@ -16,6 +16,7 @@ async fn repo() -> Arc<dyn IProviderRepository> {
 
 fn sample_params() -> CreateProviderParams<'static> {
     CreateProviderParams {
+        id: None,
         platform: "anthropic",
         name: "Anthropic",
         base_url: "https://api.anthropic.com",

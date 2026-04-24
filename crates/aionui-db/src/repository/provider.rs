@@ -27,6 +27,8 @@ pub trait IProviderRepository: Send + Sync {
 /// Parameters for creating a new provider.
 #[derive(Debug)]
 pub struct CreateProviderParams<'a> {
+    /// Optional caller-supplied id. When `None`, the repository generates one.
+    pub id: Option<&'a str>,
     pub platform: &'a str,
     pub name: &'a str,
     pub base_url: &'a str,

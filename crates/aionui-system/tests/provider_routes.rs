@@ -122,7 +122,7 @@ async fn list_providers_empty() {
 }
 
 #[tokio::test]
-async fn list_providers_returns_masked_api_key() {
+async fn list_providers_returns_plaintext_api_key() {
     let (_app, db) = setup().await;
     create_one(&db).await;
 
@@ -135,10 +135,9 @@ async fn list_providers_returns_masked_api_key() {
     assert_eq!(providers.len(), 1);
 
     let api_key = providers[0]["api_key"].as_str().unwrap();
-    assert!(api_key.contains("***"));
-    assert!(api_key.ends_with("1234"));
-    // Must NOT contain the full key
-    assert!(!api_key.contains("test1234"));
+    // Pre-launch: api_key is returned plaintext on the wire (encrypted at rest).
+    assert_eq!(api_key, "sk-ant-api03-test1234");
+    assert!(!api_key.contains("***"));
 }
 
 // ===========================================================================
@@ -162,11 +161,79 @@ async fn create_provider_success() {
     assert_eq!(data["platform"], "anthropic");
     assert_eq!(data["name"], "Anthropic");
     assert_eq!(data["base_url"], "https://api.anthropic.com");
-    assert!(data["api_key"].as_str().unwrap().contains("***"));
+    assert_eq!(data["api_key"], "sk-ant-api03-test1234");
     assert!(data["enabled"].as_bool().unwrap());
     assert!(data["models"].as_array().unwrap().is_empty());
     assert!(data["created_at"].as_i64().unwrap() > 0);
     assert!(data["updated_at"].as_i64().unwrap() > 0);
+}
+
+#[tokio::test]
+async fn create_provider_with_supplied_id() {
+    let (app, _db) = setup().await;
+    let body = json!({
+        "id": "caller-id-123",
+        "platform": "openai",
+        "name": "OpenAI",
+        "base_url": "https://api.openai.com",
+        "api_key": "sk-test",
+        "model_enabled": {"gpt-4": true, "gpt-3.5": false}
+    });
+    let resp = app
+        .oneshot(json_request("POST", "/api/providers", body))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let json = body_json(resp).await;
+    let data = &json["data"];
+    assert_eq!(data["id"], "caller-id-123");
+    assert_eq!(data["api_key"], "sk-test");
+    assert_eq!(data["model_enabled"]["gpt-4"], true);
+    assert_eq!(data["model_enabled"]["gpt-3.5"], false);
+}
+
+#[tokio::test]
+async fn create_provider_with_duplicate_id_returns_conflict() {
+    let (_app, db) = setup().await;
+    let body = json!({
+        "id": "dup-id",
+        "platform": "openai",
+        "name": "OpenAI",
+        "base_url": "https://api.openai.com",
+        "api_key": "sk-test"
+    });
+
+    let app1 = system_routes(build_state(&db));
+    let resp = app1
+        .oneshot(json_request("POST", "/api/providers", body.clone()))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+
+    let app2 = system_routes(build_state(&db));
+    let resp = app2
+        .oneshot(json_request("POST", "/api/providers", body))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn create_provider_with_invalid_id_rejected() {
+    let (app, _db) = setup().await;
+    let body = json!({
+        "id": "bad/slash",
+        "platform": "openai",
+        "name": "OpenAI",
+        "base_url": "https://api.openai.com",
+        "api_key": "sk-test"
+    });
+    let resp = app
+        .oneshot(json_request("POST", "/api/providers", body))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -307,7 +374,7 @@ async fn update_provider_name() {
 }
 
 #[tokio::test]
-async fn update_provider_api_key_mask_changes() {
+async fn update_provider_api_key_returns_plaintext() {
     let (_app, db) = setup().await;
     let (_, id) = create_one(&db).await;
 
@@ -324,7 +391,7 @@ async fn update_provider_api_key_mask_changes() {
     assert_eq!(resp.status(), StatusCode::OK);
     let json = body_json(resp).await;
     let api_key = json["data"]["api_key"].as_str().unwrap();
-    assert!(api_key.ends_with("efgh"));
+    assert_eq!(api_key, "new-key-abcdefgh");
 }
 
 #[tokio::test]

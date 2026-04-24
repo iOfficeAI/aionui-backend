@@ -51,8 +51,10 @@ async fn provider_full_crud_with_auth() {
     assert_eq!(json["data"]["platform"], "anthropic");
     assert_eq!(json["data"]["name"], "Anthropic");
     let api_key = json["data"]["api_key"].as_str().unwrap();
-    assert!(api_key.contains("***"), "API key should be masked");
-    assert!(api_key.ends_with("1234"), "mask should show last 4 chars");
+    assert_eq!(
+        api_key, "sk-ant-api03-test1234",
+        "API key should be plaintext on the wire (pre-launch)"
+    );
 
     // 3. List — should contain one
     let resp = app

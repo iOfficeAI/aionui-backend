@@ -3,7 +3,9 @@ mod url_fixer;
 
 use std::sync::Arc;
 
-use aionui_api_types::{BedrockConfig, FetchModelsRequest, FetchModelsResponse};
+use aionui_api_types::{
+    BedrockConfig, FetchModelsAnonymousRequest, FetchModelsRequest, FetchModelsResponse,
+};
 use aionui_common::{AppError, decrypt_string};
 use aionui_db::IProviderRepository;
 
@@ -48,14 +50,40 @@ impl ModelFetchService {
         req: &FetchModelsRequest,
     ) -> Result<FetchModelsResponse, AppError> {
         let config = self.load_provider_config(provider_id).await?;
+        self.fetch_with_config(&config, req.try_fix).await
+    }
 
-        match fetchers::fetch_for_platform(&self.http_client, &config).await {
+    /// Fetch models using credentials supplied in the request, without a
+    /// persisted provider row. Powers the pre-create "Fetch Models" preview
+    /// in the Add-Platform form.
+    pub async fn fetch_models_anonymous(
+        &self,
+        req: &FetchModelsAnonymousRequest,
+    ) -> Result<FetchModelsResponse, AppError> {
+        validate_anonymous_request(req)?;
+        let config = FetchConfig {
+            platform: req.platform.clone(),
+            base_url: req.base_url.clone(),
+            api_key: req.api_key.clone(),
+            bedrock_config: req.bedrock_config.clone(),
+        };
+        self.fetch_with_config(&config, req.try_fix).await
+    }
+
+    /// Shared fetch+try_fix branch used by both the by-id and anonymous
+    /// entry points.
+    async fn fetch_with_config(
+        &self,
+        config: &FetchConfig,
+        try_fix: bool,
+    ) -> Result<FetchModelsResponse, AppError> {
+        match fetchers::fetch_for_platform(&self.http_client, config).await {
             Ok(models) => Ok(FetchModelsResponse {
                 models,
                 fixed_base_url: None,
             }),
-            Err(err) if req.try_fix && supports_url_fix(&config.platform) => {
-                url_fixer::try_fix_url(&self.http_client, &config)
+            Err(err) if try_fix && supports_url_fix(&config.platform) => {
+                url_fixer::try_fix_url(&self.http_client, config)
                     .await
                     .map_err(|_| err)
             }
@@ -86,6 +114,22 @@ impl ModelFetchService {
             bedrock_config,
         })
     }
+}
+
+/// Validate a `FetchModelsAnonymousRequest` — platform / base_url / api_key
+/// must all be non-empty after trim.
+fn validate_anonymous_request(req: &FetchModelsAnonymousRequest) -> Result<(), AppError> {
+    if req.platform.trim().is_empty() {
+        return Err(AppError::BadRequest("platform is required".into()));
+    }
+    if req.base_url.trim().is_empty() {
+        return Err(AppError::BadRequest("baseUrl is required".into()));
+    }
+    // Bedrock uses bedrock_config for credentials; empty api_key is allowed there.
+    if req.platform != "bedrock" && req.api_key.trim().is_empty() {
+        return Err(AppError::BadRequest("apiKey is required".into()));
+    }
+    Ok(())
 }
 
 /// Platforms that support URL auto-fix (OpenAI-compatible).
@@ -127,6 +171,7 @@ mod tests {
         let encrypted = encrypt_string(api_key, &TEST_KEY).unwrap();
         let row = repo
             .create(CreateProviderParams {
+                id: None,
                 platform,
                 name: "Test",
                 base_url,
@@ -214,5 +259,64 @@ mod tests {
         let req = FetchModelsRequest { try_fix: false };
         let err = svc.fetch_models("no_such_id", &req).await.unwrap_err();
         assert_eq!(err.status_code(), axum::http::StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn fetch_models_anonymous_minimax_returns_hardcoded() {
+        let (svc, _db) = setup().await;
+        let req = FetchModelsAnonymousRequest {
+            platform: "minimax".into(),
+            base_url: "https://unused".into(),
+            api_key: "fake-key".into(),
+            bedrock_config: None,
+            try_fix: false,
+        };
+        let resp = svc.fetch_models_anonymous(&req).await.unwrap();
+        assert_eq!(resp.models.len(), 3);
+        assert!(resp.fixed_base_url.is_none());
+    }
+
+    #[tokio::test]
+    async fn fetch_models_anonymous_rejects_empty_api_key() {
+        let (svc, _db) = setup().await;
+        let req = FetchModelsAnonymousRequest {
+            platform: "openai".into(),
+            base_url: "https://api.openai.com".into(),
+            api_key: "   ".into(),
+            bedrock_config: None,
+            try_fix: false,
+        };
+        let err = svc.fetch_models_anonymous(&req).await.unwrap_err();
+        assert_eq!(err.status_code(), axum::http::StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn fetch_models_anonymous_rejects_empty_platform() {
+        let (svc, _db) = setup().await;
+        let req = FetchModelsAnonymousRequest {
+            platform: "".into(),
+            base_url: "https://api.openai.com".into(),
+            api_key: "sk-test".into(),
+            bedrock_config: None,
+            try_fix: false,
+        };
+        let err = svc.fetch_models_anonymous(&req).await.unwrap_err();
+        assert_eq!(err.status_code(), axum::http::StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn fetch_models_anonymous_bedrock_allows_empty_api_key() {
+        // Bedrock uses bedrock_config for credentials, not api_key.
+        // With no bedrock_config attached the fetcher itself will fail,
+        // but validate_anonymous_request must not reject up-front.
+        let (_svc, _db) = setup().await;
+        let req = FetchModelsAnonymousRequest {
+            platform: "bedrock".into(),
+            base_url: "https://bedrock.example".into(),
+            api_key: "".into(),
+            bedrock_config: None,
+            try_fix: false,
+        };
+        assert!(validate_anonymous_request(&req).is_ok());
     }
 }

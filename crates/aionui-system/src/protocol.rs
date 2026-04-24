@@ -10,10 +10,40 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 use tracing::debug;
 
-use crate::provider::mask_api_key;
-
 const DEFAULT_TIMEOUT_MS: u64 = 10_000;
 const MAX_CONCURRENT_KEY_TESTS: usize = 5;
+
+/// Mask an API key for display in multi-key probe results: preserve the
+/// prefix up to the last dash before the secret part and the last 4
+/// characters, replacing the middle with `***`.
+///
+/// Only used for diagnostic output of the protocol-detection endpoint;
+/// provider responses now return plaintext keys.
+fn mask_api_key(key: &str) -> String {
+    if key.is_empty() {
+        return "***".to_string();
+    }
+
+    let tail_len = 4;
+    let prefix_end = key
+        .rmatch_indices('-')
+        .find(|(i, _)| key.len() - i > tail_len)
+        .map(|(i, _)| i + 1);
+
+    match prefix_end {
+        Some(pe) => {
+            let suffix_start = key.len().saturating_sub(tail_len);
+            let prefix = &key[..pe];
+            let suffix = &key[suffix_start..];
+            format!("{prefix}***{suffix}")
+        }
+        None => {
+            let suffix_start = key.len().saturating_sub(tail_len);
+            let suffix = &key[suffix_start..];
+            format!("***{suffix}")
+        }
+    }
+}
 
 // -- Shared response structs for probing --
 

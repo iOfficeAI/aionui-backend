@@ -219,7 +219,7 @@ async fn full_system_flow_e2e() {
     assert_eq!(resp.status(), StatusCode::CREATED);
     let json = body_json(resp).await;
     let provider_id = json["data"]["id"].as_str().unwrap().to_string();
-    assert!(json["data"]["api_key"].as_str().unwrap().contains("***"));
+    assert_eq!(json["data"]["api_key"], "sk-proj-test-key-1234");
 
     // 7. List providers
     let resp = app

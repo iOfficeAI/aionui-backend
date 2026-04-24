@@ -37,7 +37,10 @@ impl IProviderRepository for SqliteProviderRepository {
     }
 
     async fn create(&self, params: CreateProviderParams<'_>) -> Result<Provider, DbError> {
-        let id = aionui_common::generate_prefixed_id("prov");
+        let id = params
+            .id
+            .map(String::from)
+            .unwrap_or_else(|| aionui_common::generate_prefixed_id("prov"));
         let now = aionui_common::now_ms();
 
         sqlx::query(
@@ -63,7 +66,13 @@ impl IProviderRepository for SqliteProviderRepository {
         .bind(now)
         .bind(now)
         .execute(&self.pool)
-        .await?;
+        .await
+        .map_err(|e| match &e {
+            sqlx::Error::Database(db_err) if is_unique_violation(db_err.as_ref()) => {
+                DbError::Conflict(format!("Provider with id '{id}' already exists"))
+            }
+            _ => DbError::Query(e),
+        })?;
 
         Ok(Provider {
             id,
@@ -138,6 +147,11 @@ impl IProviderRepository for SqliteProviderRepository {
     }
 }
 
+/// Detect SQLite UNIQUE constraint violation (codes 2067 / 1555).
+fn is_unique_violation(err: &dyn sqlx::error::DatabaseError) -> bool {
+    err.code().is_some_and(|c| c == "2067" || c == "1555")
+}
+
 /// Merge partial update params into an existing provider, returning a new instance.
 fn merge_update(existing: Provider, params: UpdateProviderParams<'_>) -> Provider {
     let now = aionui_common::now_ms();
@@ -187,6 +201,7 @@ mod tests {
 
     fn sample_params() -> CreateProviderParams<'static> {
         CreateProviderParams {
+            id: None,
             platform: "anthropic",
             name: "Anthropic",
             base_url: "https://api.anthropic.com",
@@ -225,6 +240,44 @@ mod tests {
         assert!(p.bedrock_config.is_none());
         assert!(p.created_at > 0);
         assert_eq!(p.created_at, p.updated_at);
+    }
+
+    #[tokio::test]
+    async fn create_with_caller_supplied_id() {
+        let (repo, _db) = setup().await;
+        let p = repo
+            .create(CreateProviderParams {
+                id: Some("my-custom-id-1"),
+                ..sample_params()
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(p.id, "my-custom-id-1");
+        assert_eq!(p.platform, "anthropic");
+
+        let found = repo.find_by_id("my-custom-id-1").await.unwrap().unwrap();
+        assert_eq!(found.id, "my-custom-id-1");
+    }
+
+    #[tokio::test]
+    async fn create_with_duplicate_id_returns_conflict() {
+        let (repo, _db) = setup().await;
+        repo.create(CreateProviderParams {
+            id: Some("dup-id"),
+            ..sample_params()
+        })
+        .await
+        .unwrap();
+
+        let err = repo
+            .create(CreateProviderParams {
+                id: Some("dup-id"),
+                ..sample_params()
+            })
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DbError::Conflict(_)));
     }
 
     #[tokio::test]

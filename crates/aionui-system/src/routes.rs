@@ -6,9 +6,10 @@ use axum::routing::{delete, get, post};
 
 use aionui_api_types::{
     ApiResponse, ClientPreferencesResponse, CreateProviderRequest, DetectProtocolRequest,
-    FetchModelsRequest, FetchModelsResponse, ProtocolDetectionResponse, ProviderResponse,
-    SystemInfoResponse, SystemSettingsResponse, UpdateCheckRequest, UpdateCheckResult,
-    UpdateClientPreferencesRequest, UpdateProviderRequest, UpdateSettingsRequest,
+    FetchModelsAnonymousRequest, FetchModelsRequest, FetchModelsResponse,
+    ProtocolDetectionResponse, ProviderResponse, SystemInfoResponse, SystemSettingsResponse,
+    UpdateCheckRequest, UpdateCheckResult, UpdateClientPreferencesRequest, UpdateProviderRequest,
+    UpdateSettingsRequest,
 };
 use aionui_common::AppError;
 
@@ -44,6 +45,7 @@ pub struct SystemRouterState {
 /// - `PUT  /api/providers/:id`               — update a provider
 /// - `DELETE /api/providers/:id`             — delete a provider
 /// - `POST /api/providers/:id/models`        — fetch models from remote API
+/// - `POST /api/providers/fetch-models`      — fetch models anonymously (pre-create preview)
 /// - `POST /api/providers/detect-protocol`   — detect API protocol
 /// - `GET  /api/system/info`                 — system directory & platform info
 /// - `POST /api/system/check-update`         — check GitHub for new versions
@@ -55,7 +57,11 @@ pub fn system_routes(state: SystemRouterState) -> Router {
             get(get_client_preferences).put(update_client_preferences),
         )
         .route("/api/providers", get(list_providers).post(create_provider))
+        // Literal-segment routes must register BEFORE the `/{id}` routes so
+        // axum matches the literals instead of treating "detect-protocol" /
+        // "fetch-models" as a provider id.
         .route("/api/providers/detect-protocol", post(detect_protocol))
+        .route("/api/providers/fetch-models", post(fetch_models_anonymous))
         .route(
             "/api/providers/{id}",
             delete(delete_provider).put(update_provider),
@@ -176,6 +182,18 @@ async fn fetch_models(
 ) -> Result<Json<ApiResponse<FetchModelsResponse>>, AppError> {
     let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
     let result = state.model_fetch_service.fetch_models(&id, &req).await?;
+    Ok(Json(ApiResponse::ok(result)))
+}
+
+async fn fetch_models_anonymous(
+    State(state): State<SystemRouterState>,
+    body: Result<Json<FetchModelsAnonymousRequest>, JsonRejection>,
+) -> Result<Json<ApiResponse<FetchModelsResponse>>, AppError> {
+    let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
+    let result = state
+        .model_fetch_service
+        .fetch_models_anonymous(&req)
+        .await?;
     Ok(Json(ApiResponse::ok(result)))
 }
 

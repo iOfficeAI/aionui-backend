@@ -62,6 +62,7 @@ async fn create_provider(
     let encrypted = encrypt_string(api_key, &TEST_KEY).unwrap();
     let row = repo
         .create(CreateProviderParams {
+            id: None,
             platform,
             name: "Test Provider",
             base_url,
@@ -434,4 +435,86 @@ async fn fetch_models_url_auto_fix_not_for_anthropic() {
     let json = body_json(resp).await;
     // Should be fallback models, no fixedBaseUrl
     assert!(json["data"].get("fixed_base_url").is_none());
+}
+
+// ---------------------------------------------------------------------------
+// Tests: anonymous fetch-models (T1b)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn fetch_models_anonymous_returns_models_for_valid_input() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/models"))
+        .and(header("Authorization", "Bearer sk-anon"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "data": [{"id": "gpt-4o"}, {"id": "gpt-4o-mini"}]
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let (router, _db) = setup().await;
+    let req = post_request(
+        "/api/providers/fetch-models",
+        json!({
+            "platform": "openai",
+            "base_url": mock_server.uri(),
+            "api_key": "sk-anon"
+        }),
+    );
+    let resp = router.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let json = body_json(resp).await;
+    let models = json["data"]["models"].as_array().unwrap();
+    assert_eq!(models.len(), 2);
+    assert_eq!(models[0], "gpt-4o");
+}
+
+#[tokio::test]
+async fn fetch_models_anonymous_rejects_empty_api_key() {
+    let (router, _db) = setup().await;
+    let req = post_request(
+        "/api/providers/fetch-models",
+        json!({
+            "platform": "openai",
+            "base_url": "https://api.openai.com",
+            "api_key": "   "
+        }),
+    );
+    let resp = router.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn fetch_models_anonymous_minimax_hardcoded() {
+    // Hardcoded-list platforms work without hitting any remote endpoint.
+    let (router, _db) = setup().await;
+    let req = post_request(
+        "/api/providers/fetch-models",
+        json!({
+            "platform": "minimax",
+            "base_url": "https://unused",
+            "api_key": "fake"
+        }),
+    );
+    let resp = router.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let json = body_json(resp).await;
+    assert_eq!(json["data"]["models"].as_array().unwrap().len(), 3);
+}
+
+#[tokio::test]
+async fn fetch_models_route_literal_segment_beats_id_shadowing() {
+    // Regression guard for axum route ordering: POST /api/providers/fetch-models
+    // must NOT be matched as /api/providers/{id}/models with id="fetch-models".
+    // If shadowing occurred we'd either hit the by-id handler (→ 404 provider
+    // not found) or get a routing error. Hitting the anonymous handler returns
+    // 400 for missing required fields, which is the right signature.
+    let (router, _db) = setup().await;
+    let req = post_request("/api/providers/fetch-models", json!({}));
+    let resp = router.oneshot(req).await.unwrap();
+    // Missing "platform" / "base_url" / "api_key" — anonymous handler
+    // rejects with 400 via JSON deserialization failure, not 404 from the
+    // by-id handler.
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }

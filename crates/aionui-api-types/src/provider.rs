@@ -74,15 +74,16 @@ pub struct BedrockConfig {
 
 /// Provider response for `GET /api/providers` and single-provider endpoints.
 ///
-/// The `api_key` field is always masked (e.g. `sk-ant-***abcd`).
-/// Full API keys are never included in responses.
+/// The `api_key` field is returned in plaintext (decrypted on read). Storage
+/// remains encrypted at rest. Pre-launch convention for the frontend
+/// local-store → backend migration; no masking applied.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProviderResponse {
     pub id: String,
     pub platform: String,
     pub name: String,
     pub base_url: String,
-    /// Masked API key (e.g. `sk-ant-***abcd`).
+    /// Plaintext API key (decrypted from storage).
     pub api_key: String,
     pub models: Vec<String>,
     pub enabled: bool,
@@ -104,6 +105,11 @@ pub struct ProviderResponse {
 /// Request body for `POST /api/providers`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateProviderRequest {
+    /// Optional caller-supplied id. When `None`, the server generates one.
+    /// Lets callers preserve a locally-known id across the create boundary
+    /// (used during the frontend-local-store → backend migration).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
     pub platform: String,
     pub name: String,
     pub base_url: String,
@@ -115,9 +121,15 @@ pub struct CreateProviderRequest {
     pub enabled: bool,
     #[serde(default)]
     pub capabilities: Vec<ModelCapability>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_limit: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_protocols: Option<HashMap<String, String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_enabled: Option<HashMap<String, bool>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_health: Option<HashMap<String, ModelHealthStatus>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bedrock_config: Option<BedrockConfig>,
 }
 
@@ -147,6 +159,23 @@ pub struct UpdateProviderRequest {
 /// Request body for `POST /api/providers/:id/models`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct FetchModelsRequest {
+    #[serde(default)]
+    pub try_fix: bool,
+}
+
+/// Request body for `POST /api/providers/fetch-models` (anonymous, pre-create).
+///
+/// Used by the frontend's Add-Platform form to preview a provider's model
+/// list before the provider row is persisted — credentials are passed in
+/// the request body instead of looked up by id.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FetchModelsAnonymousRequest {
+    pub platform: String,
+    pub base_url: String,
+    /// Plain-text API key (supports multi-key).
+    pub api_key: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bedrock_config: Option<BedrockConfig>,
     #[serde(default)]
     pub try_fix: bool,
 }
@@ -391,7 +420,7 @@ mod tests {
             platform: "anthropic".into(),
             name: "Anthropic".into(),
             base_url: "https://api.anthropic.com".into(),
-            api_key: "sk-ant-***abcd".into(),
+            api_key: "sk-ant-api03-plaintext".into(),
             models: vec!["claude-sonnet-4-20250514".into()],
             enabled: true,
             capabilities: vec![ModelCapability {
@@ -409,13 +438,38 @@ mod tests {
         let json = serde_json::to_value(&resp).unwrap();
         assert_eq!(json["id"], "uuid-xxx");
         assert_eq!(json["platform"], "anthropic");
-        assert_eq!(json["api_key"], "sk-ant-***abcd");
+        assert_eq!(json["api_key"], "sk-ant-api03-plaintext");
         assert_eq!(json["base_url"], "https://api.anthropic.com");
         assert_eq!(json["models"][0], "claude-sonnet-4-20250514");
         assert_eq!(json["model_enabled"]["claude-sonnet-4-20250514"], true);
         assert!(json.get("context_limit").is_none());
         assert!(json.get("model_protocols").is_none());
         assert!(json.get("bedrock_config").is_none());
+    }
+
+    #[test]
+    fn test_provider_response_api_key_plaintext() {
+        // Pre-launch: no masking is applied to the api_key field on the wire.
+        let resp = ProviderResponse {
+            id: "id".into(),
+            platform: "openai".into(),
+            name: "n".into(),
+            base_url: "https://api.openai.com".into(),
+            api_key: "sk-secret-xyz".into(),
+            models: vec![],
+            enabled: true,
+            capabilities: vec![],
+            context_limit: None,
+            model_protocols: None,
+            model_enabled: None,
+            model_health: None,
+            bedrock_config: None,
+            created_at: 0,
+            updated_at: 0,
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["api_key"], "sk-secret-xyz");
+        assert!(!json["api_key"].as_str().unwrap().contains("***"));
     }
 
     // -- CreateProviderRequest --
@@ -466,11 +520,79 @@ mod tests {
             }
         });
         let req: CreateProviderRequest = serde_json::from_value(raw).unwrap();
+        assert!(req.id.is_none());
         assert!(!req.enabled);
         assert_eq!(req.models.len(), 1);
         assert_eq!(req.capabilities.len(), 2);
         assert_eq!(req.context_limit, Some(200000));
         assert!(req.bedrock_config.is_some());
+    }
+
+    #[test]
+    fn test_create_provider_request_with_id() {
+        let raw = json!({
+            "id": "caller-supplied-1",
+            "platform": "openai",
+            "name": "OpenAI",
+            "base_url": "https://api.openai.com",
+            "api_key": "sk-test"
+        });
+        let req: CreateProviderRequest = serde_json::from_value(raw).unwrap();
+        assert_eq!(req.id.as_deref(), Some("caller-supplied-1"));
+    }
+
+    #[test]
+    fn test_create_provider_request_with_per_model_fields() {
+        let raw = json!({
+            "platform": "openai",
+            "name": "OpenAI",
+            "base_url": "https://api.openai.com",
+            "api_key": "sk-test",
+            "models": ["gpt-4", "gpt-3.5"],
+            "model_protocols": {"gpt-4": "openai"},
+            "model_enabled": {"gpt-4": true, "gpt-3.5": false},
+            "model_health": {
+                "gpt-4": {"status": "healthy", "last_check": 1712345678000_i64, "latency": 320}
+            }
+        });
+        let req: CreateProviderRequest = serde_json::from_value(raw).unwrap();
+        assert_eq!(
+            req.model_protocols.as_ref().unwrap().get("gpt-4"),
+            Some(&"openai".to_string())
+        );
+        assert_eq!(
+            req.model_enabled.as_ref().unwrap().get("gpt-4"),
+            Some(&true)
+        );
+        assert_eq!(
+            req.model_enabled.as_ref().unwrap().get("gpt-3.5"),
+            Some(&false)
+        );
+        let health = req.model_health.as_ref().unwrap().get("gpt-4").unwrap();
+        assert_eq!(health.status, HealthStatus::Healthy);
+        assert_eq!(health.latency, Some(320));
+    }
+
+    #[test]
+    fn test_create_provider_request_id_skipped_when_none() {
+        // When id is None, it should not appear in serialized output.
+        let req = CreateProviderRequest {
+            id: None,
+            platform: "openai".into(),
+            name: "OpenAI".into(),
+            base_url: "https://api.openai.com".into(),
+            api_key: "sk-test".into(),
+            models: vec![],
+            enabled: true,
+            capabilities: vec![],
+            context_limit: None,
+            model_protocols: None,
+            model_enabled: None,
+            model_health: None,
+            bedrock_config: None,
+        };
+        let json = serde_json::to_value(&req).unwrap();
+        assert!(json.get("id").is_none());
     }
 
     // -- UpdateProviderRequest --
@@ -506,6 +628,51 @@ mod tests {
         let raw = json!({"try_fix": true});
         let req: FetchModelsRequest = serde_json::from_value(raw).unwrap();
         assert!(req.try_fix);
+    }
+
+    // -- FetchModelsAnonymousRequest --
+
+    #[test]
+    fn test_fetch_models_anonymous_request_required_fields() {
+        let raw = json!({
+            "platform": "openai",
+            "base_url": "https://api.openai.com",
+            "api_key": "sk-test"
+        });
+        let req: FetchModelsAnonymousRequest = serde_json::from_value(raw).unwrap();
+        assert_eq!(req.platform, "openai");
+        assert_eq!(req.base_url, "https://api.openai.com");
+        assert_eq!(req.api_key, "sk-test");
+        assert!(req.bedrock_config.is_none());
+        assert!(!req.try_fix);
+    }
+
+    #[test]
+    fn test_fetch_models_anonymous_request_with_bedrock() {
+        let raw = json!({
+            "platform": "bedrock",
+            "base_url": "https://bedrock.us-east-1.amazonaws.com",
+            "api_key": "",
+            "bedrock_config": {
+                "auth_method": "accessKey",
+                "region": "us-east-1",
+                "access_key_id": "AKIA...",
+                "secret_access_key": "secret"
+            },
+            "try_fix": true
+        });
+        let req: FetchModelsAnonymousRequest = serde_json::from_value(raw).unwrap();
+        assert_eq!(req.platform, "bedrock");
+        assert!(req.try_fix);
+        let cfg = req.bedrock_config.unwrap();
+        assert_eq!(cfg.region, "us-east-1");
+        assert_eq!(cfg.auth_method, BedrockAuthMethod::AccessKey);
+    }
+
+    #[test]
+    fn test_fetch_models_anonymous_request_missing_required_field() {
+        let raw = json!({"platform": "openai", "api_key": "sk"});
+        assert!(serde_json::from_value::<FetchModelsAnonymousRequest>(raw).is_err());
     }
 
     // -- ModelInfo --
