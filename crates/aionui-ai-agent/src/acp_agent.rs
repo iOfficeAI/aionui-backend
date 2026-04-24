@@ -699,7 +699,7 @@ mod tests {
         assert_eq!(yolo_mode_value(AcpBackend::IFlow), Some("yolo"));
         assert_eq!(yolo_mode_value(AcpBackend::Kiro), None);
         assert_eq!(yolo_mode_value(AcpBackend::Gemini), None);
-        assert_eq!(yolo_mode_value(AcpBackend::Custom), None);
+        assert_eq!(yolo_mode_value(AcpBackend::Goose), None);
     }
 
     // ── approval_key tests ────────────────────────────────────────────

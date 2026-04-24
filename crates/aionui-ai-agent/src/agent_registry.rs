@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use aionui_api_types::{AgentSource, DetectedAgent};
-use aionui_common::AcpBackend;
+use aionui_common::{AcpBackend, AgentType};
 use tokio::sync::RwLock;
 use tracing::{debug, info};
 
@@ -81,9 +81,10 @@ impl AgentRegistry {
 
     fn detect_internal_agent() -> DetectedAgent {
         DetectedAgent {
-            id: AcpBackend::Aionrs.id(),
+            id: AgentType::Aionrs.id(),
             name: "Aion CLI".into(),
-            backend: AcpBackend::Aionrs,
+            agent_type: AgentType::Aionrs,
+            backend: None,
             available: true,
             source: AgentSource::Internal,
             command: None,
@@ -92,20 +93,28 @@ impl AgentRegistry {
         }
     }
 
+    /// Detect all builtin agents by scanning the system PATH.
+    ///
+    /// Each AgentType has its own detection logic — ACP backends are detected
+    /// via CLI_BACKENDS, while other agent types have dedicated detectors.
     fn detect_builtin_agents() -> Vec<DetectedAgent> {
-        // TODO: 改成使用打包进应用的 bundled bun，而不是 PATH 里的 bun。
-        // 目前还不清楚如何从 Rust 侧获取 bundled bun 的路径。
+        let mut agents = Self::detect_acp_agents();
+        agents.extend(Self::detect_openclaw());
+        agents.extend(Self::detect_nanobot());
+        agents
+    }
+
+    fn detect_acp_agents() -> Vec<DetectedAgent> {
+        // TODO: use bundled bun instead of PATH bun.
         let bun_path = which::which("bun").ok();
 
         AcpBackend::CLI_BACKENDS
             .iter()
             .filter_map(|&backend| {
                 if let Some(bridge_pkg) = backend.bridge_package() {
-                    // Bridge-based backend: needs bun/npx to run the bridge package
                     let bun = bun_path.as_ref()?;
                     let bun_cmd = bun.to_string_lossy().into_owned();
 
-                    // Also check that the native CLI exists (indicates the tool is installed)
                     if let Some(binary) = backend.cli_binary_name() {
                         which::which(binary).ok()?;
                     }
@@ -124,7 +133,8 @@ impl AgentRegistry {
                     Some(DetectedAgent {
                         id: backend.id(),
                         name: backend.display_name().into(),
-                        backend,
+                        agent_type: AgentType::Acp,
+                        backend: Some(backend),
                         available: true,
                         source: AgentSource::Builtin,
                         command: Some(bun_cmd),
@@ -132,7 +142,6 @@ impl AgentRegistry {
                         env: vec![],
                     })
                 } else {
-                    // Direct CLI backend: native binary + ACP args
                     let binary = backend.cli_binary_name()?;
                     let path = which::which(binary).ok()?;
                     let command = path.to_string_lossy().into_owned();
@@ -143,7 +152,8 @@ impl AgentRegistry {
                     Some(DetectedAgent {
                         id: backend.id(),
                         name: backend.display_name().into(),
-                        backend,
+                        agent_type: AgentType::Acp,
+                        backend: Some(backend),
                         available: true,
                         source: AgentSource::Builtin,
                         command: Some(command),
@@ -153,6 +163,44 @@ impl AgentRegistry {
                 }
             })
             .collect()
+    }
+
+    fn detect_openclaw() -> Option<DetectedAgent> {
+        let path = which::which("openclaw").ok()?;
+        let command = path.to_string_lossy().into_owned();
+
+        debug!(%command, "Detected OpenClaw Gateway agent");
+
+        Some(DetectedAgent {
+            id: AgentType::OpenclawGateway.id(),
+            name: "OpenClaw Gateway".into(),
+            agent_type: AgentType::OpenclawGateway,
+            backend: None,
+            available: true,
+            source: AgentSource::Builtin,
+            command: Some(command),
+            args: vec![],
+            env: vec![],
+        })
+    }
+
+    fn detect_nanobot() -> Option<DetectedAgent> {
+        let path = which::which("nanobot").ok()?;
+        let command = path.to_string_lossy().into_owned();
+
+        debug!(%command, "Detected Nanobot agent");
+
+        Some(DetectedAgent {
+            id: AgentType::Nanobot.id(),
+            name: "Nanobot".into(),
+            agent_type: AgentType::Nanobot,
+            backend: None,
+            available: true,
+            source: AgentSource::Builtin,
+            command: Some(command),
+            args: vec!["--experimental-acp".to_owned()],
+            env: vec![],
+        })
     }
 
     /// Merge all sources with priority: Custom > Extension > Builtin > Internal.
@@ -172,14 +220,18 @@ impl AgentRegistry {
 
     /// Deduplicate agents. First occurrence wins (priority order preserved by caller).
     /// Custom and Extension agents use their `id` as dedup key (multiple custom agents
-    /// can share the same backend). Builtin/Internal dedup by backend.
+    /// can share the same backend). Builtin/Internal dedup by backend (for ACP) or
+    /// agent_type (for non-ACP).
     fn deduplicate(agents: Vec<DetectedAgent>) -> Vec<DetectedAgent> {
         let mut seen = HashSet::new();
         let mut result = Vec::new();
         for agent in agents {
             let key = match agent.source {
                 AgentSource::Custom | AgentSource::Extension => agent.id.clone(),
-                _ => format!("{:?}", agent.backend),
+                _ => match agent.backend {
+                    Some(b) => format!("acp:{b:?}"),
+                    None => format!("type:{:?}", agent.agent_type),
+                },
             };
             if seen.insert(key) {
                 result.push(agent);
@@ -193,11 +245,26 @@ impl AgentRegistry {
 mod tests {
     use super::*;
 
-    fn make_agent(id: &str, backend: AcpBackend, source: AgentSource) -> DetectedAgent {
+    fn make_acp_agent(id: &str, backend: AcpBackend, source: AgentSource) -> DetectedAgent {
         DetectedAgent {
             id: id.into(),
             name: id.into(),
-            backend,
+            agent_type: AgentType::Acp,
+            backend: Some(backend),
+            available: true,
+            source,
+            command: None,
+            args: vec![],
+            env: vec![],
+        }
+    }
+
+    fn make_typed_agent(id: &str, agent_type: AgentType, source: AgentSource) -> DetectedAgent {
+        DetectedAgent {
+            id: id.into(),
+            name: id.into(),
+            agent_type,
+            backend: None,
             available: true,
             source,
             command: None,
@@ -208,12 +275,12 @@ mod tests {
 
     #[test]
     fn merge_priority_custom_over_builtin() {
-        let customs = vec![make_agent(
+        let customs = vec![make_acp_agent(
             "custom:claude",
             AcpBackend::Claude,
             AgentSource::Custom,
         )];
-        let builtins = vec![make_agent(
+        let builtins = vec![make_acp_agent(
             "builtin-claude",
             AcpBackend::Claude,
             AgentSource::Builtin,
@@ -226,13 +293,13 @@ mod tests {
     #[test]
     fn merge_deduplicates_same_backend_builtins() {
         let builtins = vec![
-            make_agent("a", AcpBackend::Claude, AgentSource::Builtin),
-            make_agent("b", AcpBackend::Claude, AgentSource::Builtin),
+            make_acp_agent("a", AcpBackend::Claude, AgentSource::Builtin),
+            make_acp_agent("b", AcpBackend::Claude, AgentSource::Builtin),
         ];
         let merged = AgentRegistry::merge(vec![], vec![], builtins, vec![]);
         let claude_count = merged
             .iter()
-            .filter(|a| a.backend == AcpBackend::Claude && a.source == AgentSource::Builtin)
+            .filter(|a| a.backend == Some(AcpBackend::Claude) && a.source == AgentSource::Builtin)
             .count();
         assert_eq!(claude_count, 1);
         assert_eq!(merged[0].id, "a");
@@ -240,12 +307,12 @@ mod tests {
 
     #[test]
     fn merge_keeps_internal_at_end() {
-        let internals = vec![make_agent(
+        let internals = vec![make_typed_agent(
             "aionrs",
-            AcpBackend::Aionrs,
+            AgentType::Aionrs,
             AgentSource::Internal,
         )];
-        let builtins = vec![make_agent(
+        let builtins = vec![make_acp_agent(
             "claude",
             AcpBackend::Claude,
             AgentSource::Builtin,
@@ -254,12 +321,23 @@ mod tests {
         assert_eq!(merged.last().unwrap().source, AgentSource::Internal);
     }
 
+    #[test]
+    fn dedup_non_acp_by_agent_type() {
+        let agents = vec![
+            make_typed_agent("oc1", AgentType::OpenclawGateway, AgentSource::Builtin),
+            make_typed_agent("oc2", AgentType::OpenclawGateway, AgentSource::Builtin),
+        ];
+        let deduped = AgentRegistry::deduplicate(agents);
+        assert_eq!(deduped.len(), 1);
+        assert_eq!(deduped[0].id, "oc1");
+    }
+
     #[tokio::test]
     async fn registry_initialize_and_get_all() {
         let registry = AgentRegistry::new();
         registry.initialize(vec![], vec![]).await;
         let agents = registry.get_all().await;
-        assert!(agents.iter().any(|a| a.backend == AcpBackend::Aionrs));
+        assert!(agents.iter().any(|a| a.agent_type == AgentType::Aionrs));
     }
 
     #[tokio::test]
@@ -276,9 +354,9 @@ mod tests {
             0
         );
 
-        let customs = vec![make_agent(
+        let customs = vec![make_acp_agent(
             "custom:test",
-            AcpBackend::Custom,
+            AcpBackend::Claude,
             AgentSource::Custom,
         )];
         registry.refresh_customs(customs).await;

@@ -24,7 +24,7 @@ use aionui_auth::{
 #[cfg(feature = "weixin")]
 use aionui_channel::weixin_login_route;
 use aionui_channel::{ChannelRouterState, channel_routes};
-use aionui_common::AcpBackend;
+use aionui_common::AgentType;
 use aionui_conversation::{ConversationRouterState, ConversationService, conversation_routes};
 use aionui_cron::{CronEventEmitter, CronRouterState, cron_routes};
 use aionui_db::{
@@ -242,7 +242,8 @@ async fn resolve_extension_agents(registry: &ExtensionRegistry) -> Vec<DetectedA
         .map(|a| DetectedAgent {
             id: a.id,
             name: a.name,
-            backend: AcpBackend::Custom,
+            agent_type: AgentType::Acp,
+            backend: None,
             available: true,
             source: AgentSource::Extension,
             command: a.default_cli_path.or(a.cli_command),

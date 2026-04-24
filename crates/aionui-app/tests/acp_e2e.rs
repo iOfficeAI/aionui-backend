@@ -68,11 +68,11 @@ async fn detect_cli_non_cli_backend_returns_no_path() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "user1", "pass123").await;
 
-    // "custom" backend has no CLI binary
+    // "gemini" backend has no CLI binary name (returns None)
     let req = json_with_token(
         "POST",
         "/api/acp/detect-cli",
-        json!({ "backend": "custom" }),
+        json!({ "backend": "gemini" }),
         &token,
         &csrf,
     );
@@ -97,7 +97,7 @@ async fn list_agents_returns_array() {
     assert_eq!(body["success"], true);
     assert!(body["data"].is_array());
     let agents = body["data"].as_array().unwrap();
-    assert!(agents.iter().any(|a| a["backend"] == "aionrs"));
+    assert!(agents.iter().any(|a| a["agent_type"] == "aionrs"));
 }
 
 #[tokio::test]
@@ -161,7 +161,7 @@ async fn health_check_non_cli_backend() {
     let req = json_with_token(
         "POST",
         "/api/acp/health-check",
-        json!({ "backend": "custom" }),
+        json!({ "backend": "gemini" }),
         &token,
         &csrf,
     );

@@ -79,7 +79,8 @@ impl StreamRelay {
                         if has_thinking {
                             self.send_thinking_done();
                         }
-                        self.persist_thinking(&thinking_buffer, thinking_started_at).await;
+                        self.persist_thinking(&thinking_buffer, thinking_started_at)
+                            .await;
                         self.finalize(&text_buffer, &record_created, &event).await;
                         self.send_turn_completed(&event);
                         break;
@@ -89,7 +90,8 @@ impl StreamRelay {
                     if has_thinking {
                         self.send_thinking_done();
                     }
-                    self.persist_thinking(&thinking_buffer, thinking_started_at).await;
+                    self.persist_thinking(&thinking_buffer, thinking_started_at)
+                        .await;
                     // Channel closed without finish/error — still finalize
                     self.finalize(
                         &text_buffer,
@@ -307,14 +309,13 @@ impl StreamRelay {
 
     /// Send a `thinking` event with `status: "done"` to close the thinking UI.
     fn send_thinking_done(&self) {
-        let thinking_done = AgentStreamEvent::Thinking(
-            aionui_ai_agent::stream_event::ThinkingEventData {
+        let thinking_done =
+            AgentStreamEvent::Thinking(aionui_ai_agent::stream_event::ThinkingEventData {
                 content: String::new(),
                 subject: None,
                 duration: None,
                 status: Some("done".into()),
-            },
-        );
+            });
         self.forward_to_websocket(&thinking_done);
     }
 
