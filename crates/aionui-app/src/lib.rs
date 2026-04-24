@@ -165,6 +165,7 @@ impl AppServices {
             remote_agent_repo,
             encryption_key,
             agent_registry: agent_registry.clone(),
+            data_dir: std::path::PathBuf::from(&data_dir),
         });
         let worker_task_manager: Arc<dyn IWorkerTaskManager> =
             Arc::new(WorkerTaskManagerImpl::new(factory));

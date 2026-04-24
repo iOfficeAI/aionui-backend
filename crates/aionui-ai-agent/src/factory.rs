@@ -1,6 +1,7 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use aionui_common::{AgentType, AppError};
+use aionui_common::{AgentType, AppError, now_ms};
 use aionui_db::IRemoteAgentRepository;
 use tracing::warn;
 
@@ -24,6 +25,7 @@ pub struct AgentFactoryDeps {
     pub remote_agent_repo: Arc<dyn IRemoteAgentRepository>,
     pub encryption_key: [u8; 32],
     pub agent_registry: Arc<AgentRegistry>,
+    pub data_dir: PathBuf,
 }
 
 /// Build a production agent factory that dispatches to concrete agent types.
@@ -51,7 +53,18 @@ async fn build_agent(
     options: BuildTaskOptions,
 ) -> Result<AgentManagerHandle, AppError> {
     let conversation_id = options.conversation_id.clone();
-    let workspace = options.workspace.clone();
+    let workspace = if options.workspace.is_empty() {
+        let dir = deps.data_dir.join("tmp").join(format!(
+            "{:?}-temp-{}",
+            options.agent_type,
+            now_ms()
+        ));
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| AppError::Internal(format!("Failed to create temp workspace: {e}")))?;
+        dir.to_string_lossy().into_owned()
+    } else {
+        options.workspace.clone()
+    };
 
     match options.agent_type {
         AgentType::Acp => {

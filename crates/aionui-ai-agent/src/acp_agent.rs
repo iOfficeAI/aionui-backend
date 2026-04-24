@@ -118,20 +118,6 @@ impl AcpAgentManager {
             .backend
             .ok_or_else(|| AppError::BadRequest("ACP backend is required".into()))?;
 
-        // Workspace fallback: create temp directory if empty
-        let workspace = if workspace.is_empty() {
-            let dir = std::env::temp_dir().join(format!(
-                "{}-temp-{}",
-                backend.cli_binary_name().unwrap_or("acp"),
-                now_ms()
-            ));
-            std::fs::create_dir_all(&dir)
-                .map_err(|e| AppError::Internal(format!("Failed to create temp workspace: {e}")))?;
-            dir.to_string_lossy().into_owned()
-        } else {
-            workspace
-        };
-
         let process = CliAgentProcess::spawn_for_sdk(CliSpawnConfig {
             command: spawn_command,
             args: spawn_args,
