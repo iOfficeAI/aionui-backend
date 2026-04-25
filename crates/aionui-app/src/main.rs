@@ -1,7 +1,10 @@
+use std::path::{Path, PathBuf};
+
 use anyhow::Result;
 use clap::Parser;
 use tokio::net::TcpListener;
 use tracing::info;
+use tracing_subscriber::{EnvFilter, Layer, fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 use aionui_app::{AppConfig, AppServices, create_router};
 
@@ -23,24 +26,60 @@ struct Cli {
     /// Run in local embedded mode (skip authentication, use system_default_user).
     #[arg(long)]
     local: bool,
+
+    /// Directory for log files. Defaults to {data-dir}/logs/.
+    #[arg(long)]
+    log_dir: Option<PathBuf>,
+
+    /// Log level filter (e.g. "info", "debug", "info,aionui_mcp=trace").
+    #[arg(long)]
+    log_level: Option<String>,
 }
 
-fn init_tracing() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                "info,aionui_ai_agent=debug,aionui_conversation=debug,aionui_realtime=debug".into()
-            }),
-        )
+fn init_tracing(
+    log_dir: &Path,
+    log_level: Option<&str>,
+) -> tracing_appender::non_blocking::WorkerGuard {
+    let default_filter =
+        "info,aionui_ai_agent=debug,aionui_conversation=debug,aionui_realtime=debug";
+
+    std::fs::create_dir_all(log_dir).expect("failed to create log directory");
+
+    let console_filter = EnvFilter::new(log_level.unwrap_or("info"));
+    let console_layer = fmt::layer().with_target(true).with_filter(console_filter);
+
+    let file_appender = tracing_appender::rolling::RollingFileAppender::builder()
+        .rotation(tracing_appender::rolling::Rotation::DAILY)
+        .filename_prefix("backend")
+        .filename_suffix("log")
+        .build(log_dir)
+        .expect("failed to create log file appender");
+    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+
+    let file_filter = EnvFilter::new(log_level.unwrap_or(default_filter));
+    let file_layer = fmt::layer()
+        .json()
+        .with_writer(non_blocking)
+        .with_ansi(false)
         .with_target(true)
+        .with_filter(file_filter);
+
+    tracing_subscriber::registry()
+        .with(console_layer)
+        .with(file_layer)
         .init();
+
+    guard
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    init_tracing();
+    let log_dir = cli
+        .log_dir
+        .unwrap_or_else(|| Path::new(&cli.data_dir).join("logs"));
+    let _log_guard = init_tracing(&log_dir, cli.log_level.as_deref());
 
     let config = AppConfig {
         host: cli.host,

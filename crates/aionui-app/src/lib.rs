@@ -15,7 +15,7 @@ use aionui_ai_agent::{
     RemoteAgentRouterState, RemoteAgentService, WorkerTaskManagerImpl, acp_routes, agent_routes,
     auxiliary_routes, build_agent_factory, connection_test_routes, remote_agent_routes,
 };
-use aionui_api_types::{AgentSource, DetectedAgent, EnvVar};
+use aionui_api_types::{AgentSource, DetectedAgent};
 use aionui_assistant::{
     AssistantRouterState, AssistantService, BuiltinAssistantRegistry, assistant_routes,
 };
@@ -28,6 +28,7 @@ use aionui_auth::{
 use aionui_channel::weixin_login_route;
 use aionui_channel::{ChannelRouterState, channel_routes};
 use aionui_common::AgentType;
+use aionui_common::EnvVar;
 use aionui_conversation::{ConversationRouterState, ConversationService, conversation_routes};
 use aionui_cron::{CronEventEmitter, CronRouterState, cron_routes};
 use aionui_db::{

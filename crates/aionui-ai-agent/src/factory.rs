@@ -1,8 +1,7 @@
+use aionui_common::{AcpBackend, AgentType, AppError, CommandSpec, now_ms};
+use aionui_db::{IProviderRepository, IRemoteAgentRepository};
 use std::path::PathBuf;
 use std::sync::Arc;
-
-use aionui_common::{AgentType, AppError, now_ms};
-use aionui_db::{IProviderRepository, IRemoteAgentRepository};
 use tracing::warn;
 
 use crate::agent_manager::AgentManagerHandle;
@@ -55,10 +54,23 @@ async fn build_agent(
 ) -> Result<AgentManagerHandle, AppError> {
     let conversation_id = options.conversation_id.clone();
     let workspace = if options.workspace.is_empty() {
-        let dir =
-            deps.data_dir
-                .join("tmp")
-                .join(format!("{:?}-temp-{}", options.agent_type, now_ms()));
+        let label = match options.agent_type {
+            AgentType::Acp => {
+                let backend = options
+                    .extra
+                    .get("backend")
+                    .and_then(|v| serde_json::from_value::<AcpBackend>(v.clone()).ok());
+                match backend {
+                    Some(b) => format!("acp-{}", b.display_name()).to_lowercase(),
+                    None => "acp".to_string(),
+                }
+            }
+            other => format!("{other:?}").to_lowercase(),
+        };
+        let dir = deps
+            .data_dir
+            .join("tmp")
+            .join(format!("{label}-temp-{}", now_ms()));
         std::fs::create_dir_all(&dir)
             .map_err(|e| AppError::Internal(format!("Failed to create temp workspace: {e}")))?;
         dir.to_string_lossy().into_owned()
@@ -87,14 +99,17 @@ async fn build_agent(
                 config.backend = detected.backend;
             }
 
-            let (spawn_command, spawn_args) = match detected {
-                Some(ref d) if d.command.is_some() => (d.command.clone().unwrap(), d.args.clone()),
+            let (spawn_command, spawn_args, spawn_env) = match detected {
+                Some(ref d) if d.command.is_some() => {
+                    (d.command.clone().unwrap(), d.args.clone(), d.env.clone())
+                }
                 _ => {
                     // Last resort fallback: direct CLI with default ACP args
                     let backend = config
                         .backend
                         .ok_or_else(|| AppError::BadRequest("ACP backend is required".into()))?;
-                    let binary = backend.cli_binary_name().ok_or_else(|| {
+
+                    let binary = backend.binary_name().ok_or_else(|| {
                         AppError::BadRequest(format!("Backend {backend:?} has no CLI binary"))
                     })?;
                     let path = which::which(binary)
@@ -108,15 +123,19 @@ async fn build_agent(
                         .iter()
                         .map(|s| (*s).to_owned())
                         .collect();
-                    (path, args)
+                    (path, args, vec![])
                 }
             };
 
             let agent = AcpAgentManager::new(
                 conversation_id,
-                workspace,
-                spawn_command,
-                spawn_args,
+                workspace.clone(),
+                CommandSpec {
+                    command: PathBuf::from(spawn_command),
+                    args: spawn_args,
+                    env: spawn_env,
+                    cwd: Some(workspace),
+                },
                 config,
             )
             .await?;
