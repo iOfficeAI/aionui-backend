@@ -107,8 +107,8 @@ impl IAgentManager for TypedMockAgent {
 // Aionrs agent tests (real implementation with AgentEngine)
 // ---------------------------------------------------------------------------
 
-fn make_aionrs_config() -> AionrsBuildExtra {
-    AionrsBuildExtra {
+fn make_aionrs_config() -> AionrsResolvedConfig {
+    AionrsResolvedConfig {
         provider: "anthropic".into(),
         api_key: "sk-test-key".into(),
         model: "claude-sonnet-4-20250514".into(),
