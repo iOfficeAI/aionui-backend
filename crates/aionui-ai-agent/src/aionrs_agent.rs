@@ -51,11 +51,17 @@ impl AionrsAgentManager {
             _ => ProviderType::Anthropic,
         };
 
-        let compat = match provider_type {
+        let mut compat = match provider_type {
             ProviderType::OpenAI => ProviderCompat::openai_defaults(),
             ProviderType::Bedrock => ProviderCompat::bedrock_defaults(),
             ProviderType::Anthropic | ProviderType::Vertex => ProviderCompat::anthropic_defaults(),
         };
+        if let Some(field) = config_extra.compat_overrides.max_tokens_field {
+            compat.max_tokens_field = Some(field);
+        }
+        if let Some(path) = config_extra.compat_overrides.api_path {
+            compat.api_path = Some(path);
+        }
 
         let prompt_caching = matches!(
             provider_type,
@@ -215,6 +221,7 @@ mod tests {
             system_prompt: None,
             max_tokens: 4096,
             max_turns: None,
+            compat_overrides: Default::default(),
         }
     }
 

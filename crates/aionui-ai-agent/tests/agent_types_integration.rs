@@ -116,6 +116,7 @@ fn make_aionrs_config() -> AionrsResolvedConfig {
         system_prompt: None,
         max_tokens: 4096,
         max_turns: None,
+        compat_overrides: Default::default(),
     }
 }
 

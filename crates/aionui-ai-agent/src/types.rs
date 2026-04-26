@@ -171,6 +171,15 @@ pub struct AionrsBuildExtra {
     pub max_turns: Option<usize>,
 }
 
+/// Provider-specific compat overrides resolved in the factory.
+///
+/// These are merged on top of the provider defaults in the agent manager.
+#[derive(Debug, Clone, Default)]
+pub struct AionrsCompatOverrides {
+    pub max_tokens_field: Option<String>,
+    pub api_path: Option<String>,
+}
+
 /// Fully resolved Aionrs configuration passed to the agent manager.
 ///
 /// Constructed in the factory by combining provider DB data with
@@ -191,6 +200,8 @@ pub struct AionrsResolvedConfig {
     pub max_tokens: u32,
     /// Max agentic turns.
     pub max_turns: Option<usize>,
+    /// Provider-specific compat overrides.
+    pub compat_overrides: AionrsCompatOverrides,
 }
 
 fn default_aionrs_max_tokens() -> u32 {

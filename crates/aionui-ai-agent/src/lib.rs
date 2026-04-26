@@ -65,7 +65,8 @@ pub use skill_manager::{
 pub use stream_event::AgentStreamEvent;
 pub use task_manager::{AgentFactory, IWorkerTaskManager, WorkerTaskManagerImpl};
 pub use types::{
-    AcpBuildExtra, AcpModelInfo, AcpSessionConfigOption, AionrsBuildExtra, AionrsResolvedConfig,
-    BuildTaskOptions, GeminiBuildExtra, OpenClawBuildExtra, OpenClawGatewayConfig,
-    RemoteBuildExtra, SendMessageData, SlashCommandItem,
+    AcpBuildExtra, AcpModelInfo, AcpSessionConfigOption, AionrsBuildExtra,
+    AionrsCompatOverrides, AionrsResolvedConfig, BuildTaskOptions, GeminiBuildExtra,
+    OpenClawBuildExtra, OpenClawGatewayConfig, RemoteBuildExtra, SendMessageData,
+    SlashCommandItem,
 };
