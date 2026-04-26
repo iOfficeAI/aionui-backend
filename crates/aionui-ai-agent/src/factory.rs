@@ -257,7 +257,7 @@ async fn build_agent(
                 compat_overrides,
             };
 
-            let agent = AionrsAgentManager::new(conversation_id, workspace, config);
+            let agent = AionrsAgentManager::new(conversation_id, workspace, config).await?;
             Ok(Arc::new(agent) as AgentManagerHandle)
         }
     }

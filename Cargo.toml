@@ -48,11 +48,11 @@ aionui-assistant = { path = "crates/aionui-assistant" }
 aionui-app = { path = "crates/aionui-app" }
 
 # Aionrs agent engine (external git dependency)
-aion-agent = { git = "ssh://git@github.com/iOfficeAI/aionrs.git", tag = "v0.1.15" }
-aion-types = { git = "ssh://git@github.com/iOfficeAI/aionrs.git", tag = "v0.1.15" }
-aion-protocol = { git = "ssh://git@github.com/iOfficeAI/aionrs.git", tag = "v0.1.15" }
-aion-config = { git = "ssh://git@github.com/iOfficeAI/aionrs.git", tag = "v0.1.15" }
-aion-tools = { git = "ssh://git@github.com/iOfficeAI/aionrs.git", tag = "v0.1.15" }
+aion-agent = { git = "ssh://git@github.com/iOfficeAI/aionrs.git", tag = "v0.1.16" }
+aion-types = { git = "ssh://git@github.com/iOfficeAI/aionrs.git", tag = "v0.1.16" }
+aion-protocol = { git = "ssh://git@github.com/iOfficeAI/aionrs.git", tag = "v0.1.16" }
+aion-config = { git = "ssh://git@github.com/iOfficeAI/aionrs.git", tag = "v0.1.16" }
+aion-mcp = { git = "ssh://git@github.com/iOfficeAI/aionrs.git", tag = "v0.1.16" }
 
 # Core framework
 tokio = { version = "1", features = ["full"] }

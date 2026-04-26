@@ -1,24 +1,19 @@
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, RwLock};
 
+use aion_agent::bootstrap::AgentBootstrap;
 use aion_agent::engine::AgentEngine;
 use aion_agent::output::OutputSink;
 use aion_config::compat::ProviderCompat;
 use aion_config::config::{Config, ProviderType};
+use aion_mcp::manager::McpManager;
 use aion_protocol::ToolApprovalManager;
-use aion_tools::bash::BashTool;
-use aion_tools::edit::EditTool;
-use aion_tools::glob::GlobTool;
-use aion_tools::grep::GrepTool;
-use aion_tools::read::ReadTool;
-use aion_tools::registry::ToolRegistry;
-use aion_tools::write::WriteTool;
 use aionui_common::{
     AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, TimestampMs, now_ms,
 };
 use serde_json::Value;
 use tokio::sync::{Mutex, broadcast};
-use tracing::{debug, info, error};
+use tracing::{debug, error, info};
 
 use crate::agent_manager::IAgentManager;
 use crate::backend_output_sink::BackendOutputSink;
@@ -31,16 +26,18 @@ pub struct AionrsAgentManager {
     pub(crate) event_tx: broadcast::Sender<AgentStreamEvent>,
     last_activity: AtomicI64,
     engine: Mutex<AgentEngine>,
+    #[allow(dead_code)] // held for Arc drop cleanup on agent destruction
+    mcp_managers: Vec<Arc<McpManager>>,
     status: RwLock<Option<ConversationStatus>>,
     approval_manager: Arc<ToolApprovalManager>,
 }
 
 impl AionrsAgentManager {
-    pub fn new(
+    pub async fn new(
         conversation_id: String,
         workspace: String,
         config_extra: AionrsResolvedConfig,
-    ) -> Self {
+    ) -> Result<Self, AppError> {
         let (event_tx, _) = broadcast::channel(128);
         let sink: Arc<dyn OutputSink> = Arc::new(BackendOutputSink::new(event_tx.clone()));
 
@@ -92,26 +89,23 @@ impl AionrsAgentManager {
             debug: Default::default(),
         };
 
-        let mut registry = ToolRegistry::new();
-        registry.register(Box::new(ReadTool::new(None)));
-        registry.register(Box::new(WriteTool::new(None)));
-        registry.register(Box::new(EditTool::new(None)));
-        registry.register(Box::new(BashTool));
-        registry.register(Box::new(GrepTool));
-        registry.register(Box::new(GlobTool));
+        let result = AgentBootstrap::new(config, &workspace, sink)
+            .build()
+            .await
+            .map_err(|e| AppError::Internal(format!("Agent bootstrap failed: {e}")))?;
 
-        let engine = AgentEngine::new(config, registry, sink);
         let approval_manager = Arc::new(ToolApprovalManager::new());
 
-        Self {
+        Ok(Self {
             conversation_id,
             workspace,
             event_tx,
             last_activity: AtomicI64::new(now_ms()),
-            engine: Mutex::new(engine),
+            engine: Mutex::new(result.engine),
+            mcp_managers: result.mcp_managers,
             status: RwLock::new(Some(ConversationStatus::Pending)),
             approval_manager,
-        }
+        })
     }
 }
 
@@ -285,55 +279,70 @@ mod tests {
         }
     }
 
-    #[test]
-    fn aionrs_agent_returns_correct_type() {
-        let agent = AionrsAgentManager::new("conv-1".into(), "/project".into(), make_test_config());
+    #[tokio::test]
+    async fn aionrs_agent_returns_correct_type() {
+        let agent = AionrsAgentManager::new("conv-1".into(), "/project".into(), make_test_config())
+            .await
+            .unwrap();
         assert_eq!(agent.agent_type(), AgentType::Aionrs);
         assert_eq!(agent.workspace(), "/project");
         assert_eq!(agent.conversation_id(), "conv-1");
     }
 
-    #[test]
-    fn aionrs_agent_initial_status_is_pending() {
-        let agent = AionrsAgentManager::new("conv-1".into(), "/project".into(), make_test_config());
+    #[tokio::test]
+    async fn aionrs_agent_initial_status_is_pending() {
+        let agent = AionrsAgentManager::new("conv-1".into(), "/project".into(), make_test_config())
+            .await
+            .unwrap();
         assert_eq!(agent.status(), Some(ConversationStatus::Pending));
     }
 
-    #[test]
-    fn aionrs_agent_subscribe_returns_receiver() {
-        let agent = AionrsAgentManager::new("conv-1".into(), "/project".into(), make_test_config());
+    #[tokio::test]
+    async fn aionrs_agent_subscribe_returns_receiver() {
+        let agent = AionrsAgentManager::new("conv-1".into(), "/project".into(), make_test_config())
+            .await
+            .unwrap();
         let _rx = agent.subscribe();
     }
 
-    #[test]
-    fn aionrs_agent_kill_succeeds() {
-        let agent = AionrsAgentManager::new("conv-1".into(), "/project".into(), make_test_config());
+    #[tokio::test]
+    async fn aionrs_agent_kill_succeeds() {
+        let agent = AionrsAgentManager::new("conv-1".into(), "/project".into(), make_test_config())
+            .await
+            .unwrap();
         assert!(agent.kill(None).is_ok());
         assert_eq!(agent.status(), None);
     }
 
-    #[test]
-    fn aionrs_agent_kill_with_reason_succeeds() {
-        let agent = AionrsAgentManager::new("conv-1".into(), "/project".into(), make_test_config());
+    #[tokio::test]
+    async fn aionrs_agent_kill_with_reason_succeeds() {
+        let agent = AionrsAgentManager::new("conv-1".into(), "/project".into(), make_test_config())
+            .await
+            .unwrap();
         assert!(agent.kill(Some(AgentKillReason::IdleTimeout)).is_ok());
     }
 
-    #[test]
-    fn aionrs_agent_confirmations_initially_empty() {
-        let agent = AionrsAgentManager::new("conv-1".into(), "/project".into(), make_test_config());
+    #[tokio::test]
+    async fn aionrs_agent_confirmations_initially_empty() {
+        let agent = AionrsAgentManager::new("conv-1".into(), "/project".into(), make_test_config())
+            .await
+            .unwrap();
         assert!(agent.get_confirmations().is_empty());
     }
 
-    #[test]
-    fn aionrs_agent_check_approval_returns_false_by_default() {
-        let agent = AionrsAgentManager::new("conv-1".into(), "/project".into(), make_test_config());
+    #[tokio::test]
+    async fn aionrs_agent_check_approval_returns_false_by_default() {
+        let agent = AionrsAgentManager::new("conv-1".into(), "/project".into(), make_test_config())
+            .await
+            .unwrap();
         assert!(!agent.check_approval("any_action", None));
     }
 
     #[tokio::test]
     async fn stop_emits_finish_event_and_sets_status() {
-        let agent =
-            AionrsAgentManager::new("conv-stop".into(), "/project".into(), make_test_config());
+        let agent = AionrsAgentManager::new("conv-stop".into(), "/project".into(), make_test_config())
+            .await
+            .unwrap();
         let mut rx = agent.subscribe();
 
         agent.stop().await.unwrap();
@@ -352,10 +361,11 @@ mod tests {
         }
     }
 
-    #[test]
-    fn event_tx_can_send_error_and_finish() {
-        let agent =
-            AionrsAgentManager::new("conv-err".into(), "/project".into(), make_test_config());
+    #[tokio::test]
+    async fn event_tx_can_send_error_and_finish() {
+        let agent = AionrsAgentManager::new("conv-err".into(), "/project".into(), make_test_config())
+            .await
+            .unwrap();
         let mut rx = agent.subscribe();
 
         let _ = agent.event_tx.send(AgentStreamEvent::Error(
