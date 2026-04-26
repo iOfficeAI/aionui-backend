@@ -28,7 +28,7 @@ use crate::types::{AionrsResolvedConfig, SendMessageData};
 pub struct AionrsAgentManager {
     conversation_id: String,
     workspace: String,
-    event_tx: broadcast::Sender<AgentStreamEvent>,
+    pub(crate) event_tx: broadcast::Sender<AgentStreamEvent>,
     last_activity: AtomicI64,
     engine: Mutex<AgentEngine>,
     status: RwLock<Option<ConversationStatus>>,
@@ -158,12 +158,43 @@ impl IAgentManager for AionrsAgentManager {
         self.last_activity.store(now_ms(), Ordering::Relaxed);
 
         match result {
-            Ok(_) => Ok(()),
-            Err(e) => Err(AppError::Internal(format!("Aionrs agent error: {e}"))),
+            Ok(_) => {
+                // AgentEngine.run() does not call emit_stream_end(), so we must
+                // send the Finish event ourselves to unblock StreamRelay.
+                let _ = self.event_tx.send(AgentStreamEvent::Finish(
+                    crate::stream_event::FinishEventData { session_id: None },
+                ));
+                Ok(())
+            }
+            Err(e) => {
+                let error_msg = format!("Aionrs agent error: {e}");
+                let _ = self.event_tx.send(AgentStreamEvent::Error(
+                    crate::stream_event::ErrorEventData {
+                        message: error_msg.clone(),
+                        code: None,
+                    },
+                ));
+                let _ = self.event_tx.send(AgentStreamEvent::Finish(
+                    crate::stream_event::FinishEventData { session_id: None },
+                ));
+                Err(AppError::Internal(error_msg))
+            }
         }
     }
 
     async fn stop(&self) -> Result<(), AppError> {
+        let _ = self.event_tx.send(AgentStreamEvent::Error(
+            crate::stream_event::ErrorEventData {
+                message: "Stopped by user".into(),
+                code: None,
+            },
+        ));
+        let _ = self.event_tx.send(AgentStreamEvent::Finish(
+            crate::stream_event::FinishEventData { session_id: None },
+        ));
+        if let Ok(mut s) = self.status.write() {
+            *s = Some(ConversationStatus::Finished);
+        }
         Ok(())
     }
 
@@ -268,5 +299,53 @@ mod tests {
     fn aionrs_agent_check_approval_returns_false_by_default() {
         let agent = AionrsAgentManager::new("conv-1".into(), "/project".into(), make_test_config());
         assert!(!agent.check_approval("any_action", None));
+    }
+
+    #[tokio::test]
+    async fn stop_emits_finish_event_and_sets_status() {
+        let agent =
+            AionrsAgentManager::new("conv-stop".into(), "/project".into(), make_test_config());
+        let mut rx = agent.subscribe();
+
+        agent.stop().await.unwrap();
+
+        assert_eq!(agent.status(), Some(ConversationStatus::Finished));
+
+        match rx.try_recv().unwrap() {
+            AgentStreamEvent::Error(data) => {
+                assert!(data.message.contains("Stopped"));
+            }
+            other => panic!("Expected Error, got {:?}", other),
+        }
+        match rx.try_recv().unwrap() {
+            AgentStreamEvent::Finish(_) => {}
+            other => panic!("Expected Finish, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn event_tx_can_send_error_and_finish() {
+        let agent =
+            AionrsAgentManager::new("conv-err".into(), "/project".into(), make_test_config());
+        let mut rx = agent.subscribe();
+
+        let _ = agent.event_tx.send(AgentStreamEvent::Error(
+            crate::stream_event::ErrorEventData {
+                message: "test error".into(),
+                code: None,
+            },
+        ));
+        let _ = agent.event_tx.send(AgentStreamEvent::Finish(
+            crate::stream_event::FinishEventData { session_id: None },
+        ));
+
+        match rx.try_recv().unwrap() {
+            AgentStreamEvent::Error(data) => assert_eq!(data.message, "test error"),
+            other => panic!("Expected Error, got {:?}", other),
+        }
+        match rx.try_recv().unwrap() {
+            AgentStreamEvent::Finish(_) => {}
+            other => panic!("Expected Finish, got {:?}", other),
+        }
     }
 }
