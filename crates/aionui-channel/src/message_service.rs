@@ -150,6 +150,7 @@ impl ChannelMessageService {
             | AgentStreamEvent::AgentStatus(_)
             | AgentStreamEvent::Plan(_)
             | AgentStreamEvent::Permission(_)
+            | AgentStreamEvent::AcpPermission(_)
             | AgentStreamEvent::AcpToolCall(_)
             | AgentStreamEvent::AvailableCommands(_)
             | AgentStreamEvent::SkillSuggest(_)

@@ -38,6 +38,8 @@ pub enum AgentStreamEvent {
     Thinking(ThinkingEventData),
     /// Execution plan.
     Plan(PlanEventData),
+    /// Generic permission request (non-ACP backends).
+    Permission(serde_json::Value),
     /// ACP permission request (tool approval).
     AcpPermission(AcpPermissionEventData),
     /// Skill suggestion from cron job.
