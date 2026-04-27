@@ -96,11 +96,19 @@ async fn discover_skills_uses_extension_service_layout() {
     // No enabled_skills: opt-in builtin (mermaid) and custom (my-skill) should
     // be skipped. Only the auto-inject builtin (cron) appears.
     let idx = mgr.discover_skills(None, None).await;
-    let names: std::collections::HashSet<&str> =
-        idx.iter().map(|s| s.name.as_str()).collect();
-    assert!(names.contains("cron"), "auto-inject skill missing: got {names:?}");
-    assert!(!names.contains("mermaid"), "opt-in builtin leaked without enabled_skills");
-    assert!(!names.contains("my-skill"), "custom leaked without enabled_skills");
+    let names: std::collections::HashSet<&str> = idx.iter().map(|s| s.name.as_str()).collect();
+    assert!(
+        names.contains("cron"),
+        "auto-inject skill missing: got {names:?}"
+    );
+    assert!(
+        !names.contains("mermaid"),
+        "opt-in builtin leaked without enabled_skills"
+    );
+    assert!(
+        !names.contains("my-skill"),
+        "custom leaked without enabled_skills"
+    );
 
     unsafe {
         std::env::remove_var(BUILTIN_SKILLS_ENV_VAR);
@@ -199,7 +207,10 @@ async fn discover_skills_respects_exclude_builtin() {
     let mgr = AcpSkillManager::new(paths);
     let exclude = vec!["cron".to_string()];
     let idx = mgr.discover_skills(None, Some(&exclude)).await;
-    assert!(idx.is_empty(), "excluded auto-inject skill should be dropped");
+    assert!(
+        idx.is_empty(),
+        "excluded auto-inject skill should be dropped"
+    );
 
     unsafe {
         std::env::remove_var(BUILTIN_SKILLS_ENV_VAR);

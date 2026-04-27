@@ -107,8 +107,7 @@ async fn workspace_browse_no_active_task() {
 
     let ws = tmp.path().to_string_lossy().into_owned();
     let conv_id =
-        create_conversation_with_workspace(&mut app, &token, &csrf, "Test Conv", "acp", &ws)
-            .await;
+        create_conversation_with_workspace(&mut app, &token, &csrf, "Test Conv", "acp", &ws).await;
 
     let req = get_with_token(
         &format!("/api/conversations/{conv_id}/workspace?path=/src"),

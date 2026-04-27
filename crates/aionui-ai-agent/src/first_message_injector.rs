@@ -43,9 +43,9 @@ pub async fn inject_first_message_prefix(
     if use_native {
         // Light mode: only preset_context, no skill discovery
         match config.preset_context {
-            Some(ctx) if !ctx.is_empty() => format!(
-                "[Assistant Rules]\n{ctx}\n[/Assistant Rules]\n\n{content}"
-            ),
+            Some(ctx) if !ctx.is_empty() => {
+                format!("[Assistant Rules]\n{ctx}\n[/Assistant Rules]\n\n{content}")
+            }
             _ => content.to_string(),
         }
     } else {

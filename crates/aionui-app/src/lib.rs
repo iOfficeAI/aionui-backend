@@ -1,4 +1,6 @@
 //! Application entry point: assembles all crates into an Axum server with DI and middleware.
+mod state_builders;
+
 use std::sync::Arc;
 
 use axum::http::Method;
@@ -8,60 +10,43 @@ use axum::{Json, Router, middleware};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tower_http::cors::{Any, CorsLayer};
+use tower_http::trace::TraceLayer;
 
 use aionui_ai_agent::{
     AcpRouterState, AcpSkillManager, AgentFactoryDeps, AgentRegistry, AgentRouterState,
-    AuxiliaryRouterState, ConnectionTestRouterState, ConnectionTestService, IWorkerTaskManager,
-    RemoteAgentRouterState, RemoteAgentService, WorkerTaskManagerImpl, acp_routes, agent_routes,
-    auxiliary_routes, build_agent_factory, connection_test_routes, remote_agent_routes,
+    AuxiliaryRouterState, ConnectionTestRouterState, IWorkerTaskManager, RemoteAgentRouterState,
+    WorkerTaskManagerImpl, acp_routes, agent_routes, auxiliary_routes, build_agent_factory,
+    connection_test_routes, remote_agent_routes,
 };
-use aionui_api_types::{AgentSource, DetectedAgent};
-use aionui_assistant::{
-    AssistantRouterState, AssistantService, BuiltinAssistantRegistry, assistant_routes,
-};
+use aionui_assistant::{AssistantRouterState, assistant_routes};
 use aionui_auth::{
     AuthRouterState, AuthState, CookieConfig, JwtService, QrTokenStore, auth_middleware,
-    auth_routes, csrf_middleware, extract_token_from_ws_headers, resolve_jwt_secret,
-    security_headers_middleware,
+    auth_routes, csrf_middleware, resolve_jwt_secret, security_headers_middleware,
 };
 #[cfg(feature = "weixin")]
 use aionui_channel::weixin_login_route;
 use aionui_channel::{ChannelRouterState, channel_routes};
-use aionui_common::AgentType;
-use aionui_common::EnvVar;
-use aionui_conversation::{ConversationRouterState, ConversationService, conversation_routes};
-use aionui_cron::{CronEventEmitter, CronRouterState, cron_routes};
+use aionui_conversation::{ConversationRouterState, conversation_routes};
+use aionui_cron::{CronRouterState, cron_routes};
 use aionui_db::{
-    Database, IAssistantOverrideRepository, IAssistantRepository, IUserRepository,
-    SqliteAssistantOverrideRepository, SqliteAssistantRepository, SqliteClientPreferenceRepository,
-    SqliteConversationRepository, SqliteProviderRepository, SqliteRemoteAgentRepository,
-    SqliteSettingsRepository, SqliteUserRepository,
+    Database, IUserRepository, SqliteProviderRepository, SqliteRemoteAgentRepository,
+    SqliteUserRepository,
 };
 use aionui_extension::{
-    AssistantRuleDispatcher, ExtensionRegistry, ExtensionRouterState, ExtensionStateStore,
-    ExternalPathsManager, HubIndexManager, HubInstaller, HubRouterState, SkillRouterState,
-    extension_routes, hub_routes, skill_routes,
+    ExtensionRouterState, HubRouterState, SkillRouterState, extension_routes, hub_routes,
+    skill_routes,
 };
-use aionui_file::{FileRouterState, FileService, FileWatchService, SnapshotService, file_routes};
-use aionui_mcp::{
-    AionrsAdapter, AionuiAdapter, ClaudeAdapter, CodeBuddyAdapter, CodexAdapter, GeminiAdapter,
-    McpAgentAdapter, McpConfigService, McpConnectionTestService, McpRouterState, McpSyncService,
-    OpencodeAdapter, QwenAdapter, mcp_routes,
-};
-use aionui_office::{
-    ConversionService, OfficeRouterState, OfficecliWatchManager, ProxyService,
-    SnapshotService as OfficeSnapshotService, StarOfficeDetector, office_proxy_routes,
-    office_routes,
-};
-use aionui_realtime::{
-    BroadcastEventBus, NoopMessageRouter, WebSocketManager, WsHandlerState, ws_upgrade_handler,
-};
+use aionui_file::{FileRouterState, file_routes};
+use aionui_mcp::{McpRouterState, mcp_routes};
+use aionui_office::{OfficeRouterState, office_proxy_routes, office_routes};
+use aionui_realtime::{BroadcastEventBus, WebSocketManager, WsHandlerState, ws_upgrade_handler};
 use aionui_shell::{ShellRouterState, shell_routes};
-use aionui_system::{
-    ClientPrefService, ModelFetchService, ProtocolDetectionService, ProviderService,
-    SettingsService, SystemRouterState, VersionCheckService, system_routes,
+use aionui_system::{SystemRouterState, system_routes};
+use aionui_team::{TeamRouterState, team_routes};
+
+pub use state_builders::{
+    build_assistant_state, build_extension_states, build_module_states, build_ws_state,
 };
-use aionui_team::{TeamRouterState, TeamSessionService, team_routes};
 
 /// Application configuration parsed from CLI arguments.
 #[derive(Debug, Clone)]
@@ -251,178 +236,6 @@ pub struct ModuleStates {
     pub agent: AgentRouterState,
 }
 
-/// Convert extension-contributed ACP adapters into `DetectedAgent` values.
-async fn resolve_extension_agents(registry: &ExtensionRegistry) -> Vec<DetectedAgent> {
-    registry
-        .get_acp_adapters()
-        .await
-        .into_iter()
-        .filter(|a| {
-            a.connection_type
-                .as_deref()
-                .is_none_or(|ct| ct == "cli" || ct == "stdio")
-        })
-        .map(|a| DetectedAgent {
-            id: a.id,
-            name: a.name,
-            agent_type: AgentType::Acp,
-            backend: None,
-            available: true,
-            source: AgentSource::Extension,
-            command: a.default_cli_path.or(a.cli_command),
-            args: a.acp_args,
-            env: a
-                .env
-                .into_iter()
-                .map(|(k, v)| EnvVar { name: k, value: v })
-                .collect(),
-        })
-        .collect()
-}
-
-/// Build all default `ModuleStates` from application services.
-pub async fn build_module_states(services: &AppServices) -> ModuleStates {
-    let (ext_state, hub_state, mut skill_state) = build_extension_states(services).await;
-    let assistant = build_assistant_state(services, ext_state.registry.clone());
-
-    let extensions = resolve_extension_agents(&ext_state.registry).await;
-    // TODO: load custom agent configs from settings/DB and convert to DetectedAgent
-    services.agent_registry.initialize(extensions, vec![]).await;
-
-    // Wire the AssistantService as the source-dispatch implementation for
-    // the existing assistant-rule / assistant-skill endpoints in
-    // aionui-extension. This replaces the legacy user-directory-only paths
-    // with builtin / extension / user routing.
-    let dispatcher: Arc<dyn AssistantRuleDispatcher> = assistant.service.clone();
-    skill_state.assistant_dispatcher = Some(dispatcher);
-
-    // Best-effort cleanup of orphaned per-agent skills directories from
-    // conversations that no longer exist. The predicate closure bridges
-    // the extension crate (which does not depend on aionui-conversation)
-    // and the conversation repository. Failures are logged and ignored
-    // — agent-skills sweeping is not critical to startup.
-    run_orphan_agent_skills_cleanup(services, &skill_state.skill_paths).await;
-
-    ModuleStates {
-        system: build_system_state(services),
-        conversation: build_conversation_state(services),
-        remote_agent: build_remote_agent_state(services),
-        acp: build_acp_state(services),
-        connection_test: build_connection_test_state(),
-        auxiliary: build_auxiliary_state(services),
-        file: build_file_state(services),
-        mcp: build_mcp_state(services),
-        extension: ext_state,
-        hub: hub_state,
-        skill: skill_state,
-        channel: build_channel_state(services),
-        team: build_team_state(services),
-        cron: build_cron_state(services),
-        office: build_office_state(services),
-        shell: build_shell_state(services),
-        assistant,
-        agent: AgentRouterState {
-            agent_registry: services.agent_registry.clone(),
-        },
-    }
-}
-
-/// Best-effort orphan sweep of `{data_dir}/agent-skills/`.
-///
-/// Scans the directory and deletes subdirectories whose name does not
-/// correspond to a live conversation (per the conversation repository).
-/// Runs synchronously during startup — the count is small in practice
-/// (one entry per open conversation at shutdown) and the operation is
-/// strictly local filesystem I/O.
-///
-/// `aionui-extension` accepts a `Fn(&str) -> bool` predicate so it does
-/// not need to depend on `aionui-conversation`. We perform the blocking
-/// repository check via `tokio::task::block_in_place` + the current
-/// runtime's `block_on`, which is safe on multi-thread runtimes (the
-/// only runtime flavor this binary uses).
-async fn run_orphan_agent_skills_cleanup(
-    services: &AppServices,
-    skill_paths: &aionui_extension::SkillPaths,
-) {
-    let pool = services.database.pool().clone();
-    let repo: Arc<dyn aionui_db::IConversationRepository> =
-        Arc::new(SqliteConversationRepository::new(pool));
-    let handle = tokio::runtime::Handle::current();
-    let is_live = {
-        let repo = repo.clone();
-        move |id: &str| -> bool {
-            let id = id.to_string();
-            let repo = repo.clone();
-            // Block on the async repo call. Multi-thread runtime required.
-            tokio::task::block_in_place(|| {
-                handle.block_on(async move { repo.get(&id).await.ok().flatten().is_some() })
-            })
-        }
-    };
-    match aionui_extension::cleanup_orphan_agent_skills(skill_paths, is_live).await {
-        Ok(removed) if removed > 0 => {
-            tracing::info!(removed, "swept orphan agent-skills dirs on startup")
-        }
-        Ok(_) => {}
-        Err(e) => tracing::warn!(error = %e, "orphan agent-skills sweep failed (non-fatal)"),
-    }
-}
-
-/// Build the default `AssistantRouterState` from application services.
-///
-/// Loads the built-in assistant manifest from
-/// `{exe_dir}/assets/builtin-assistants/` (or dev fallback), constructs
-/// the user-data repositories, and assembles the full `AssistantService`.
-pub fn build_assistant_state(
-    services: &AppServices,
-    extension_registry: ExtensionRegistry,
-) -> AssistantRouterState {
-    let pool = services.database.pool().clone();
-    let repo: Arc<dyn IAssistantRepository> =
-        Arc::new(SqliteAssistantRepository::new(pool.clone()));
-    let override_repo: Arc<dyn IAssistantOverrideRepository> =
-        Arc::new(SqliteAssistantOverrideRepository::new(pool));
-    let builtin = Arc::new(BuiltinAssistantRegistry::load());
-    let service = Arc::new(AssistantService::new(
-        repo,
-        override_repo,
-        builtin,
-        extension_registry,
-    ));
-    AssistantRouterState { service }
-}
-
-/// Build the default `SystemRouterState` from application services.
-///
-/// Tests can call this and override individual fields before passing
-/// to [`create_router_with_states`].
-pub fn build_system_state(services: &AppServices) -> SystemRouterState {
-    let encryption_key = derive_encryption_key(&services.jwt_secret_raw);
-    let pool = services.database.pool().clone();
-    let provider_repo = Arc::new(SqliteProviderRepository::new(pool.clone()));
-    let http_client = reqwest::Client::new();
-
-    SystemRouterState {
-        settings_service: SettingsService::new(Arc::new(SqliteSettingsRepository::new(
-            pool.clone(),
-        ))),
-        client_pref_service: ClientPrefService::new(Arc::new(
-            SqliteClientPreferenceRepository::new(pool),
-        )),
-        provider_service: ProviderService::new(provider_repo.clone(), encryption_key),
-        model_fetch_service: ModelFetchService::new(
-            provider_repo,
-            encryption_key,
-            http_client.clone(),
-        ),
-        protocol_detection_service: ProtocolDetectionService::new(http_client.clone()),
-        version_check_service: VersionCheckService::new(
-            http_client,
-            env!("CARGO_PKG_VERSION").to_owned(),
-        ),
-    }
-}
-
 /// Create the application router with all routes and global middleware.
 ///
 /// Middleware stack (outermost → innermost):
@@ -444,349 +257,6 @@ pub async fn create_router(services: &AppServices) -> Router {
     create_router_with_states(services, states)
 }
 
-/// Build the default `ConversationRouterState` from application services.
-pub fn build_conversation_state(services: &AppServices) -> ConversationRouterState {
-    let pool = services.database.pool().clone();
-    let repo = Arc::new(SqliteConversationRepository::new(pool));
-    ConversationRouterState {
-        conversation_service: ConversationService::new_with_workspace_root(
-            repo,
-            services.event_bus.clone(),
-            std::path::PathBuf::from(&services.data_dir),
-        ),
-        worker_task_manager: services.worker_task_manager.clone(),
-    }
-}
-
-/// Build the default `RemoteAgentRouterState` from application services.
-pub fn build_remote_agent_state(services: &AppServices) -> RemoteAgentRouterState {
-    let encryption_key = derive_encryption_key(&services.jwt_secret_raw);
-    let pool = services.database.pool().clone();
-    let repo = Arc::new(SqliteRemoteAgentRepository::new(pool));
-    RemoteAgentRouterState {
-        service: RemoteAgentService::new(repo, encryption_key),
-    }
-}
-
-/// Build the default `AcpRouterState` from application services.
-pub fn build_acp_state(services: &AppServices) -> AcpRouterState {
-    AcpRouterState {
-        worker_task_manager: services.worker_task_manager.clone(),
-    }
-}
-
-/// Build the default `ConnectionTestRouterState`.
-pub fn build_connection_test_state() -> ConnectionTestRouterState {
-    ConnectionTestRouterState {
-        service: ConnectionTestService::new(reqwest::Client::new()),
-    }
-}
-
-/// Build the default `AuxiliaryRouterState` from application services.
-pub fn build_auxiliary_state(services: &AppServices) -> AuxiliaryRouterState {
-    let pool = services.database.pool().clone();
-    let conversation_repo = Arc::new(SqliteConversationRepository::new(pool));
-    AuxiliaryRouterState {
-        worker_task_manager: services.worker_task_manager.clone(),
-        conversation_repo,
-    }
-}
-
-/// Build the default `FileRouterState` from application services.
-pub fn build_file_state(services: &AppServices) -> FileRouterState {
-    let broadcaster = services.event_bus.clone();
-    let allowed_roots = vec![
-        std::env::temp_dir(),
-        dirs::home_dir().unwrap_or_else(std::env::temp_dir),
-    ];
-    let file_service = Arc::new(FileService::new(broadcaster.clone(), allowed_roots));
-    let watch_service =
-        Arc::new(FileWatchService::new(broadcaster).expect("file watch service initialization"));
-    let snapshot_service = Arc::new(SnapshotService::new());
-    FileRouterState {
-        file_service,
-        watch_service,
-        snapshot_service,
-    }
-}
-
-/// Build the default `McpRouterState` from application services.
-pub fn build_mcp_state(services: &AppServices) -> McpRouterState {
-    let pool = services.database.pool().clone();
-    let repo: Arc<dyn aionui_db::IMcpServerRepository> =
-        Arc::new(aionui_db::SqliteMcpServerRepository::new(pool));
-
-    let adapters: Vec<Arc<dyn McpAgentAdapter>> = vec![
-        Arc::new(ClaudeAdapter),
-        Arc::new(GeminiAdapter),
-        Arc::new(QwenAdapter),
-        Arc::new(CodexAdapter),
-        Arc::new(CodeBuddyAdapter),
-        Arc::new(OpencodeAdapter),
-        Arc::new(AionrsAdapter),
-        Arc::new(AionuiAdapter::new(repo.clone())),
-    ];
-
-    let oauth_token_repo: Arc<dyn aionui_db::IOAuthTokenRepository> = Arc::new(
-        aionui_db::SqliteOAuthTokenRepository::new(services.database.pool().clone()),
-    );
-    let http_client = reqwest::Client::new();
-
-    McpRouterState {
-        config_service: McpConfigService::new(repo.clone()),
-        sync_service: McpSyncService::new(repo, adapters),
-        connection_test_service: McpConnectionTestService::new(http_client.clone()),
-        oauth_service: aionui_mcp::McpOAuthService::new(oauth_token_repo, http_client),
-    }
-}
-
-/// Build the default `ChannelRouterState` from application services.
-pub fn build_channel_state(services: &AppServices) -> ChannelRouterState {
-    let pool = services.database.pool().clone();
-    let repo: Arc<dyn aionui_db::IChannelRepository> =
-        Arc::new(aionui_db::SqliteChannelRepository::new(pool));
-    let encryption_key = derive_encryption_key(&services.jwt_secret_raw);
-
-    let (message_tx, _message_rx) = tokio::sync::mpsc::channel(256);
-    let (confirm_tx, _confirm_rx) = tokio::sync::mpsc::channel(256);
-
-    let manager = Arc::new(aionui_channel::manager::ChannelManager::new(
-        repo.clone(),
-        services.event_bus.clone(),
-        encryption_key,
-        message_tx,
-        confirm_tx,
-    ));
-
-    let pairing_service = Arc::new(aionui_channel::pairing::PairingService::new(
-        repo.clone(),
-        services.event_bus.clone(),
-    ));
-
-    let session_manager = Arc::new(aionui_channel::session::SessionManager::new(repo.clone()));
-
-    let plugin_factory: Arc<aionui_channel::manager::PluginFactory> =
-        Arc::new(Box::new(aionui_channel::plugins::create_plugin));
-
-    ChannelRouterState {
-        manager,
-        pairing_service,
-        session_manager,
-        repo,
-        plugin_factory,
-    }
-}
-
-/// Build the default `TeamRouterState` from application services.
-pub fn build_team_state(services: &AppServices) -> TeamRouterState {
-    let pool = services.database.pool().clone();
-    let team_repo: Arc<dyn aionui_db::ITeamRepository> =
-        Arc::new(aionui_db::SqliteTeamRepository::new(pool.clone()));
-    let conv_repo: Arc<dyn aionui_db::IConversationRepository> =
-        Arc::new(SqliteConversationRepository::new(pool));
-    let conv_service = ConversationService::new_with_workspace_root(
-        conv_repo,
-        services.event_bus.clone(),
-        std::path::PathBuf::from(&services.data_dir),
-    );
-    let service = Arc::new(TeamSessionService::new(
-        team_repo,
-        conv_service,
-        services.event_bus.clone(),
-    ));
-    TeamRouterState { service }
-}
-
-/// Build the default `CronRouterState` from application services.
-pub fn build_cron_state(services: &AppServices) -> CronRouterState {
-    let pool = services.database.pool().clone();
-    let cron_repo: Arc<dyn aionui_db::ICronRepository> =
-        Arc::new(aionui_db::SqliteCronRepository::new(pool.clone()));
-
-    let conv_repo: Arc<dyn aionui_db::IConversationRepository> =
-        Arc::new(SqliteConversationRepository::new(pool));
-    let conv_service = ConversationService::new_with_workspace_root(
-        conv_repo.clone(),
-        services.event_bus.clone(),
-        std::path::PathBuf::from(&services.data_dir),
-    );
-
-    let busy_guard = Arc::new(aionui_cron::busy_guard::CronBusyGuard::new());
-    let executor = Arc::new(aionui_cron::executor::JobExecutor::new(
-        services.worker_task_manager.clone(),
-        conv_repo,
-        Arc::new(conv_service.clone()),
-        busy_guard,
-    ));
-
-    let tick_service_ref: Arc<CronServiceTickRef> = Arc::new(CronServiceTickRef::default());
-    let tick_ref = tick_service_ref.clone();
-    let scheduler = Arc::new(aionui_cron::scheduler::CronScheduler::new(Arc::new(
-        move |job_id: String| {
-            let svc = tick_ref.0.lock().unwrap().clone();
-            tokio::spawn(async move {
-                if let Some(svc) = svc {
-                    svc.tick(&job_id).await;
-                }
-            });
-        },
-    )));
-
-    let emitter = CronEventEmitter::new(services.event_bus.clone());
-    let cron_service = Arc::new(aionui_cron::service::CronService::new(
-        cron_repo, scheduler, executor, emitter,
-    ));
-
-    tick_service_ref
-        .0
-        .lock()
-        .unwrap()
-        .replace(cron_service.clone());
-
-    CronRouterState {
-        cron_service,
-        conversation_service: conv_service,
-    }
-}
-
-/// Build the default `OfficeRouterState` from application services.
-pub fn build_office_state(services: &AppServices) -> OfficeRouterState {
-    let data_dir = std::path::Path::new(&services.data_dir);
-
-    let spawner: Arc<dyn aionui_office::ProcessSpawner> =
-        Arc::new(aionui_office::DefaultProcessSpawner);
-    let watch_manager = Arc::new(OfficecliWatchManager::new(
-        spawner,
-        services.event_bus.clone(),
-    ));
-
-    let snapshot_service = Arc::new(OfficeSnapshotService::new(data_dir));
-    let star_office_detector = Arc::new(StarOfficeDetector::new(reqwest::Client::new()));
-    let conversion_service = Arc::new(ConversionService::new(None));
-    let proxy_service = Arc::new(ProxyService::new(watch_manager.clone()));
-
-    OfficeRouterState {
-        watch_manager,
-        snapshot_service,
-        star_office_detector,
-        conversion_service,
-        proxy_service,
-    }
-}
-
-/// Build the default `ShellRouterState` from application services.
-pub fn build_shell_state(services: &AppServices) -> ShellRouterState {
-    let pool = services.database.pool().clone();
-    let client_pref_repo = Arc::new(SqliteClientPreferenceRepository::new(pool));
-    let client_pref_service = ClientPrefService::new(client_pref_repo);
-
-    ShellRouterState {
-        shell_service: Arc::new(aionui_shell::ShellService::new(Arc::new(
-            aionui_shell::DefaultSystemOpener,
-        ))),
-        stt_service: Arc::new(aionui_shell::SttService::new(reqwest::Client::new())),
-        client_pref_service,
-    }
-}
-
-/// Helper to break the circular reference between CronScheduler and CronService.
-///
-/// The scheduler's tick callback needs to call `CronService::tick()`, but
-/// `CronService` owns the scheduler. We use a `Mutex<Option<Arc<CronService>>>`
-/// that gets populated after both are constructed.
-#[derive(Default)]
-struct CronServiceTickRef(std::sync::Mutex<Option<Arc<aionui_cron::service::CronService>>>);
-
-/// Build the default extension-related router states.
-///
-/// Returns `(ExtensionRouterState, HubRouterState, SkillRouterState)`.
-pub async fn build_extension_states(
-    services: &AppServices,
-) -> (ExtensionRouterState, HubRouterState, SkillRouterState) {
-    // Extension state, hub index, and external skill paths continue to live
-    // under `~/.aionui/` (carried over from the pre-migration layout).
-    let legacy_home_dir = dirs::home_dir()
-        .unwrap_or_else(std::env::temp_dir)
-        .join(".aionui");
-
-    // Skill paths honor the `--data-dir` CLI flag so the new
-    // `{data_dir}/agent-skills/` and `{data_dir}/builtin-skills-view/`
-    // directories land inside whatever root the operator picked.
-    let skill_data_dir = std::path::PathBuf::from(&services.data_dir);
-
-    let state_store = ExtensionStateStore::new(legacy_home_dir.join("extension-states.json"));
-    let registry = ExtensionRegistry::new(
-        state_store,
-        services.event_bus.clone(),
-        env!("CARGO_PKG_VERSION").to_string(),
-    );
-
-    let hub_dir = legacy_home_dir.join("extensions");
-    let index_manager = HubIndexManager::new(hub_dir, registry.clone());
-    let installer = HubInstaller::new(index_manager.clone(), registry.clone());
-
-    // Skill paths: use app resource dir (binary's parent) for built-in
-    // rules. Canonicalize current_exe so a cargo-install symlink doesn't
-    // point the resource root at `~/.cargo/bin/` (assistant H1 lesson).
-    let app_resource_dir = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.canonicalize().ok())
-        .and_then(|p| p.parent().map(|pp| pp.to_path_buf()))
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
-    let skill_paths = aionui_extension::resolve_skill_paths(&app_resource_dir, &skill_data_dir);
-
-    let ext_paths_mgr = Arc::new(ExternalPathsManager::new(&legacy_home_dir).await);
-
-    let ext_state = ExtensionRouterState {
-        registry: registry.clone(),
-    };
-
-    let hub_state = HubRouterState {
-        index_manager,
-        installer,
-    };
-
-    let skill_state = SkillRouterState {
-        skill_paths,
-        external_paths_manager: ext_paths_mgr,
-        // Wired in `build_module_states` once the AssistantService is built
-        // (the service implements `AssistantRuleDispatcher`).
-        assistant_dispatcher: None,
-    };
-
-    (ext_state, hub_state, skill_state)
-}
-
-/// Build the default `WsHandlerState` from application services.
-///
-/// Tests can call this and override individual fields before passing
-/// to [`create_router_with_ws_state`].
-pub fn build_ws_state(services: &AppServices) -> WsHandlerState {
-    if services.local {
-        // Local mode: skip authentication for WebSocket connections.
-        // Consistent with HTTP routes which also bypass auth in local mode.
-        return WsHandlerState {
-            manager: services.ws_manager.clone(),
-            router: Arc::new(NoopMessageRouter),
-            token_validator: Arc::new(|_| true),
-            token_extractor: Arc::new(|_| Some("local".into())),
-        };
-    }
-
-    let jwt_service = services.jwt_service.clone();
-    let token_validator = Arc::new(move |token: &str| jwt_service.verify(token).is_ok());
-
-    let token_extractor =
-        Arc::new(|headers: &axum::http::HeaderMap| extract_token_from_ws_headers(headers));
-
-    WsHandlerState {
-        manager: services.ws_manager.clone(),
-        router: Arc::new(NoopMessageRouter),
-        token_validator,
-        token_extractor,
-    }
-}
-
 /// Create the application router with custom module states.
 ///
 /// Used for testing when specific service overrides are needed
@@ -794,6 +264,45 @@ pub fn build_ws_state(services: &AppServices) -> WsHandlerState {
 pub fn create_router_with_states(services: &AppServices, states: ModuleStates) -> Router {
     let ws_state = build_ws_state(services);
     create_router_with_all_state(services, states, ws_state)
+}
+
+fn with_access_log(router: Router) -> Router {
+    router.layer(
+        TraceLayer::new_for_http()
+            .make_span_with(|req: &axum::http::Request<_>| {
+                tracing::info_span!(
+                    "http",
+                    method = %req.method(),
+                    path = %req.uri().path(),
+                )
+            })
+            .on_response(
+                |res: &axum::http::Response<_>,
+                 latency: std::time::Duration,
+                 _span: &tracing::Span| {
+                    let status = res.status().as_u16();
+                    let latency_ms = latency.as_millis() as u64;
+                    if status >= 500 {
+                        tracing::error!(status, latency_ms, "response");
+                    } else if status >= 400 {
+                        tracing::warn!(status, latency_ms, "response");
+                    } else {
+                        tracing::info!(status, latency_ms, "response");
+                    }
+                },
+            )
+            .on_failure(
+                |error: tower_http::classify::ServerErrorsFailureClass,
+                 latency: std::time::Duration,
+                 _span: &tracing::Span| {
+                    tracing::error!(
+                        %error,
+                        latency_ms = latency.as_millis() as u64,
+                        "request failed"
+                    );
+                },
+            ),
+    )
 }
 
 /// Create the application router with custom module states and WebSocket state.
@@ -940,6 +449,8 @@ pub fn create_router_with_all_state(
     .merge(ws_routes)
     .merge(office_proxy)
     .layer(middleware::from_fn(security_headers_middleware));
+
+    let router = with_access_log(router);
 
     if services.local {
         let cors = CorsLayer::new()

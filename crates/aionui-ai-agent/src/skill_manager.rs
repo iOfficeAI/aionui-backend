@@ -94,16 +94,15 @@ impl AcpSkillManager {
             let keep = match item.source {
                 aionui_extension::SkillSource::Builtin => {
                     if is_auto_inject {
-                        !exclude_builtin_skills
-                            .is_some_and(|ex| ex.iter().any(|n| n == &item.name))
+                        !exclude_builtin_skills.is_some_and(|ex| ex.iter().any(|n| n == &item.name))
                     } else {
-                        enabled_skills
-                            .is_some_and(|en| en.iter().any(|n| n == &item.name))
+                        enabled_skills.is_some_and(|en| en.iter().any(|n| n == &item.name))
                     }
                 }
                 aionui_extension::SkillSource::Custom
-                | aionui_extension::SkillSource::Extension => enabled_skills
-                    .is_some_and(|en| en.iter().any(|n| n == &item.name)),
+                | aionui_extension::SkillSource::Extension => {
+                    enabled_skills.is_some_and(|en| en.iter().any(|n| n == &item.name))
+                }
             };
             if !keep {
                 continue;
@@ -628,9 +627,10 @@ mod tests {
     #[tokio::test]
     async fn get_skill_unknown_returns_none() {
         let tmp = TempDir::new().unwrap();
-        let mgr = AcpSkillManager::new(std::sync::Arc::new(
-            aionui_extension::resolve_skill_paths(tmp.path(), tmp.path()),
-        ));
+        let mgr = AcpSkillManager::new(std::sync::Arc::new(aionui_extension::resolve_skill_paths(
+            tmp.path(),
+            tmp.path(),
+        )));
         assert!(mgr.get_skill("nonexistent").await.is_none());
     }
 }
