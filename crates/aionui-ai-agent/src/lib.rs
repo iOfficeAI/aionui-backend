@@ -15,6 +15,7 @@ pub mod cli_process;
 pub mod connection_test_routes;
 pub mod connection_test_service;
 pub mod factory;
+pub mod first_message_injector;
 pub mod gemini_agent;
 pub mod idle_scanner;
 pub mod middleware;
