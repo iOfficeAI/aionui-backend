@@ -45,8 +45,8 @@ use aionui_extension::{
 use aionui_file::{FileRouterState, FileService, FileWatchService, SnapshotService, file_routes};
 use aionui_mcp::{
     AionrsAdapter, AionuiAdapter, ClaudeAdapter, CodeBuddyAdapter, CodexAdapter, GeminiAdapter,
-    IFlowAdapter, McpAgentAdapter, McpConfigService, McpConnectionTestService, McpRouterState,
-    McpSyncService, OpencodeAdapter, QwenAdapter, mcp_routes,
+    McpAgentAdapter, McpConfigService, McpConnectionTestService, McpRouterState, McpSyncService,
+    OpencodeAdapter, QwenAdapter, mcp_routes,
 };
 use aionui_office::{
     ConversionService, OfficeRouterState, OfficecliWatchManager, ProxyService,
@@ -499,7 +499,6 @@ pub fn build_mcp_state(services: &AppServices) -> McpRouterState {
         Arc::new(ClaudeAdapter),
         Arc::new(GeminiAdapter),
         Arc::new(QwenAdapter),
-        Arc::new(IFlowAdapter),
         Arc::new(CodexAdapter),
         Arc::new(CodeBuddyAdapter),
         Arc::new(OpencodeAdapter),
