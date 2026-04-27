@@ -34,6 +34,15 @@ pub enum AppError {
 
     #[error("Unprocessable entity: {0}")]
     UnprocessableEntity(String),
+
+    /// The conversation exists but is archived and cannot be operated on.
+    /// Example: legacy Gemini runtime conversations after the runtime was
+    /// removed — the row stays readable (list + history) but send_message /
+    /// resume should 410 Gone with this code so the client renders a
+    /// dedicated "this conversation is archived" UI instead of a generic
+    /// bad-request banner.
+    #[error("Conversation archived: {0}")]
+    ConversationArchived(String),
 }
 
 /// Internal error response body matching the `ErrorResponse` format from `aionui-api-types`.
@@ -58,6 +67,7 @@ impl AppError {
             Self::BadGateway(_) => StatusCode::BAD_GATEWAY,
             Self::Timeout(_) => StatusCode::BAD_GATEWAY,
             Self::UnprocessableEntity(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            Self::ConversationArchived(_) => StatusCode::GONE,
         }
     }
 
@@ -74,6 +84,7 @@ impl AppError {
             Self::BadGateway(_) => "BAD_GATEWAY",
             Self::Timeout(_) => "TIMEOUT",
             Self::UnprocessableEntity(_) => "UNPROCESSABLE_ENTITY",
+            Self::ConversationArchived(_) => "CONVERSATION_ARCHIVED",
         }
     }
 }

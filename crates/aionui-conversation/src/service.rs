@@ -558,12 +558,14 @@ impl ConversationService {
 
         // Short-circuit for legacy Gemini conversations: the dedicated Gemini
         // runtime has been removed, so we cannot build an agent for this row.
-        // Return a clean BadRequest without touching the legacy `model` column,
-        // which may hold shapes the new parser can't deserialize.
+        // Emit CONVERSATION_ARCHIVED (HTTP 410 Gone) without touching the
+        // legacy `model` column, which may hold shapes the new parser can't
+        // deserialize. The client identifies this case by `code` and renders
+        // a dedicated archived-conversation UI rather than a generic banner.
         if row.r#type == "gemini" {
-            return Err(AppError::BadRequest(
-                "This is a legacy Gemini conversation. The dedicated Gemini runtime has been \
-                 removed; please create a new conversation with the Gemini ACP backend to continue."
+            return Err(AppError::ConversationArchived(
+                "This conversation was created with the legacy Gemini runtime, which has been \
+                 removed. Please start a new conversation with the Gemini ACP backend to continue."
                     .into(),
             ));
         }

@@ -79,9 +79,9 @@ async fn build_agent(
     };
 
     match options.agent_type {
-        AgentType::Gemini => Err(AppError::BadRequest(
-            "This is a legacy Gemini conversation. The dedicated Gemini runtime has been \
-             removed; please create a new conversation with the Gemini ACP backend to continue."
+        AgentType::Gemini => Err(AppError::ConversationArchived(
+            "This conversation was created with the legacy Gemini runtime, which has been \
+             removed. Please start a new conversation with the Gemini ACP backend to continue."
                 .into(),
         )),
         AgentType::Acp => {
