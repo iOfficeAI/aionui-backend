@@ -42,6 +42,12 @@ pub enum AgentStreamEvent {
     CronTrigger(CronTriggerEventData),
     /// ACP model info update.
     AcpModelInfo(serde_json::Value),
+    /// ACP current session mode update.
+    AcpModeInfo(serde_json::Value),
+    /// ACP session config option update.
+    AcpConfigOption(serde_json::Value),
+    /// ACP session info update (title / timestamps / metadata).
+    AcpSessionInfo(serde_json::Value),
     /// ACP context usage info.
     AcpContextUsage(serde_json::Value),
     /// Response finished.
@@ -278,22 +284,29 @@ pub fn session_notification_to_events(notif: &SessionNotification) -> Vec<AgentS
             ));
         }
 
-        SessionUpdate::CurrentModeUpdate(_update) => {
-            // Mode changes are tracked internally by acp_agent.rs.
-            // The frontend receives mode info through the mode API endpoint.
-            debug!("SessionUpdate::CurrentModeUpdate received, not forwarded to event stream");
+        SessionUpdate::CurrentModeUpdate(update) => {
+            events.push(AgentStreamEvent::AcpModeInfo(
+                serde_json::to_value(update).unwrap_or_default(),
+            ));
         }
 
-        SessionUpdate::ConfigOptionUpdate(_update) => {
-            // Config changes are tracked internally.
-            debug!("SessionUpdate::ConfigOptionUpdate received, not forwarded to event stream");
+        SessionUpdate::ConfigOptionUpdate(update) => {
+            events.push(AgentStreamEvent::AcpConfigOption(
+                serde_json::to_value(update).unwrap_or_default(),
+            ));
         }
 
-        SessionUpdate::SessionInfoUpdate(_update) => {
-            // Session info updates (title changes etc.) are not forwarded.
-            debug!("SessionUpdate::SessionInfoUpdate received, not forwarded to event stream");
+        SessionUpdate::SessionInfoUpdate(update) => {
+            events.push(AgentStreamEvent::AcpSessionInfo(
+                serde_json::to_value(update).unwrap_or_default(),
+            ));
         }
 
+        SessionUpdate::UsageUpdate(update) => {
+            events.push(AgentStreamEvent::AcpContextUsage(
+                serde_json::to_value(update).unwrap_or_default(),
+            ));
+        }
         // Future SDK variants or feature-gated variants — log and skip.
         _ => {
             debug!("Unknown SessionUpdate variant received, skipping");
