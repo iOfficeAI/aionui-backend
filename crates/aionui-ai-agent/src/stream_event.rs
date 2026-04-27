@@ -1,7 +1,13 @@
 use agent_client_protocol::schema::{
-    ContentBlock, SessionNotification, SessionUpdate, ToolCallStatus as SdkToolCallStatus,
+    ContentBlock, Meta as SdkMeta, PermissionOption,
+    PermissionOptionKind as SdkPermissionOptionKind, RequestPermissionRequest, SessionNotification,
+    SessionUpdate, ToolCallContent as SdkToolCallContent, ToolCallLocation as SdkToolCallLocation,
+    ToolCallStatus as SdkToolCallStatus, ToolCallUpdate as SdkToolCallUpdate,
+    ToolKind as SdkToolKind,
 };
+use aionui_common::{Confirmation, ConfirmationOption};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tracing::debug;
 
 /// Events emitted by an Agent during a message processing turn.
@@ -18,8 +24,12 @@ pub enum AgentStreamEvent {
     Text(TextEventData),
     /// Tip / notification (error, success, warning).
     Tips(TipsEventData),
+
     /// Single tool call status update.
     ToolCall(ToolCallEventData),
+    /// ACP tool call progress.
+    AcpToolCall(AcpToolCallEventData),
+
     /// Group of tool calls.
     ToolGroup(Vec<ToolGroupEntry>),
     /// Agent status change (backend, status, session info).
@@ -28,18 +38,13 @@ pub enum AgentStreamEvent {
     Thinking(ThinkingEventData),
     /// Execution plan.
     Plan(PlanEventData),
-    /// Tool permission request (approval confirmation).
-    Permission(serde_json::Value),
-    /// ACP tool call progress.
-    AcpToolCall(serde_json::Value),
-    /// Codex tool call progress.
-    CodexToolCall(serde_json::Value),
-    /// Available slash commands update.
-    AvailableCommands(AvailableCommandsEventData),
+    /// ACP permission request (tool approval).
+    AcpPermission(AcpPermissionEventData),
     /// Skill suggestion from cron job.
     SkillSuggest(SkillSuggestEventData),
     /// Cron trigger notification.
     CronTrigger(CronTriggerEventData),
+
     /// ACP model info update.
     AcpModelInfo(serde_json::Value),
     /// ACP current session mode update.
@@ -50,6 +55,12 @@ pub enum AgentStreamEvent {
     AcpSessionInfo(serde_json::Value),
     /// ACP context usage info.
     AcpContextUsage(serde_json::Value),
+
+    /// Slash commands updated notification.
+    SlashCommandsUpdated(serde_json::Value),
+    /// Available slash commands update.
+    AvailableCommands(AvailableCommandsEventData),
+
     /// Response finished.
     Finish(FinishEventData),
     /// Error during processing.
@@ -58,8 +69,6 @@ pub enum AgentStreamEvent {
     System(serde_json::Value),
     /// Raw request trace (ACP debug info).
     RequestTrace(serde_json::Value),
-    /// Slash commands updated notification.
-    SlashCommandsUpdated(serde_json::Value),
 }
 
 /// Data for the `Start` event.
@@ -104,6 +113,91 @@ pub struct ToolCallEventData {
     #[serde(default)]
     pub args: serde_json::Value,
     pub status: ToolCallStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AcpToolCallEventData {
+    pub session_id: String,
+    pub update: AcpToolCallUpdateData,
+    #[serde(rename = "_meta", skip_serializing_if = "Option::is_none")]
+    pub meta: Option<SdkMeta>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AcpToolCallUpdateData {
+    #[serde(rename = "sessionUpdate")]
+    pub session_update: AcpToolCallSessionUpdateKind,
+    pub tool_call_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<AcpToolCallStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<AcpToolCallKind>,
+    #[serde(rename = "rawInput", skip_serializing_if = "Option::is_none")]
+    pub raw_input: Option<Value>,
+    #[serde(rename = "rawOutput", skip_serializing_if = "Option::is_none")]
+    pub raw_output: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<Vec<AcpToolCallContentItem>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub locations: Option<Vec<AcpToolCallLocationItem>>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AcpToolCallSessionUpdateKind {
+    ToolCall,
+    ToolCallUpdate,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AcpToolCallStatus {
+    Pending,
+    InProgress,
+    Completed,
+    Failed,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AcpToolCallKind {
+    Read,
+    Edit,
+    Execute,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AcpToolCallContentItem {
+    Content {
+        content: AcpToolCallTextBlock,
+    },
+    Diff {
+        path: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        old_text: Option<String>,
+        new_text: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AcpToolCallTextBlock {
+    #[serde(rename = "type")]
+    pub block_type: AcpToolCallTextBlockType,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AcpToolCallTextBlockType {
+    Text,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AcpToolCallLocationItem {
+    pub path: String,
 }
 
 /// Status of a tool call.
@@ -234,28 +328,46 @@ pub fn session_notification_to_events(notif: &SessionNotification) -> Vec<AgentS
         }
 
         SessionUpdate::ToolCall(tc) => {
-            let status = map_sdk_tool_status(&tc.status);
-            events.push(AgentStreamEvent::ToolCall(ToolCallEventData {
-                call_id: tc.tool_call_id.to_string(),
-                name: tc.title.clone(),
-                args: tc.raw_input.clone().unwrap_or_default(),
-                status,
+            events.push(AgentStreamEvent::AcpToolCall(AcpToolCallEventData {
+                session_id: session_id.into(),
+                update: AcpToolCallUpdateData {
+                    session_update: AcpToolCallSessionUpdateKind::ToolCall,
+                    tool_call_id: tc.tool_call_id.to_string(),
+                    status: Some(map_sdk_tool_status(&tc.status)),
+                    title: Some(tc.title.clone()),
+                    kind: Some(map_sdk_tool_kind(&tc.kind)),
+                    raw_input: tc.raw_input.clone(),
+                    raw_output: None,
+                    content: map_tool_call_content(&tc.content),
+                    locations: map_tool_call_locations(&tc.locations),
+                },
+                meta: tc.meta.clone(),
             }));
         }
 
         SessionUpdate::ToolCallUpdate(tcu) => {
-            let status = tcu
-                .fields
-                .status
-                .as_ref()
-                .map(map_sdk_tool_status)
-                .unwrap_or(ToolCallStatus::Running);
-
-            events.push(AgentStreamEvent::ToolCall(ToolCallEventData {
-                call_id: tcu.tool_call_id.to_string(),
-                name: tcu.fields.title.clone().unwrap_or_default(),
-                args: tcu.fields.raw_input.clone().unwrap_or_default(),
-                status,
+            events.push(AgentStreamEvent::AcpToolCall(AcpToolCallEventData {
+                session_id: session_id.into(),
+                update: AcpToolCallUpdateData {
+                    session_update: AcpToolCallSessionUpdateKind::ToolCallUpdate,
+                    tool_call_id: tcu.tool_call_id.to_string(),
+                    status: tcu.fields.status.as_ref().map(map_sdk_tool_status),
+                    title: tcu.fields.title.clone(),
+                    kind: tcu.fields.kind.as_ref().map(map_sdk_tool_kind),
+                    raw_input: tcu.fields.raw_input.clone(),
+                    raw_output: tcu.fields.raw_output.clone(),
+                    content: tcu
+                        .fields
+                        .content
+                        .as_ref()
+                        .and_then(|content| map_tool_call_content(content)),
+                    locations: tcu
+                        .fields
+                        .locations
+                        .as_ref()
+                        .and_then(|locations| map_tool_call_locations(locations)),
+                },
+                meta: tcu.meta.clone(),
             }));
         }
 
@@ -316,20 +428,76 @@ pub fn session_notification_to_events(notif: &SessionNotification) -> Vec<AgentS
     events
 }
 
-/// Map SDK [`ToolCallStatus`](SdkToolCallStatus) to our [`ToolCallStatus`].
-fn map_sdk_tool_status(sdk: &SdkToolCallStatus) -> ToolCallStatus {
+fn map_sdk_tool_status(sdk: &SdkToolCallStatus) -> AcpToolCallStatus {
     match sdk {
-        SdkToolCallStatus::Pending | SdkToolCallStatus::InProgress => ToolCallStatus::Running,
-        SdkToolCallStatus::Completed => ToolCallStatus::Completed,
-        SdkToolCallStatus::Failed => ToolCallStatus::Error,
-        // Future SDK variants — default to Running
-        _ => ToolCallStatus::Running,
+        SdkToolCallStatus::Pending => AcpToolCallStatus::Pending,
+        SdkToolCallStatus::InProgress => AcpToolCallStatus::InProgress,
+        SdkToolCallStatus::Completed => AcpToolCallStatus::Completed,
+        SdkToolCallStatus::Failed => AcpToolCallStatus::Failed,
+        _ => AcpToolCallStatus::Pending,
     }
+}
+
+fn map_sdk_tool_kind(kind: &SdkToolKind) -> AcpToolCallKind {
+    match kind {
+        SdkToolKind::Read | SdkToolKind::Search => AcpToolCallKind::Read,
+        SdkToolKind::Edit | SdkToolKind::Delete | SdkToolKind::Move => AcpToolCallKind::Edit,
+        SdkToolKind::Execute
+        | SdkToolKind::Think
+        | SdkToolKind::Fetch
+        | SdkToolKind::SwitchMode
+        | SdkToolKind::Other
+        | _ => AcpToolCallKind::Execute,
+    }
+}
+
+fn map_tool_call_content(content: &[SdkToolCallContent]) -> Option<Vec<AcpToolCallContentItem>> {
+    let items: Vec<AcpToolCallContentItem> = content
+        .iter()
+        .filter_map(|item| match item {
+            SdkToolCallContent::Content(content) => match &content.content {
+                ContentBlock::Text(text) => Some(AcpToolCallContentItem::Content {
+                    content: AcpToolCallTextBlock {
+                        block_type: AcpToolCallTextBlockType::Text,
+                        text: text.text.clone(),
+                    },
+                }),
+                _ => None,
+            },
+            SdkToolCallContent::Diff(diff) => Some(AcpToolCallContentItem::Diff {
+                path: diff.path.to_string_lossy().into_owned(),
+                old_text: diff.old_text.clone(),
+                new_text: diff.new_text.clone(),
+            }),
+            SdkToolCallContent::Terminal(_) => None,
+            _ => None,
+        })
+        .collect();
+
+    if items.is_empty() { None } else { Some(items) }
+}
+
+fn map_tool_call_locations(
+    locations: &[SdkToolCallLocation],
+) -> Option<Vec<AcpToolCallLocationItem>> {
+    (!locations.is_empty()).then(|| {
+        locations
+            .iter()
+            .map(|loc| AcpToolCallLocationItem {
+                path: loc.path.to_string_lossy().into_owned(),
+            })
+            .collect()
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent_client_protocol::schema::{
+        SessionNotification, SessionUpdate, ToolCall as SdkToolCall,
+        ToolCallStatus as SdkToolCallStatus, ToolCallUpdate as SdkToolCallUpdate,
+        ToolCallUpdateFields, ToolKind as SdkToolKind,
+    };
     use serde_json::json;
 
     #[test]
@@ -438,6 +606,51 @@ mod tests {
         let json = serde_json::to_value(&event).unwrap();
         assert_eq!(json["type"], "agent_status");
         assert_eq!(json["data"]["backend"], "claude");
+    }
+
+    #[test]
+    fn session_tool_call_maps_to_acp_tool_call_event() {
+        let notif = SessionNotification::new(
+            "sess-1",
+            SessionUpdate::ToolCall(
+                SdkToolCall::new("tool-1", "Terminal")
+                    .kind(SdkToolKind::Execute)
+                    .status(SdkToolCallStatus::Pending)
+                    .raw_input(json!({ "command": "echo hi" })),
+            ),
+        );
+
+        let events = session_notification_to_events(&notif);
+        assert_eq!(events.len(), 1);
+        let json = serde_json::to_value(&events[0]).unwrap();
+        assert_eq!(json["type"], "acp_tool_call");
+        assert_eq!(json["data"]["session_id"], "sess-1");
+        assert_eq!(json["data"]["update"]["sessionUpdate"], "tool_call");
+        assert_eq!(json["data"]["update"]["tool_call_id"], "tool-1");
+        assert_eq!(json["data"]["update"]["title"], "Terminal");
+        assert_eq!(json["data"]["update"]["kind"], "execute");
+        assert_eq!(json["data"]["update"]["rawInput"]["command"], "echo hi");
+    }
+
+    #[test]
+    fn session_tool_call_update_omits_missing_fields_for_frontend_merge() {
+        let notif = SessionNotification::new(
+            "sess-1",
+            SessionUpdate::ToolCallUpdate(SdkToolCallUpdate::new(
+                "tool-1",
+                ToolCallUpdateFields::new().status(SdkToolCallStatus::Completed),
+            )),
+        );
+
+        let events = session_notification_to_events(&notif);
+        assert_eq!(events.len(), 1);
+        let json = serde_json::to_value(&events[0]).unwrap();
+        assert_eq!(json["type"], "acp_tool_call");
+        assert_eq!(json["data"]["update"]["sessionUpdate"], "tool_call_update");
+        assert_eq!(json["data"]["update"]["tool_call_id"], "tool-1");
+        assert_eq!(json["data"]["update"]["status"], "completed");
+        assert!(json["data"]["update"].get("title").is_none());
+        assert!(json["data"]["update"].get("rawInput").is_none());
     }
 
     #[test]
