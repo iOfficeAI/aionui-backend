@@ -97,6 +97,9 @@ pub struct AppServices {
     pub data_dir: String,
     /// When `true`, skip JWT authentication and use a fixed default user.
     pub local: bool,
+    /// Resolved skill paths. Shared with the `ConversationService` for
+    /// snapshot resolution at create time.
+    pub skill_paths: Arc<aionui_extension::SkillPaths>,
 }
 
 impl AppServices {
@@ -190,6 +193,7 @@ impl AppServices {
             jwt_secret_raw: secret,
             data_dir,
             local,
+            skill_paths,
         })
     }
 }

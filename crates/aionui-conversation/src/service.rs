@@ -19,6 +19,7 @@ use tracing::{debug, info, warn};
 use crate::convert::{
     row_to_message_response, row_to_response, search_row_to_item, string_to_enum,
 };
+use crate::skill_resolver::SkillResolver;
 use crate::stream_relay::StreamRelay;
 
 #[async_trait::async_trait]
@@ -32,18 +33,21 @@ pub struct ConversationService {
     broadcaster: Arc<dyn EventBroadcaster>,
     delete_hooks: Vec<Arc<dyn OnConversationDelete>>,
     workspace_root: std::path::PathBuf,
+    skill_resolver: Arc<dyn SkillResolver>,
 }
 
 impl ConversationService {
     pub fn new(
         repo: Arc<dyn IConversationRepository>,
         broadcaster: Arc<dyn EventBroadcaster>,
+        skill_resolver: Arc<dyn SkillResolver>,
     ) -> Self {
         Self {
             repo,
             broadcaster,
             delete_hooks: Vec::new(),
             workspace_root: std::path::PathBuf::from("data"),
+            skill_resolver,
         }
     }
 
@@ -51,12 +55,14 @@ impl ConversationService {
         repo: Arc<dyn IConversationRepository>,
         broadcaster: Arc<dyn EventBroadcaster>,
         workspace_root: std::path::PathBuf,
+        skill_resolver: Arc<dyn SkillResolver>,
     ) -> Self {
         Self {
             repo,
             broadcaster,
             delete_hooks: Vec::new(),
             workspace_root,
+            skill_resolver,
         }
     }
 
@@ -64,12 +70,14 @@ impl ConversationService {
         repo: Arc<dyn IConversationRepository>,
         broadcaster: Arc<dyn EventBroadcaster>,
         delete_hooks: Vec<Arc<dyn OnConversationDelete>>,
+        skill_resolver: Arc<dyn SkillResolver>,
     ) -> Self {
         Self {
             repo,
             broadcaster,
             delete_hooks,
             workspace_root: std::path::PathBuf::from("data"),
+            skill_resolver,
         }
     }
 

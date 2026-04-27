@@ -219,11 +219,20 @@ async fn setup() -> (CronService, Arc<dyn ICronRepository>, Arc<MockBroadcaster>
     let cron_repo: Arc<dyn ICronRepository> = Arc::new(SqliteCronRepository::new(pool));
     let bc = Arc::new(MockBroadcaster::new());
 
+    struct StubSkillResolver;
+    #[async_trait::async_trait]
+    impl aionui_conversation::skill_resolver::SkillResolver for StubSkillResolver {
+        async fn auto_inject_names(&self) -> Vec<String> {
+            Vec::new()
+        }
+    }
+
     let stub_conv_repo: Arc<dyn IConversationRepository> = Arc::new(StubConvRepo);
     let conv_service = Arc::new(ConversationService::new_with_workspace_root(
         Arc::clone(&stub_conv_repo),
         bc.clone() as Arc<dyn EventBroadcaster>,
         std::env::temp_dir(),
+        Arc::new(StubSkillResolver),
     ));
     let busy_guard = Arc::new(CronBusyGuard::new());
     let executor = Arc::new(JobExecutor::new(

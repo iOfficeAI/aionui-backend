@@ -484,6 +484,7 @@ dependencies = [
  "aionui-auth",
  "aionui-common",
  "aionui-db",
+ "aionui-extension",
  "aionui-realtime",
  "async-trait",
  "axum",

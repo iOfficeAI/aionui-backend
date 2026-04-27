@@ -268,6 +268,14 @@ impl ITeamRepository for FullMockTeamRepo {
 // Helpers
 // ---------------------------------------------------------------------------
 
+struct StubSkillResolver;
+#[async_trait::async_trait]
+impl aionui_conversation::skill_resolver::SkillResolver for StubSkillResolver {
+    async fn auto_inject_names(&self) -> Vec<String> {
+        Vec::new()
+    }
+}
+
 fn setup() -> TeamSessionService {
     let team_repo: Arc<dyn ITeamRepository> = Arc::new(FullMockTeamRepo::new());
     let conv_repo: Arc<dyn IConversationRepository> = Arc::new(MockConversationRepo::new());
@@ -276,6 +284,7 @@ fn setup() -> TeamSessionService {
         conv_repo,
         broadcaster.clone(),
         std::env::temp_dir(),
+        Arc::new(StubSkillResolver),
     );
     TeamSessionService::new(team_repo, conv_service, broadcaster)
 }

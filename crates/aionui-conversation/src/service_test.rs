@@ -22,6 +22,7 @@ use serde_json::json;
 use tokio::sync::broadcast;
 
 use crate::service::ConversationService;
+use crate::skill_resolver::FixedSkillResolver;
 
 // ── Mock EventBroadcaster ──────────────────────────────────────────
 
@@ -238,12 +239,24 @@ fn make_service() -> (
     Arc<MockRepo>,
     Arc<dyn IWorkerTaskManager>,
 ) {
+    make_service_with_resolver(Arc::new(FixedSkillResolver { names: vec![] }))
+}
+
+fn make_service_with_resolver(
+    skill_resolver: Arc<dyn crate::skill_resolver::SkillResolver>,
+) -> (
+    ConversationService,
+    Arc<MockBroadcaster>,
+    Arc<MockRepo>,
+    Arc<dyn IWorkerTaskManager>,
+) {
     let repo = Arc::new(MockRepo::new());
     let broadcaster = Arc::new(MockBroadcaster::new());
     let svc = ConversationService::new_with_workspace_root(
         repo.clone(),
         broadcaster.clone(),
         std::path::PathBuf::from(std::env::temp_dir()),
+        skill_resolver,
     );
     let task_mgr: Arc<dyn IWorkerTaskManager> = Arc::new(MockTaskManager::new());
     (svc, broadcaster, repo, task_mgr)

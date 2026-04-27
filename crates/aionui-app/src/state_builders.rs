@@ -186,11 +186,17 @@ pub fn build_system_state(services: &AppServices) -> SystemRouterState {
 pub fn build_conversation_state(services: &AppServices) -> ConversationRouterState {
     let pool = services.database.pool().clone();
     let repo = Arc::new(SqliteConversationRepository::new(pool));
+    let skill_resolver = Arc::new(
+        aionui_conversation::skill_resolver::ExtensionSkillResolver::new(
+            services.skill_paths.clone(),
+        ),
+    );
     ConversationRouterState {
         conversation_service: ConversationService::new_with_workspace_root(
             repo,
             services.event_bus.clone(),
             std::path::PathBuf::from(&services.data_dir),
+            skill_resolver,
         ),
         worker_task_manager: services.worker_task_manager.clone(),
     }
@@ -322,10 +328,16 @@ pub fn build_team_state(services: &AppServices) -> TeamRouterState {
         Arc::new(aionui_db::SqliteTeamRepository::new(pool.clone()));
     let conv_repo: Arc<dyn aionui_db::IConversationRepository> =
         Arc::new(SqliteConversationRepository::new(pool));
+    let skill_resolver = Arc::new(
+        aionui_conversation::skill_resolver::ExtensionSkillResolver::new(
+            services.skill_paths.clone(),
+        ),
+    );
     let conv_service = ConversationService::new_with_workspace_root(
         conv_repo,
         services.event_bus.clone(),
         std::path::PathBuf::from(&services.data_dir),
+        skill_resolver,
     );
     let service = Arc::new(TeamSessionService::new(
         team_repo,
@@ -343,10 +355,16 @@ pub fn build_cron_state(services: &AppServices) -> CronRouterState {
 
     let conv_repo: Arc<dyn aionui_db::IConversationRepository> =
         Arc::new(SqliteConversationRepository::new(pool));
+    let skill_resolver = Arc::new(
+        aionui_conversation::skill_resolver::ExtensionSkillResolver::new(
+            services.skill_paths.clone(),
+        ),
+    );
     let conv_service = ConversationService::new_with_workspace_root(
         conv_repo.clone(),
         services.event_bus.clone(),
         std::path::PathBuf::from(&services.data_dir),
+        skill_resolver,
     );
 
     let busy_guard = Arc::new(aionui_cron::busy_guard::CronBusyGuard::new());
