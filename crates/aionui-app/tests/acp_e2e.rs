@@ -68,11 +68,11 @@ async fn detect_cli_non_cli_backend_returns_no_path() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "user1", "pass123").await;
 
-    // "gemini" backend has no CLI binary name (returns None)
+    // "iFlow" backend has no CLI binary name (returns None)
     let req = json_with_token(
         "POST",
         "/api/acp/detect-cli",
-        json!({ "backend": "gemini" }),
+        json!({ "backend": "iFlow" }),
         &token,
         &csrf,
     );
@@ -161,7 +161,7 @@ async fn health_check_non_cli_backend() {
     let req = json_with_token(
         "POST",
         "/api/acp/health-check",
-        json!({ "backend": "gemini" }),
+        json!({ "backend": "iFlow" }),
         &token,
         &csrf,
     );
