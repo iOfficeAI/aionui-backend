@@ -98,6 +98,25 @@ async fn main() -> Result<()> {
         config.database_path().display()
     );
     let database = aionui_db::init_database(&config.database_path()).await?;
+
+    // Materialize the embedded builtin-skills corpus to disk before any
+    // service can read from it. Gated by a .version file so this is a
+    // no-op on subsequent starts with the same binary. When
+    // `AIONUI_BUILTIN_SKILLS_PATH` is set, skip materialization — the
+    // override path is the source of truth in that mode.
+    if std::env::var(aionui_extension::BUILTIN_SKILLS_ENV_VAR)
+        .map(|v| v.is_empty())
+        .unwrap_or(true)
+    {
+        aionui_extension::materialize_if_needed(
+            Path::new(&config.data_dir),
+            aionui_extension::builtin_skills_corpus(),
+            env!("CARGO_PKG_VERSION"),
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to materialize builtin skills: {e}"))?;
+    }
+
     let services =
         AppServices::from_database_with_data_dir(database, config.data_dir.clone(), config.local)
             .await?;
