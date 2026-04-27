@@ -119,11 +119,7 @@ impl AgentRegistry {
                         which::which(binary).ok()?;
                     }
 
-                    let mut args = vec![
-                        "x".to_owned(),
-                        "--bun".to_owned(),
-                        bridge_pkg.to_owned(),
-                    ];
+                    let mut args = vec!["x".to_owned(), "--bun".to_owned(), bridge_pkg.to_owned()];
                     for extra in backend.bridge_extra_args() {
                         args.push((*extra).to_owned());
                     }

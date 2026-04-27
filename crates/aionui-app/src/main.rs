@@ -36,16 +36,23 @@ struct Cli {
     log_level: Option<String>,
 }
 
+const NOISE_SUPPRESSIONS: &[&str] = &["sqlx::query=warn", "hyper_util=warn", "reqwest=warn"];
+
+fn build_env_filter(log_level: Option<&str>) -> EnvFilter {
+    let user_directives = log_level.unwrap_or("info");
+    let suppressions = NOISE_SUPPRESSIONS.join(",");
+    EnvFilter::new(format!("{suppressions},{user_directives}"))
+}
+
 fn init_tracing(
     log_dir: &Path,
     log_level: Option<&str>,
 ) -> tracing_appender::non_blocking::WorkerGuard {
-    let default_level = "info";
-
     std::fs::create_dir_all(log_dir).expect("failed to create log directory");
 
-    let console_filter = EnvFilter::new(log_level.unwrap_or(default_level));
-    let console_layer = fmt::layer().with_target(true).with_filter(console_filter);
+    let console_layer = fmt::layer()
+        .with_target(true)
+        .with_filter(build_env_filter(log_level));
 
     let file_appender = tracing_appender::rolling::RollingFileAppender::builder()
         .rotation(tracing_appender::rolling::Rotation::DAILY)
@@ -54,13 +61,12 @@ fn init_tracing(
         .expect("failed to create log file appender");
     let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
 
-    let file_filter = EnvFilter::new(log_level.unwrap_or(default_level));
     let file_layer = fmt::layer()
         .json()
         .with_writer(non_blocking)
         .with_ansi(false)
         .with_target(true)
-        .with_filter(file_filter);
+        .with_filter(build_env_filter(log_level));
 
     tracing_subscriber::registry()
         .with(console_layer)
