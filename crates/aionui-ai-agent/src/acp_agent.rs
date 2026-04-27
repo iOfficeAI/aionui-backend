@@ -10,7 +10,7 @@ use aionui_common::{
 };
 use serde_json::{Value, json};
 use tokio::sync::{Mutex, RwLock, broadcast, mpsc, oneshot};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 use crate::acp_protocol::{
     AcpProtocol, CancelNotification, ContentBlock, LoadSessionRequest, NewSessionRequest,
@@ -39,16 +39,6 @@ impl SessionResumeStrategy {
             AcpBackend::Codex => Self::SessionLoad,
             _ => Self::NewAndPrompt,
         }
-    }
-}
-
-/// YOLO mode value for each ACP backend.
-/// Returns `None` for backends that don't support YOLO.
-fn yolo_mode_value(backend: AcpBackend) -> Option<&'static str> {
-    match backend {
-        AcpBackend::Claude | AcpBackend::Codebuddy => Some("bypassPermissions"),
-        AcpBackend::Qwen => Some("yolo"),
-        _ => None,
     }
 }
 
@@ -386,44 +376,6 @@ impl AcpAgentManager {
         Ok(())
     }
 
-    /// Enable YOLO mode for the current session if the backend supports it.
-    pub async fn ensure_yolo_mode(&self) -> bool {
-        let mode = match yolo_mode_value(self.backend) {
-            Some(m) => m,
-            None => return false,
-        };
-
-        let session_id = self.state.read().await.session_id.clone();
-        let sid = match session_id {
-            Some(ref s) => s.as_str(),
-            None => return false,
-        };
-
-        match self
-            .protocol
-            .set_mode(SetSessionModeRequest::new(SessionId::new(sid), mode))
-            .await
-        {
-            Ok(()) => {
-                debug!(
-                    conversation_id = %self.conversation_id,
-                    backend = ?self.backend,
-                    mode,
-                    "YOLO mode enabled"
-                );
-                true
-            }
-            Err(e) => {
-                warn!(
-                    conversation_id = %self.conversation_id,
-                    error = %e,
-                    "Failed to enable YOLO mode"
-                );
-                false
-            }
-        }
-    }
-
     // -- ACP-specific extended methods (beyond IAgentManager) --
 
     /// Query the ACP backend for current session mode.
@@ -685,22 +637,6 @@ mod tests {
             SessionResumeStrategy::for_backend(AcpBackend::Kiro),
             SessionResumeStrategy::NewAndPrompt
         );
-    }
-
-    #[test]
-    fn yolo_mode_for_backends() {
-        assert_eq!(
-            yolo_mode_value(AcpBackend::Claude),
-            Some("bypassPermissions")
-        );
-        assert_eq!(
-            yolo_mode_value(AcpBackend::Codebuddy),
-            Some("bypassPermissions")
-        );
-        assert_eq!(yolo_mode_value(AcpBackend::Qwen), Some("yolo"));
-        assert_eq!(yolo_mode_value(AcpBackend::Kiro), None);
-        assert_eq!(yolo_mode_value(AcpBackend::Gemini), None);
-        assert_eq!(yolo_mode_value(AcpBackend::Goose), None);
     }
 
     #[test]
