@@ -192,6 +192,39 @@ impl AcpBackend {
             _ => &[],
         }
     }
+
+    /// Native workspace skill directories the CLI reads on its own,
+    /// without backend prompt-side injection.
+    ///
+    /// Returns `Some(&[".xxx/skills"])` for backends that support native
+    /// skill discovery via workspace symlinks, and `None` for backends
+    /// that must receive skills through prompt injection.
+    ///
+    /// Mirrors `src/common/types/acpTypes.ts` `ACP_BACKENDS_ALL` `skillsDirs`
+    /// entries. Keep in sync when adding or modifying backends.
+    pub fn native_skills_dirs(&self) -> Option<&'static [&'static str]> {
+        match self {
+            AcpBackend::Claude => Some(&[".claude/skills"]),
+            AcpBackend::Qwen => Some(&[".qwen/skills"]),
+            AcpBackend::Codex => Some(&[".codex/skills"]),
+            AcpBackend::Codebuddy => Some(&[".codebuddy/skills"]),
+            AcpBackend::Goose => Some(&[".goose/skills"]),
+            AcpBackend::Kimi => Some(&[".kimi/skills"]),
+            AcpBackend::Opencode => Some(&[".opencode/skills"]),
+            AcpBackend::Droid => Some(&[".factory/skills"]),
+            AcpBackend::Vibe => Some(&[".vibe/skills"]),
+            AcpBackend::Cursor => Some(&[".cursor/skills"]),
+            // Explicitly no native skill discovery:
+            AcpBackend::Copilot
+            | AcpBackend::Qoder
+            | AcpBackend::Kiro
+            | AcpBackend::Hermes
+            | AcpBackend::Snow
+            | AcpBackend::IFlow
+            | AcpBackend::Gemini
+            | AcpBackend::Auggie => None,
+        }
+    }
 }
 
 /// Runtime status of a conversation.
@@ -357,6 +390,50 @@ pub enum McpServerStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn claude_supports_native_skills() {
+        assert_eq!(
+            AcpBackend::Claude.native_skills_dirs(),
+            Some(&[".claude/skills"][..])
+        );
+    }
+
+    #[test]
+    fn copilot_has_no_native_skills() {
+        assert_eq!(AcpBackend::Copilot.native_skills_dirs(), None);
+    }
+
+    #[test]
+    fn qoder_kiro_hermes_snow_have_no_native_skills() {
+        assert_eq!(AcpBackend::Qoder.native_skills_dirs(), None);
+        assert_eq!(AcpBackend::Kiro.native_skills_dirs(), None);
+        assert_eq!(AcpBackend::Hermes.native_skills_dirs(), None);
+        assert_eq!(AcpBackend::Snow.native_skills_dirs(), None);
+    }
+
+    #[test]
+    fn all_backends_with_skills_dirs() {
+        // Mirrors src/common/types/acpTypes.ts ACP_BACKENDS_ALL skillsDirs entries.
+        let expected_with_skills: &[AcpBackend] = &[
+            AcpBackend::Claude,
+            AcpBackend::Qwen,
+            AcpBackend::Codex,
+            AcpBackend::Codebuddy,
+            AcpBackend::Goose,
+            AcpBackend::Kimi,
+            AcpBackend::Opencode,
+            AcpBackend::Droid,
+            AcpBackend::Vibe,
+            AcpBackend::Cursor,
+        ];
+        for b in expected_with_skills {
+            assert!(
+                b.native_skills_dirs().is_some(),
+                "{b:?} should expose native_skills_dirs"
+            );
+        }
+    }
 
     #[test]
     fn test_agent_type_display_names() {
