@@ -40,23 +40,21 @@ fn init_tracing(
     log_dir: &Path,
     log_level: Option<&str>,
 ) -> tracing_appender::non_blocking::WorkerGuard {
-    let default_filter =
-        "info,aionui_ai_agent=debug,aionui_conversation=debug,aionui_realtime=debug";
+    let default_level = "info";
 
     std::fs::create_dir_all(log_dir).expect("failed to create log directory");
 
-    let console_filter = EnvFilter::new(log_level.unwrap_or("info"));
+    let console_filter = EnvFilter::new(log_level.unwrap_or(default_level));
     let console_layer = fmt::layer().with_target(true).with_filter(console_filter);
 
     let file_appender = tracing_appender::rolling::RollingFileAppender::builder()
         .rotation(tracing_appender::rolling::Rotation::DAILY)
-        .filename_prefix("backend")
-        .filename_suffix("log")
+        .filename_suffix("backend.log")
         .build(log_dir)
         .expect("failed to create log file appender");
     let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
 
-    let file_filter = EnvFilter::new(log_level.unwrap_or(default_filter));
+    let file_filter = EnvFilter::new(log_level.unwrap_or(default_level));
     let file_layer = fmt::layer()
         .json()
         .with_writer(non_blocking)
