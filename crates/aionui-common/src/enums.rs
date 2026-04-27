@@ -6,7 +6,6 @@ use crate::id::fnv1a_hex8;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AgentType {
-    Gemini,
     Acp,
     #[serde(rename = "openclaw-gateway")]
     OpenclawGateway,
@@ -18,7 +17,6 @@ pub enum AgentType {
 impl AgentType {
     pub fn display_name(&self) -> &'static str {
         match self {
-            AgentType::Gemini => "Gemini",
             AgentType::Acp => "ACP",
             AgentType::OpenclawGateway => "OpenClaw Gateway",
             AgentType::Nanobot => "Nanobot",
@@ -29,7 +27,6 @@ impl AgentType {
 
     pub fn serde_name(&self) -> &'static str {
         match self {
-            AgentType::Gemini => "gemini",
             AgentType::Acp => "acp",
             AgentType::OpenclawGateway => "openclaw-gateway",
             AgentType::Nanobot => "nanobot",
@@ -369,7 +366,6 @@ mod tests {
         );
         assert_eq!(AgentType::Aionrs.display_name(), "Aion CLI");
         assert_eq!(AgentType::Nanobot.display_name(), "Nanobot");
-        assert_eq!(AgentType::Gemini.display_name(), "Gemini");
         assert_eq!(AgentType::Remote.display_name(), "Remote");
         assert_eq!(AgentType::Acp.display_name(), "ACP");
     }
@@ -385,7 +381,6 @@ mod tests {
     #[test]
     fn test_agent_type_id_unique_per_variant() {
         let ids: Vec<String> = [
-            AgentType::Gemini,
             AgentType::Acp,
             AgentType::OpenclawGateway,
             AgentType::Nanobot,
@@ -411,7 +406,6 @@ mod tests {
     #[test]
     fn test_agent_type_all_variants() {
         let cases = [
-            (AgentType::Gemini, "gemini"),
             (AgentType::Acp, "acp"),
             (AgentType::OpenclawGateway, "openclaw-gateway"),
             (AgentType::Nanobot, "nanobot"),

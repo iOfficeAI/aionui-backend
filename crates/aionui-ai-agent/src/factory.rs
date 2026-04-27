@@ -11,11 +11,11 @@ use crate::skill_manager::AcpSkillManager;
 use crate::task_manager::AgentFactory;
 use crate::types::{
     AcpBuildExtra, AionrsBuildExtra, AionrsCompatOverrides, AionrsResolvedConfig,
-    BuildTaskOptions, GeminiBuildExtra, OpenClawBuildExtra, RemoteBuildExtra,
+    BuildTaskOptions, OpenClawBuildExtra, RemoteBuildExtra,
 };
 use crate::{
-    AcpAgentManager, AionrsAgentManager, GeminiAgentManager, NanobotAgentManager,
-    OpenClawAgentManager, RemoteAgentManager,
+    AcpAgentManager, AionrsAgentManager, NanobotAgentManager, OpenClawAgentManager,
+    RemoteAgentManager,
 };
 
 /// Dependencies needed by the agent factory to construct agents.
@@ -142,23 +142,6 @@ async fn build_agent(
             let arc = Arc::new(agent);
             arc.start_permission_handler();
             Ok(arc as AgentManagerHandle)
-        }
-        AgentType::Gemini => {
-            let config: GeminiBuildExtra = serde_json::from_value(options.extra)
-                .map_err(|e| AppError::BadRequest(format!("Invalid Gemini build options: {e}")))?;
-            // Gemini CLI path detected via `which gemini`
-            let cli_path = which::which("gemini")
-                .map(|p| p.to_string_lossy().into_owned())
-                .map_err(|_| AppError::BadRequest("Gemini CLI not found in PATH".into()))?;
-            let agent = GeminiAgentManager::new(
-                conversation_id,
-                workspace,
-                cli_path,
-                config,
-                Some(deps.skill_manager.clone()),
-            )
-            .await?;
-            Ok(Arc::new(agent) as AgentManagerHandle)
         }
         AgentType::OpenclawGateway => {
             let config: OpenClawBuildExtra =

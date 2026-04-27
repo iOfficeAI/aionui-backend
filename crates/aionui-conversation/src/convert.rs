@@ -94,7 +94,7 @@ fn parse_provider_with_model(s: &str) -> Result<ProviderWithModel, AppError> {
 
 /// Parse a DB string value into a typed enum via serde.
 ///
-/// e.g. `"gemini"` → `AgentType::Gemini`
+/// e.g. `"acp"` → `AgentType::Acp`
 pub fn string_to_enum<T: serde::de::DeserializeOwned>(s: &str) -> Result<T, AppError> {
     serde_json::from_value(serde_json::Value::String(s.to_owned()))
         .map_err(|e| AppError::Internal(format!("Invalid enum value '{s}': {e}")))
@@ -171,7 +171,7 @@ mod tests {
     fn row_to_response_basic() {
         let model = json!({"providerId": "p1", "model": "m1"});
         let row = make_row(
-            "gemini",
+            "acp",
             "pending",
             Some("aionui"),
             Some(&model.to_string()),
@@ -179,7 +179,7 @@ mod tests {
         );
         let resp = row_to_response(row).unwrap();
         assert_eq!(resp.id, "conv_1");
-        assert_eq!(resp.r#type, AgentType::Gemini);
+        assert_eq!(resp.r#type, AgentType::Acp);
         assert_eq!(resp.status, ConversationStatus::Pending);
         assert_eq!(resp.source, Some(ConversationSource::Aionui));
         assert_eq!(resp.model.unwrap().model, "m1");
@@ -208,7 +208,7 @@ mod tests {
             id: "conv_1".into(),
             user_id: "user_1".into(),
             name: "Test".into(),
-            r#type: "gemini".into(),
+            r#type: "acp".into(),
             extra: "not-json".into(),
             model: None,
             status: Some("pending".into()),
@@ -225,8 +225,8 @@ mod tests {
 
     #[test]
     fn string_to_enum_valid() {
-        let agent: AgentType = string_to_enum("gemini").unwrap();
-        assert_eq!(agent, AgentType::Gemini);
+        let agent: AgentType = string_to_enum("acp").unwrap();
+        assert_eq!(agent, AgentType::Acp);
 
         let status: ConversationStatus = string_to_enum("finished").unwrap();
         assert_eq!(status, ConversationStatus::Finished);
@@ -272,7 +272,7 @@ mod tests {
             id: "conv_2".into(),
             user_id: "user_1".into(),
             name: "Pinned".into(),
-            r#type: "gemini".into(),
+            r#type: "acp".into(),
             extra: "{}".into(),
             model: None,
             status: Some("pending".into()),

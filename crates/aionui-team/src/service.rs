@@ -414,7 +414,6 @@ mod tests {
     #[test]
     fn parse_agent_type_known_backends() {
         assert_eq!(parse_agent_type("acp").unwrap(), AgentType::Acp);
-        assert_eq!(parse_agent_type("gemini").unwrap(), AgentType::Gemini);
         assert_eq!(parse_agent_type("nanobot").unwrap(), AgentType::Nanobot);
         assert_eq!(parse_agent_type("remote").unwrap(), AgentType::Remote);
         assert_eq!(parse_agent_type("aionrs").unwrap(), AgentType::Aionrs);

@@ -15,7 +15,7 @@ use common::{
 
 fn create_body(name: &str) -> serde_json::Value {
     json!({
-        "type": "gemini",
+        "type": "acp",
         "name": name,
         "model": { "provider_id": "p1", "model": "claude-sonnet-4-20250514" },
         "extra": { "workspace": "/project" }
@@ -24,7 +24,7 @@ fn create_body(name: &str) -> serde_json::Value {
 
 fn create_body_with_extra(name: &str, extra: serde_json::Value) -> serde_json::Value {
     json!({
-        "type": "gemini",
+        "type": "acp",
         "name": name,
         "model": { "provider_id": "p1", "model": "claude-sonnet-4-20250514" },
         "extra": extra
@@ -52,7 +52,7 @@ async fn t1_1_create_conversation_success() {
     assert_eq!(json["success"], true);
     let data = &json["data"];
     assert_eq!(data["name"], "Code Review");
-    assert_eq!(data["type"], "gemini");
+    assert_eq!(data["type"], "acp");
     assert_eq!(data["status"], "pending");
     assert_eq!(data["source"], "aionui");
     assert_eq!(data["pinned"], false);
@@ -67,7 +67,7 @@ async fn t1_2_create_various_agent_types() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
-    let types = ["gemini", "acp", "openclaw-gateway", "nanobot", "remote"];
+    let types = ["acp", "openclaw-gateway", "nanobot", "remote"];
     for agent_type in types {
         let body = json!({
             "type": agent_type,
@@ -88,7 +88,7 @@ async fn t1_3_create_with_optional_fields() {
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
     let body = json!({
-        "type": "gemini",
+        "type": "acp",
         "name": "Telegram Bot",
         "model": { "provider_id": "p1", "model": "m1" },
         "source": "telegram",
@@ -126,7 +126,7 @@ async fn t1_4_create_missing_required_field() {
 
     // Missing extra
     let body = json!({
-        "type": "gemini",
+        "type": "acp",
         "model": { "provider_id": "p1", "model": "m1" }
     });
     let req = json_with_token("POST", "/api/conversations", body, &token, &csrf);
@@ -283,7 +283,7 @@ async fn t2_4_list_source_filter() {
     }
 
     let tg_body = json!({
-        "type": "gemini",
+        "type": "acp",
         "name": "TG Conv",
         "model": { "provider_id": "p1", "model": "m1" },
         "source": "telegram",
@@ -654,7 +654,7 @@ async fn t6_1_clone_from_source() {
     let clone_body = json!({
         "source_conversation_id": source_id,
         "conversation": {
-            "type": "gemini",
+            "type": "acp",
             "model": { "provider_id": "p1", "model": "m1" },
             "extra": { "newKey": "value" }
         }
@@ -714,7 +714,7 @@ async fn t6_3_clone_source_not_found() {
     let clone_body = json!({
         "source_conversation_id": "non-existent-id",
         "conversation": {
-            "type": "gemini",
+            "type": "acp",
             "model": { "provider_id": "p1", "model": "m1" },
             "extra": {}
         }

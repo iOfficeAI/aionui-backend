@@ -48,7 +48,7 @@ const USER_ID: &str = "system_default_user";
 
 fn make_create_req() -> CreateConversationRequest {
     serde_json::from_value(json!({
-        "type": "gemini",
+        "type": "acp",
         "model": { "provider_id": "p1", "model": "claude-sonnet-4-20250514" },
         "extra": { "workspace": "/home/user/project" }
     }))
@@ -77,7 +77,7 @@ async fn t6_1_clone_from_source() {
 
     // Create source
     let source_req: CreateConversationRequest = serde_json::from_value(json!({
-        "type": "gemini",
+        "type": "acp",
         "name": "Source",
         "model": { "provider_id": "p1", "model": "m1" },
         "extra": { "workspace": "/src", "contextFileName": "ctx.md" }
@@ -89,7 +89,7 @@ async fn t6_1_clone_from_source() {
     let clone_req: CloneConversationRequest = serde_json::from_value(json!({
         "source_conversation_id": source.id,
         "conversation": {
-            "type": "gemini",
+            "type": "acp",
             "name": "Cloned",
             "model": { "provider_id": "p1", "model": "m1" },
             "extra": { "workspace": "/cloned" }
@@ -130,7 +130,7 @@ async fn t6_3_clone_source_not_found() {
     let req: CloneConversationRequest = serde_json::from_value(json!({
         "source_conversation_id": "nonexistent",
         "conversation": {
-            "type": "gemini",
+            "type": "acp",
             "model": { "provider_id": "p1", "model": "m1" },
             "extra": {}
         }
@@ -153,7 +153,7 @@ async fn t6_4_clone_messages_not_copied() {
     let clone_req: CloneConversationRequest = serde_json::from_value(json!({
         "source_conversation_id": source.id,
         "conversation": {
-            "type": "gemini",
+            "type": "acp",
             "model": { "provider_id": "p1", "model": "m1" },
             "extra": {}
         }
@@ -379,7 +379,7 @@ async fn t10_1_same_workspace() {
     let (svc, _repo, _b) = setup().await;
 
     let req1: CreateConversationRequest = serde_json::from_value(json!({
-        "type": "gemini",
+        "type": "acp",
         "name": "Conv A",
         "model": { "provider_id": "p1", "model": "m1" },
         "extra": { "workspace": "/shared/path" }
@@ -398,7 +398,7 @@ async fn t10_1_same_workspace() {
 
     // Different workspace
     let req3: CreateConversationRequest = serde_json::from_value(json!({
-        "type": "gemini",
+        "type": "acp",
         "name": "Conv C",
         "model": { "provider_id": "p1", "model": "m1" },
         "extra": { "workspace": "/other/path" }
@@ -416,7 +416,7 @@ async fn t10_2_no_associated() {
     let (svc, _repo, _b) = setup().await;
 
     let req: CreateConversationRequest = serde_json::from_value(json!({
-        "type": "gemini",
+        "type": "acp",
         "model": { "provider_id": "p1", "model": "m1" },
         "extra": { "workspace": "/unique/path" }
     }))

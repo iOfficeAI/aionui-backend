@@ -72,44 +72,6 @@ pub struct AcpBuildExtra {
     pub cron_job_id: Option<String>,
 }
 
-/// Gemini-specific fields extracted from `extra` in [`BuildTaskOptions`].
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GeminiBuildExtra {
-    /// Whether the user picked a custom workspace path.
-    #[serde(default)]
-    pub custom_workspace: bool,
-    /// Web search engine preference.
-    #[serde(default)]
-    pub web_search_engine: Option<String>,
-    /// Context file name.
-    #[serde(default)]
-    pub context_file_name: Option<String>,
-    /// Context content to inject.
-    #[serde(default)]
-    pub context_content: Option<String>,
-    /// Preset rules.
-    #[serde(default)]
-    pub preset_rules: Option<String>,
-    /// Skills to enable.
-    #[serde(default)]
-    pub enabled_skills: Vec<String>,
-    /// Extra skill paths.
-    #[serde(default)]
-    pub extra_skill_paths: Vec<String>,
-    /// Built-in skills to exclude.
-    #[serde(default)]
-    pub exclude_builtin_skills: Vec<String>,
-    /// Preset assistant ID.
-    #[serde(default)]
-    pub preset_assistant_id: Option<String>,
-    /// Session mode override.
-    #[serde(default)]
-    pub session_mode: Option<String>,
-    /// Associated cron job ID.
-    #[serde(default)]
-    pub cron_job_id: Option<String>,
-}
-
 /// OpenClaw gateway configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenClawGatewayConfig {

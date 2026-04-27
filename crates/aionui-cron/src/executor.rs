@@ -492,7 +492,7 @@ mod tests {
     #[test]
     fn parse_agent_type_known_types() {
         assert_eq!(parse_agent_type("acp"), AgentType::Acp);
-        assert_eq!(parse_agent_type("gemini"), AgentType::Gemini);
+        assert_eq!(parse_agent_type("nanobot"), AgentType::Nanobot);
     }
 
     #[test]

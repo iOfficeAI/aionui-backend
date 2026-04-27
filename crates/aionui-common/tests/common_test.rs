@@ -174,8 +174,8 @@ fn test_paginated_result_empty() {
 #[test]
 fn test_enum_serde_roundtrip() {
     let roundtrip_cases: Vec<(&str, AgentType)> = vec![
-        (r#""gemini""#, AgentType::Gemini),
         (r#""acp""#, AgentType::Acp),
+        (r#""nanobot""#, AgentType::Nanobot),
         (r#""openclaw-gateway""#, AgentType::OpenclawGateway),
     ];
     for (json_str, expected) in roundtrip_cases {

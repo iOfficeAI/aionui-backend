@@ -139,7 +139,7 @@ mod tests {
     #[test]
     fn deserialize_create_request_full() {
         let raw = json!({
-            "type": "gemini",
+            "type": "acp",
             "name": "Code Review",
             "model": { "provider_id": "p1", "model": "claude-sonnet-4-20250514" },
             "source": "aionui",
@@ -147,7 +147,7 @@ mod tests {
             "extra": { "workspace": "/project" }
         });
         let req: CreateConversationRequest = serde_json::from_value(raw).unwrap();
-        assert_eq!(req.r#type, AgentType::Gemini);
+        assert_eq!(req.r#type, AgentType::Acp);
         assert_eq!(req.name.as_deref(), Some("Code Review"));
         assert_eq!(req.model.unwrap().model, "claude-sonnet-4-20250514");
         assert_eq!(req.source, Some(ConversationSource::Aionui));
@@ -192,7 +192,7 @@ mod tests {
     #[test]
     fn deserialize_create_request_missing_extra() {
         let raw = json!({
-            "type": "gemini",
+            "type": "acp",
             "model": { "provider_id": "p1", "model": "m1" }
         });
         assert!(serde_json::from_value::<CreateConversationRequest>(raw).is_err());
@@ -252,7 +252,7 @@ mod tests {
         let raw = json!({
             "source_conversation_id": "conv_abc",
             "conversation": {
-                "type": "gemini",
+                "type": "acp",
                 "model": { "provider_id": "p1", "model": "m1" },
                 "extra": {}
             },
@@ -260,7 +260,7 @@ mod tests {
         });
         let req: CloneConversationRequest = serde_json::from_value(raw).unwrap();
         assert_eq!(req.source_conversation_id.as_deref(), Some("conv_abc"));
-        assert_eq!(req.conversation.r#type, AgentType::Gemini);
+        assert_eq!(req.conversation.r#type, AgentType::Acp);
         assert_eq!(req.migrate_cron, Some(true));
     }
 
@@ -352,7 +352,7 @@ mod tests {
         let resp = ConversationResponse {
             id: "conv_1".into(),
             name: "Test".into(),
-            r#type: AgentType::Gemini,
+            r#type: AgentType::Acp,
             model: Some(ProviderWithModel {
                 provider_id: "p1".into(),
                 model: "m1".into(),
@@ -369,7 +369,7 @@ mod tests {
         };
         let json = serde_json::to_value(&resp).unwrap();
         assert_eq!(json["id"], "conv_1");
-        assert_eq!(json["type"], "gemini");
+        assert_eq!(json["type"], "acp");
         assert_eq!(json["status"], "pending");
         assert_eq!(json["source"], "aionui");
         assert_eq!(json["created_at"], 1712345678000_i64);
@@ -546,7 +546,7 @@ mod tests {
             items: vec![ConversationResponse {
                 id: "conv_1".into(),
                 name: "Test".into(),
-                r#type: AgentType::Gemini,
+                r#type: AgentType::Acp,
                 model: None,
                 status: ConversationStatus::Pending,
                 source: None,

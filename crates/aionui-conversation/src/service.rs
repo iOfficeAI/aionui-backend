@@ -712,7 +712,7 @@ impl ConversationService {
 
 /// Serialize a serde-compatible enum to its JSON string form for DB storage.
 ///
-/// e.g. `AgentType::Gemini` → `"gemini"`
+/// e.g. `AgentType::Acp` → `"acp"`
 fn enum_to_db<T: serde::Serialize>(val: &T) -> Result<String, AppError> {
     let json_val = serde_json::to_value(val)
         .map_err(|e| AppError::Internal(format!("Enum serialization failed: {e}")))?;
@@ -739,8 +739,8 @@ mod tests {
     #[test]
     fn enum_to_db_agent_type() {
         use aionui_common::AgentType;
-        assert_eq!(enum_to_db(&AgentType::Gemini).unwrap(), "gemini");
         assert_eq!(enum_to_db(&AgentType::Acp).unwrap(), "acp");
+        assert_eq!(enum_to_db(&AgentType::Nanobot).unwrap(), "nanobot");
         assert_eq!(
             enum_to_db(&AgentType::OpenclawGateway).unwrap(),
             "openclaw-gateway"

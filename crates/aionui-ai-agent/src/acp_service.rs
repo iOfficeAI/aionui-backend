@@ -84,13 +84,13 @@ mod tests {
 
     #[test]
     fn detect_cli_non_cli_backend_returns_none() {
-        let resp = detect_cli(AcpBackend::Gemini);
+        let resp = detect_cli(AcpBackend::IFlow);
         assert!(resp.path.is_none());
     }
 
     #[test]
     fn health_check_non_cli_backend() {
-        let resp = health_check(AcpBackend::Gemini);
+        let resp = health_check(AcpBackend::IFlow);
         assert!(!resp.available);
         assert!(resp.error.is_some());
     }

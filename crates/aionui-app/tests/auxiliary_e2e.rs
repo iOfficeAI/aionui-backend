@@ -66,7 +66,7 @@ async fn workspace_browse_requires_auth() {
 async fn workspace_browse_no_active_task() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "user1", "pass123").await;
-    let conv_id = create_conversation(&mut app, &token, &csrf, "Test Conv", "gemini").await;
+    let conv_id = create_conversation(&mut app, &token, &csrf, "Test Conv", "acp").await;
 
     let req = get_with_token(
         &format!("/api/conversations/{conv_id}/workspace?path=/src"),
@@ -123,7 +123,7 @@ async fn side_question_empty_question() {
 async fn side_question_no_active_task() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "user1", "pass123").await;
-    let conv_id = create_conversation(&mut app, &token, &csrf, "Side Q Test", "gemini").await;
+    let conv_id = create_conversation(&mut app, &token, &csrf, "Side Q Test", "acp").await;
 
     let req = json_with_token(
         "POST",
@@ -156,7 +156,7 @@ async fn reload_context_requires_auth() {
 async fn reload_context_no_active_task() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "user1", "pass123").await;
-    let conv_id = create_conversation(&mut app, &token, &csrf, "Reload Test", "gemini").await;
+    let conv_id = create_conversation(&mut app, &token, &csrf, "Reload Test", "acp").await;
 
     let req = json_with_token(
         "POST",
@@ -187,7 +187,7 @@ async fn slash_commands_requires_auth() {
 async fn slash_commands_no_active_task() {
     let (mut app, services) = build_app().await;
     let (token, _csrf) = setup_and_login(&mut app, &services, "user1", "pass123").await;
-    let conv_id = create_conversation(&mut app, &token, &_csrf, "Slash Test", "gemini").await;
+    let conv_id = create_conversation(&mut app, &token, &_csrf, "Slash Test", "acp").await;
 
     let req = get_with_token(
         &format!("/api/conversations/{conv_id}/slash-commands"),
@@ -291,7 +291,7 @@ async fn check_approval_no_task() {
 async fn stop_stream_no_task() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "user1", "pass123").await;
-    let conv_id = create_conversation(&mut app, &token, &csrf, "Stop Test", "gemini").await;
+    let conv_id = create_conversation(&mut app, &token, &csrf, "Stop Test", "acp").await;
 
     let req = json_with_token(
         "POST",

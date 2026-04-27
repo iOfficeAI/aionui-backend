@@ -283,7 +283,6 @@ fn platform_to_source(platform: PluginType) -> ConversationSource {
 /// Falls back to `AgentType::Acp` for unknown values.
 fn parse_agent_type(s: &str) -> AgentType {
     match s {
-        "gemini" => AgentType::Gemini,
         "acp" => AgentType::Acp,
         "openclaw-gateway" => AgentType::OpenclawGateway,
         "nanobot" => AgentType::Nanobot,
@@ -354,7 +353,6 @@ mod tests {
 
     #[test]
     fn parse_known_agent_types() {
-        assert_eq!(parse_agent_type("gemini"), AgentType::Gemini);
         assert_eq!(parse_agent_type("acp"), AgentType::Acp);
         assert_eq!(
             parse_agent_type("openclaw-gateway"),

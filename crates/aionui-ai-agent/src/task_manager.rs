@@ -343,13 +343,13 @@ mod tests {
         );
         mgr.tasks.insert("conv-running".into(), running);
 
-        // Non-ACP (Gemini) + Finished + old activity → should NOT be collected
-        let gemini = Arc::new(
-            MockAgent::new("conv-gemini", Some(ConversationStatus::Finished))
-                .with_agent_type(AgentType::Gemini)
+        // Non-ACP (Nanobot) + Finished + old activity → should NOT be collected
+        let nanobot = Arc::new(
+            MockAgent::new("conv-nanobot", Some(ConversationStatus::Finished))
+                .with_agent_type(AgentType::Nanobot)
                 .with_last_activity(now_ms() - 600_000),
         );
-        mgr.tasks.insert("conv-gemini".into(), gemini);
+        mgr.tasks.insert("conv-nanobot".into(), nanobot);
 
         let idle = mgr.collect_idle(300_000); // 5-min threshold
         assert_eq!(idle.len(), 1);

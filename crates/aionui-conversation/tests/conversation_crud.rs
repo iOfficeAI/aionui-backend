@@ -46,7 +46,7 @@ const USER_ID: &str = "system_default_user";
 
 fn make_create_req() -> CreateConversationRequest {
     serde_json::from_value(json!({
-        "type": "gemini",
+        "type": "acp",
         "model": { "provider_id": "p1", "model": "claude-sonnet-4-20250514" },
         "extra": { "workspace": "/home/user/project" }
     }))
@@ -62,7 +62,7 @@ async fn t1_1_create_with_defaults() {
     let resp = svc.create(USER_ID, make_create_req()).await.unwrap();
 
     assert!(!resp.id.is_empty());
-    assert_eq!(resp.r#type, AgentType::Gemini);
+    assert_eq!(resp.r#type, AgentType::Acp);
     assert_eq!(resp.status, ConversationStatus::Pending);
     assert_eq!(resp.source, Some(ConversationSource::Aionui));
     assert!(!resp.pinned);
@@ -90,7 +90,6 @@ async fn t1_2_create_each_agent_type() {
     let (svc, _) = setup().await;
 
     let types = vec![
-        ("gemini", AgentType::Gemini),
         ("acp", AgentType::Acp),
         ("openclaw-gateway", AgentType::OpenclawGateway),
         ("nanobot", AgentType::Nanobot),
@@ -115,7 +114,7 @@ async fn t1_3_create_with_optional_fields() {
     let (svc, _) = setup().await;
 
     let req: CreateConversationRequest = serde_json::from_value(json!({
-        "type": "gemini",
+        "type": "acp",
         "name": "Custom Name",
         "model": { "provider_id": "p1", "model": "m1" },
         "source": "telegram",
@@ -219,7 +218,7 @@ async fn t2_4_source_filter() {
     svc.create(USER_ID, make_create_req()).await.unwrap();
 
     let telegram_req: CreateConversationRequest = serde_json::from_value(json!({
-        "type": "gemini",
+        "type": "acp",
         "model": { "provider_id": "p1", "model": "m1" },
         "source": "telegram",
         "extra": {}
@@ -333,7 +332,7 @@ async fn t4_4_extra_merge_preserves_existing_keys() {
     let (svc, _) = setup().await;
 
     let req: CreateConversationRequest = serde_json::from_value(json!({
-        "type": "gemini",
+        "type": "acp",
         "model": { "provider_id": "p1", "model": "m1" },
         "extra": { "workspace": "/old", "contextFileName": "ctx.md" }
     }))
@@ -458,7 +457,7 @@ async fn t12_1_long_name() {
     let long_name = "x".repeat(1000);
 
     let req: CreateConversationRequest = serde_json::from_value(json!({
-        "type": "gemini",
+        "type": "acp",
         "name": long_name,
         "model": { "provider_id": "p1", "model": "m1" },
         "extra": {}
@@ -484,7 +483,7 @@ async fn t12_2_large_extra_json() {
     });
 
     let req: CreateConversationRequest = serde_json::from_value(json!({
-        "type": "gemini",
+        "type": "acp",
         "model": { "provider_id": "p1", "model": "m1" },
         "extra": large_extra
     }))

@@ -241,7 +241,7 @@ fn make_service() -> (ConversationService, Arc<MockBroadcaster>, Arc<MockRepo>) 
 
 fn make_create_req() -> CreateConversationRequest {
     serde_json::from_value(json!({
-        "type": "gemini",
+        "type": "acp",
         "model": { "provider_id": "p1", "model": "m1" },
         "extra": { "workspace": "/project" }
     }))
@@ -257,7 +257,7 @@ async fn create_returns_conversation_with_defaults() {
     let resp = svc.create("user_1", make_create_req()).await.unwrap();
 
     assert!(!resp.id.is_empty());
-    assert_eq!(resp.r#type, AgentType::Gemini);
+    assert_eq!(resp.r#type, AgentType::Acp);
     assert_eq!(resp.status, ConversationStatus::Pending);
     assert_eq!(resp.source, Some(ConversationSource::Aionui));
     assert!(!resp.pinned);
@@ -374,7 +374,7 @@ async fn list_with_source_filter() {
     svc.create("user_1", make_create_req()).await.unwrap();
 
     let telegram_req: CreateConversationRequest = serde_json::from_value(json!({
-        "type": "gemini",
+        "type": "acp",
         "model": { "provider_id": "p1", "model": "m1" },
         "source": "telegram",
         "extra": {}
@@ -468,7 +468,7 @@ async fn update_extra_merge() {
     let (svc, _broadcaster, _repo) = make_service();
 
     let req: CreateConversationRequest = serde_json::from_value(json!({
-        "type": "gemini",
+        "type": "acp",
         "model": { "provider_id": "p1", "model": "m1" },
         "extra": { "workspace": "/old", "contextFileName": "ctx.md" }
     }))
@@ -543,7 +543,7 @@ async fn broadcast_includes_source_on_delete() {
     let (svc, broadcaster, _repo) = make_service();
 
     let req: CreateConversationRequest = serde_json::from_value(json!({
-        "type": "gemini",
+        "type": "acp",
         "model": { "provider_id": "p1", "model": "m1" },
         "source": "telegram",
         "extra": {}
@@ -625,7 +625,7 @@ async fn clone_without_source_creates_new() {
 
     let req: CloneConversationRequest = serde_json::from_value(json!({
         "conversation": {
-            "type": "gemini",
+            "type": "acp",
             "name": "Cloned",
             "model": { "provider_id": "p1", "model": "m1" },
             "extra": { "workspace": "/new" }
@@ -648,7 +648,7 @@ async fn clone_from_source_inherits_config() {
 
     // Create source with name and extra
     let source_req: CreateConversationRequest = serde_json::from_value(json!({
-        "type": "gemini",
+        "type": "acp",
         "name": "Source Conv",
         "model": { "provider_id": "p1", "model": "m1" },
         "extra": { "workspace": "/source", "contextFileName": "ctx.md" }
@@ -660,7 +660,7 @@ async fn clone_from_source_inherits_config() {
     let clone_req: CloneConversationRequest = serde_json::from_value(json!({
         "source_conversation_id": source.id,
         "conversation": {
-            "type": "gemini",
+            "type": "acp",
             "model": { "provider_id": "p1", "model": "m1" },
             "extra": { "workspace": "/cloned" }
         }
@@ -684,7 +684,7 @@ async fn clone_source_not_found() {
     let req: CloneConversationRequest = serde_json::from_value(json!({
         "source_conversation_id": "no-such-id",
         "conversation": {
-            "type": "gemini",
+            "type": "acp",
             "model": { "provider_id": "p1", "model": "m1" },
             "extra": {}
         }
@@ -704,7 +704,7 @@ async fn clone_source_wrong_user() {
     let req: CloneConversationRequest = serde_json::from_value(json!({
         "source_conversation_id": source.id,
         "conversation": {
-            "type": "gemini",
+            "type": "acp",
             "model": { "provider_id": "p1", "model": "m1" },
             "extra": {}
         }
@@ -720,7 +720,7 @@ async fn clone_strips_cron_job_id_by_default() {
     let (svc, _broadcaster, _repo) = make_service();
 
     let source_req: CreateConversationRequest = serde_json::from_value(json!({
-        "type": "gemini",
+        "type": "acp",
         "model": { "provider_id": "p1", "model": "m1" },
         "extra": { "workspace": "/p", "cronJobId": "cron_1" }
     }))
@@ -730,7 +730,7 @@ async fn clone_strips_cron_job_id_by_default() {
     let clone_req: CloneConversationRequest = serde_json::from_value(json!({
         "source_conversation_id": source.id,
         "conversation": {
-            "type": "gemini",
+            "type": "acp",
             "model": { "provider_id": "p1", "model": "m1" },
             "extra": {}
         }
@@ -747,7 +747,7 @@ async fn clone_with_migrate_cron_preserves_cron_job_id() {
     let (svc, _broadcaster, _repo) = make_service();
 
     let source_req: CreateConversationRequest = serde_json::from_value(json!({
-        "type": "gemini",
+        "type": "acp",
         "model": { "provider_id": "p1", "model": "m1" },
         "extra": { "workspace": "/p", "cronJobId": "cron_1" }
     }))
@@ -757,7 +757,7 @@ async fn clone_with_migrate_cron_preserves_cron_job_id() {
     let clone_req: CloneConversationRequest = serde_json::from_value(json!({
         "source_conversation_id": source.id,
         "conversation": {
-            "type": "gemini",
+            "type": "acp",
             "model": { "provider_id": "p1", "model": "m1" },
             "extra": {}
         },
