@@ -260,7 +260,6 @@ pub enum MessageType {
     AgentStatus,
     Permission,
     AcpToolCall,
-    CodexToolCall,
     Plan,
     Thinking,
     AvailableCommands,

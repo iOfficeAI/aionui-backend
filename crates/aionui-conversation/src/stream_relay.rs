@@ -1,9 +1,8 @@
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use aionui_ai_agent::AgentStreamEvent;
 use aionui_api_types::WebSocketMessage;
-use aionui_common::{Confirmation, ConversationStatus, generate_id, now_ms};
+use aionui_common::{ConversationStatus, generate_id, now_ms};
 use aionui_db::IConversationRepository;
 use aionui_db::models::MessageRow;
 use aionui_realtime::EventBroadcaster;
@@ -54,7 +53,6 @@ impl StreamRelay {
         let mut thinking_started_at: Option<i64> = None;
         let mut record_created = false;
         let mut flush_counter: u32 = 0;
-        let mut seen_confirmations: HashSet<String> = HashSet::new();
         let mut has_thinking = false;
 
         loop {
@@ -71,8 +69,6 @@ impl StreamRelay {
                     }
 
                     self.forward_to_websocket(&event);
-                    self.maybe_broadcast_confirmation(&event, &mut seen_confirmations);
-
                     if let AgentStreamEvent::Text(ref data) = event {
                         text_buffer.push_str(&data.content);
                         flush_counter += 1;
@@ -142,56 +138,8 @@ impl StreamRelay {
         }
     }
 
-    /// Broadcast a confirmation WebSocket event when permission events arrive.
-    ///
-    /// Sends `confirmation.add` for new confirmations and `confirmation.update`
-    /// for confirmations whose ID has already been seen.
-    fn maybe_broadcast_confirmation(&self, event: &AgentStreamEvent, seen: &mut HashSet<String>) {
-        let data = match event {
-            AgentStreamEvent::Permission(d) => d,
-            _ => return,
-        };
-
-        // Try to parse as Confirmation to build a well-typed event payload
-        if let Ok(conf) = serde_json::from_value::<Confirmation>(data.clone()) {
-            let event_name = if seen.contains(&conf.id) {
-                "confirmation.update"
-            } else {
-                seen.insert(conf.id.clone());
-                "confirmation.add"
-            };
-            let payload = json!({
-                "conversation_id": self.conversation_id,
-                "id": conf.id,
-                "call_id": conf.call_id,
-                "title": conf.title,
-                "action": conf.action,
-                "description": conf.description,
-                "command_type": conf.command_type,
-                "options": conf.options,
-            });
-            let msg = WebSocketMessage::new(event_name, payload);
-            self.broadcaster.broadcast(msg);
-        } else {
-            // Fallback: broadcast raw data with conversation ID
-            let payload = json!({
-                "conversation_id": self.conversation_id,
-                "data": data,
-            });
-            let msg = WebSocketMessage::new("confirmation.add", payload);
-            self.broadcaster.broadcast(msg);
-        }
-    }
-
     /// Forward an agent event to connected WebSocket clients.
-    ///
-    /// Permission events are skipped here because they are routed via
-    /// `maybe_broadcast_confirmation` as `confirmation.add` / `confirmation.update`
-    /// WebSocket events instead.
     fn forward_to_websocket(&self, event: &AgentStreamEvent) {
-        if matches!(event, AgentStreamEvent::Permission(_)) {
-            return;
-        }
         let event_data = match serde_json::to_value(event) {
             Ok(v) => v,
             Err(e) => {

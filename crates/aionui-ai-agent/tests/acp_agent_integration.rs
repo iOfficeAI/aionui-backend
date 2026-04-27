@@ -145,11 +145,13 @@ fn event_type_name(event: &AgentStreamEvent) -> &'static str {
         AgentStreamEvent::Plan(_) => "Plan",
         AgentStreamEvent::Permission(_) => "Permission",
         AgentStreamEvent::AcpToolCall(_) => "AcpToolCall",
-        AgentStreamEvent::CodexToolCall(_) => "CodexToolCall",
         AgentStreamEvent::AvailableCommands(_) => "AvailableCommands",
         AgentStreamEvent::SkillSuggest(_) => "SkillSuggest",
         AgentStreamEvent::CronTrigger(_) => "CronTrigger",
         AgentStreamEvent::AcpModelInfo(_) => "AcpModelInfo",
+        AgentStreamEvent::AcpModeInfo(_) => "AcpModeInfo",
+        AgentStreamEvent::AcpConfigOption(_) => "AcpConfigOption",
+        AgentStreamEvent::AcpSessionInfo(_) => "AcpSessionInfo",
         AgentStreamEvent::AcpContextUsage(_) => "AcpContextUsage",
         AgentStreamEvent::Finish(_) => "Finish",
         AgentStreamEvent::Error(_) => "Error",
@@ -278,48 +280,6 @@ async fn acp_agent_model_info_captured() {
     assert_eq!(info.model_id, "claude-sonnet-4");
     assert_eq!(info.model_name, Some("Claude Sonnet 4".into()));
     assert_eq!(info.provider, Some("anthropic".into()));
-
-    agent.kill(None).unwrap();
-}
-
-#[tokio::test]
-#[ignore = "requires JSON-RPC mock agent"]
-async fn acp_agent_confirmation_management() {
-    let _guard = serial();
-    let (agent, _rx) = make_mock_agent(r#"sleep 10"#, AcpBackend::Claude).await;
-
-    assert!(agent.get_confirmations().is_empty());
-
-    agent
-        .add_confirmation(aionui_common::Confirmation {
-            id: "c1".into(),
-            call_id: "call-1".into(),
-            title: Some("Edit file".into()),
-            action: Some("edit_file".into()),
-            description: "Edit main.rs".into(),
-            command_type: None,
-            options: vec![],
-        })
-        .await;
-    assert_eq!(agent.get_confirmations().len(), 1);
-
-    agent
-        .add_confirmation(aionui_common::Confirmation {
-            id: "c2".into(),
-            call_id: "call-2".into(),
-            title: Some("Run cmd".into()),
-            action: Some("run_command".into()),
-            description: "Run cargo test".into(),
-            command_type: Some("cargo".into()),
-            options: vec![],
-        })
-        .await;
-    assert_eq!(agent.get_confirmations().len(), 2);
-
-    let removed = agent.remove_confirmation("call-1").await;
-    assert!(removed.is_some());
-    assert_eq!(agent.get_confirmations().len(), 1);
-    assert_eq!(agent.get_confirmations()[0].call_id, "call-2");
 
     agent.kill(None).unwrap();
 }

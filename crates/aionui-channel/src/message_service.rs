@@ -151,7 +151,6 @@ impl ChannelMessageService {
             | AgentStreamEvent::Plan(_)
             | AgentStreamEvent::Permission(_)
             | AgentStreamEvent::AcpToolCall(_)
-            | AgentStreamEvent::CodexToolCall(_)
             | AgentStreamEvent::AvailableCommands(_)
             | AgentStreamEvent::SkillSuggest(_)
             | AgentStreamEvent::CronTrigger(_)
