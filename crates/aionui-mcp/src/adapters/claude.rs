@@ -152,7 +152,7 @@ fn build_stdio_json(
 
 /// Parse Claude CLI `mcp list` output.
 ///
-/// Claude uses a custom format (not the standard Gemini/Qwen/iFlow pattern):
+/// Claude uses a custom format (not the standard Gemini/Qwen pattern):
 /// ```text
 /// name: command args - ✓ Connected
 /// name: command args - ✗ Failed to connect

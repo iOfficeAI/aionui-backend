@@ -145,7 +145,7 @@ pub fn strip_ansi(input: &str) -> String {
     result
 }
 
-/// Parse the "standard" `mcp list` text output shared by Gemini, Qwen, and iFlow.
+/// Parse the "standard" `mcp list` text output shared by Gemini and Qwen.
 ///
 /// Pattern: `[checkmark] name: command (transport_type) - Status`
 ///
@@ -335,15 +335,6 @@ Some footer text";
         let servers = parse_standard_list_output(output);
         assert_eq!(servers.len(), 1);
         assert_eq!(servers[0].name, "my-mcp");
-    }
-
-    #[test]
-    fn parse_standard_list_chinese_status() {
-        // iFlow uses Chinese status text
-        let output = "✓ my-srv: npx test (stdio) - 已连接";
-        let servers = parse_standard_list_output(output);
-        assert_eq!(servers.len(), 1);
-        assert_eq!(servers[0].name, "my-srv");
     }
 
     #[test]
