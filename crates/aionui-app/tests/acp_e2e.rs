@@ -64,11 +64,11 @@ async fn detect_cli_invalid_backend() {
 }
 
 #[tokio::test]
-async fn detect_cli_non_cli_backend_returns_no_path() {
+async fn detect_cli_unknown_backend_returns_bad_request() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "user1", "pass123").await;
 
-    // "iFlow" backend has no CLI binary name (returns None)
+    // Unknown backend should fail request deserialization.
     let req = json_with_token(
         "POST",
         "/api/acp/detect-cli",
@@ -77,11 +77,7 @@ async fn detect_cli_non_cli_backend_returns_no_path() {
         &csrf,
     );
     let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-
-    let body = body_json(resp).await;
-    assert_eq!(body["success"], true);
-    assert!(body["data"]["path"].is_null() || body["data"].get("path").is_none());
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -154,7 +150,7 @@ async fn health_check_returns_status() {
 }
 
 #[tokio::test]
-async fn health_check_non_cli_backend() {
+async fn health_check_unknown_backend_returns_bad_request() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "user1", "pass123").await;
 
@@ -166,11 +162,7 @@ async fn health_check_non_cli_backend() {
         &csrf,
     );
     let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-
-    let body = body_json(resp).await;
-    assert_eq!(body["data"]["available"], false);
-    assert!(body["data"]["error"].is_string());
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

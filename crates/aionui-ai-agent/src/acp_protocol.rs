@@ -44,14 +44,8 @@ const INIT_TIMEOUT_SECS: u64 = 30;
 
 /// A pending permission request from the agent, awaiting user decision.
 pub struct PermissionRequest {
-    /// ACP session ID.
-    pub session_id: String,
-    /// Tool call details from the agent.
-    pub tool_call: serde_json::Value,
-    /// Available permission options (allow once, always, reject, etc.).
-    pub options: serde_json::Value,
-    /// Optional metadata from the agent.
-    pub meta: Option<serde_json::Value>,
+    /// Raw ACP permission request as defined by the SDK schema.
+    pub request: RequestPermissionRequest,
     /// Channel to send the user's decision back to the SDK responder.
     pub response_tx: oneshot::Sender<PermissionDecision>,
 }
@@ -382,22 +376,12 @@ async fn run_sdk_event_loop(
                 async move |request: RequestPermissionRequest,
                             responder: PermissionResponder,
                             _cx: ConnectionTo<Agent>| {
-                    let session_id = request.session_id.to_string();
                     log_incoming("session/request_permission", &json_str(&request));
-                    let tool_call = serde_json::to_value(&request.tool_call).unwrap_or_default();
-                    let options = serde_json::to_value(&request.options).unwrap_or_default();
-                    let meta = request
-                        .meta
-                        .as_ref()
-                        .and_then(|m| serde_json::to_value(m).ok());
 
                     let (resp_tx, resp_rx) = oneshot::channel();
 
                     let perm_req = PermissionRequest {
-                        session_id,
-                        tool_call,
-                        options,
-                        meta,
+                        request,
                         response_tx: resp_tx,
                     };
 
@@ -409,14 +393,20 @@ async fn run_sdk_event_loop(
                     }
 
                     match resp_rx.await {
-                        Ok(PermissionDecision::Selected { option_id }) => responder.respond(
-                            RequestPermissionResponse::new(RequestPermissionOutcome::Selected(
-                                SelectedPermissionOutcome::new(option_id),
-                            )),
-                        ),
-                        Ok(PermissionDecision::Cancelled) | Err(_) => responder.respond(
-                            RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled),
-                        ),
+                        Ok(PermissionDecision::Selected { option_id }) => {
+                            let respond =
+                                RequestPermissionResponse::new(RequestPermissionOutcome::Selected(
+                                    SelectedPermissionOutcome::new(option_id),
+                                ));
+                            log_outgoing("session/request_permission", &json_str(&respond));
+                            responder.respond(respond)
+                        }
+                        Ok(PermissionDecision::Cancelled) | Err(_) => {
+                            let respond =
+                                RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled);
+                            log_outgoing("session/request_permission", &json_str(&respond));
+                            responder.respond(respond)
+                        }
                     }
                 }
             },
@@ -595,6 +585,11 @@ fn log_notify(method: &str, body: &str) {
 /// Log an incoming agent notification/request (`←`).
 fn log_incoming(method: &str, body: &str) {
     debug!("[ACP] {method}\n ← {body}");
+}
+
+/// Log an outgoing agent notification/request (`→`).
+fn log_outgoing(method: &str, body: &str) {
+    debug!("[ACP] {method}\n → {body}");
 }
 
 impl std::fmt::Debug for AcpProtocol {

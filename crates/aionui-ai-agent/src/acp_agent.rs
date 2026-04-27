@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use aionui_common::{
     AcpBackend, AgentKillReason, AgentType, AppError, CommandSpec, Confirmation,
-    ConversationStatus, TimestampMs, generate_id, now_ms,
+    ConversationStatus, TimestampMs, now_ms,
 };
 use serde_json::{Value, json};
 use tokio::sync::{Mutex, RwLock, broadcast, mpsc, oneshot};
@@ -18,7 +18,7 @@ use crate::acp_protocol::{
     SetSessionModeRequest, SetSessionModelRequest,
 };
 use crate::cli_process::CliAgentProcess;
-use crate::stream_event::AgentStreamEvent;
+use crate::stream_event::{AgentStreamEvent, permission_request_to_event_data};
 use crate::types::{AcpBuildExtra, AcpModelInfo, SendMessageData};
 
 /// Grace period before force-killing an ACP process (ms).
@@ -40,15 +40,6 @@ impl SessionResumeStrategy {
             _ => Self::NewAndPrompt,
         }
     }
-}
-
-fn permission_call_id(tool_call: &Value) -> String {
-    tool_call
-        .get("tool_call_id")
-        .or_else(|| tool_call.get("toolCallId"))
-        .and_then(Value::as_str)
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(generate_id)
 }
 
 fn confirm_option_id(data: &Value) -> Option<String> {
@@ -196,13 +187,7 @@ impl AcpAgentManager {
         while let Some(perm_req) = rx.recv().await {
             self.last_activity.store(now_ms(), Ordering::Relaxed);
 
-            let mut tool_call = perm_req.tool_call;
-            let call_id = permission_call_id(&tool_call);
-            if let Some(tool_call_obj) = tool_call.as_object_mut() {
-                tool_call_obj
-                    .entry("tool_call_id".to_owned())
-                    .or_insert_with(|| Value::String(call_id.clone()));
-            }
+            let call_id = perm_req.request.tool_call.tool_call_id.to_string();
 
             let mut pending = self.pending_permissions.lock().unwrap();
             if let Some(previous) = pending.insert(call_id.clone(), perm_req.response_tx) {
@@ -210,26 +195,15 @@ impl AcpAgentManager {
             }
             drop(pending);
 
-            let mut permission_event = json!({
-                "session_id": &perm_req.session_id,
-                "toolCall": tool_call,
-                "options": &perm_req.options,
-            });
-            if let Some(meta) = perm_req.meta
-                && let Some(obj) = permission_event.as_object_mut()
-            {
-                obj.insert("meta".to_owned(), meta);
-            }
+            let permission_event = permission_request_to_event_data(&perm_req.request);
 
             if self
                 .event_tx
                 .send(AgentStreamEvent::AcpPermission(permission_event))
                 .is_err()
+                && let Some(response_tx) = self.pending_permissions.lock().unwrap().remove(&call_id)
             {
-                if let Some(response_tx) = self.pending_permissions.lock().unwrap().remove(&call_id)
-                {
-                    let _ = response_tx.send(PermissionDecision::Cancelled);
-                }
+                let _ = response_tx.send(PermissionDecision::Cancelled);
             }
         }
     }
@@ -637,12 +611,6 @@ mod tests {
             SessionResumeStrategy::for_backend(AcpBackend::Kiro),
             SessionResumeStrategy::NewAndPrompt
         );
-    }
-
-    #[test]
-    fn permission_call_id_prefers_tool_call_id() {
-        let tool_call = json!({ "tool_call_id": "tool-123" });
-        assert_eq!(permission_call_id(&tool_call), "tool-123");
     }
 
     #[test]

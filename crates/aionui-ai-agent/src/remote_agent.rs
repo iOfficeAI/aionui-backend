@@ -217,8 +217,8 @@ impl RemoteAgentManager {
                 let mut state = self.state.write().await;
                 state.status = Some(ConversationStatus::Finished);
             }
-            AgentStreamEvent::Permission(data) => {
-                if let Ok(conf) = serde_json::from_value::<Confirmation>(data.clone()) {
+            AgentStreamEvent::AcpPermission(data) => {
+                if let Some(conf) = data.as_confirmation() {
                     let mut guard = self.state.write().await;
                     if let Some(existing) = guard
                         .confirmations

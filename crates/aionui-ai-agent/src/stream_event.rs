@@ -200,6 +200,109 @@ pub struct AcpToolCallLocationItem {
     pub path: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum AcpPermissionEventData {
+    Request(AcpPermissionRequestData),
+    Confirmation(Confirmation),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AcpPermissionRequestData {
+    #[serde(default)]
+    pub session_id: String,
+    pub tool_call: AcpPermissionToolCall,
+    pub options: Vec<AcpPermissionOptionData>,
+    #[serde(rename = "_meta", skip_serializing_if = "Option::is_none")]
+    pub meta: Option<SdkMeta>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AcpPermissionToolCall {
+    pub tool_call_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<AcpToolCallStatus>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<AcpToolCallKind>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw_input: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub raw_output: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<Vec<AcpToolCallContentItem>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub locations: Option<Vec<AcpToolCallLocationItem>>,
+    #[serde(rename = "_meta", skip_serializing_if = "Option::is_none")]
+    pub meta: Option<SdkMeta>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AcpPermissionOptionData {
+    pub option_id: String,
+    pub name: String,
+    pub kind: AcpPermissionOptionKind,
+    #[serde(rename = "_meta", skip_serializing_if = "Option::is_none")]
+    pub meta: Option<SdkMeta>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AcpPermissionOptionKind {
+    AllowOnce,
+    AllowAlways,
+    RejectOnce,
+    RejectAlways,
+}
+
+impl AcpPermissionEventData {
+    pub fn as_confirmation(&self) -> Option<Confirmation> {
+        match self {
+            Self::Confirmation(conf) => Some(conf.clone()),
+            Self::Request(req) => Some(req.to_confirmation()),
+        }
+    }
+}
+
+impl AcpPermissionRequestData {
+    pub fn to_confirmation(&self) -> Confirmation {
+        Confirmation {
+            id: self.tool_call.tool_call_id.clone(),
+            call_id: self.tool_call.tool_call_id.clone(),
+            title: self.tool_call.title.clone(),
+            action: None,
+            description: self
+                .tool_call
+                .raw_input
+                .as_ref()
+                .and_then(|raw| raw.get("description").and_then(Value::as_str))
+                .map(ToOwned::to_owned)
+                .unwrap_or_else(|| {
+                    self.tool_call
+                        .raw_input
+                        .as_ref()
+                        .map(Value::to_string)
+                        .unwrap_or_default()
+                }),
+            command_type: self.tool_call.kind.map(|kind| match kind {
+                AcpToolCallKind::Read => "read".to_owned(),
+                AcpToolCallKind::Edit => "edit".to_owned(),
+                AcpToolCallKind::Execute => "execute".to_owned(),
+            }),
+            options: self
+                .options
+                .iter()
+                .map(|opt| ConfirmationOption {
+                    label: opt.name.clone(),
+                    value: Value::String(opt.option_id.clone()),
+                    params: None,
+                })
+                .collect(),
+        }
+    }
+}
+
 /// Status of a tool call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -329,7 +432,7 @@ pub fn session_notification_to_events(notif: &SessionNotification) -> Vec<AgentS
 
         SessionUpdate::ToolCall(tc) => {
             events.push(AgentStreamEvent::AcpToolCall(AcpToolCallEventData {
-                session_id: session_id.into(),
+                session_id,
                 update: AcpToolCallUpdateData {
                     session_update: AcpToolCallSessionUpdateKind::ToolCall,
                     tool_call_id: tc.tool_call_id.to_string(),
@@ -347,7 +450,7 @@ pub fn session_notification_to_events(notif: &SessionNotification) -> Vec<AgentS
 
         SessionUpdate::ToolCallUpdate(tcu) => {
             events.push(AgentStreamEvent::AcpToolCall(AcpToolCallEventData {
-                session_id: session_id.into(),
+                session_id,
                 update: AcpToolCallUpdateData {
                     session_update: AcpToolCallSessionUpdateKind::ToolCallUpdate,
                     tool_call_id: tcu.tool_call_id.to_string(),
@@ -451,6 +554,58 @@ fn map_sdk_tool_kind(kind: &SdkToolKind) -> AcpToolCallKind {
     }
 }
 
+fn map_sdk_permission_option_kind(kind: SdkPermissionOptionKind) -> AcpPermissionOptionKind {
+    match kind {
+        SdkPermissionOptionKind::AllowOnce => AcpPermissionOptionKind::AllowOnce,
+        SdkPermissionOptionKind::AllowAlways => AcpPermissionOptionKind::AllowAlways,
+        SdkPermissionOptionKind::RejectOnce => AcpPermissionOptionKind::RejectOnce,
+        SdkPermissionOptionKind::RejectAlways => AcpPermissionOptionKind::RejectAlways,
+        _ => AcpPermissionOptionKind::RejectOnce,
+    }
+}
+
+pub fn permission_request_to_event_data(
+    request: &RequestPermissionRequest,
+) -> AcpPermissionEventData {
+    AcpPermissionEventData::Request(AcpPermissionRequestData {
+        session_id: request.session_id.to_string(),
+        tool_call: map_permission_tool_call(&request.tool_call),
+        options: request.options.iter().map(map_permission_option).collect(),
+        meta: request.meta.clone(),
+    })
+}
+
+fn map_permission_tool_call(tool_call: &SdkToolCallUpdate) -> AcpPermissionToolCall {
+    AcpPermissionToolCall {
+        tool_call_id: tool_call.tool_call_id.to_string(),
+        status: tool_call.fields.status.as_ref().map(map_sdk_tool_status),
+        title: tool_call.fields.title.clone(),
+        kind: tool_call.fields.kind.as_ref().map(map_sdk_tool_kind),
+        raw_input: tool_call.fields.raw_input.clone(),
+        raw_output: tool_call.fields.raw_output.clone(),
+        content: tool_call
+            .fields
+            .content
+            .as_ref()
+            .and_then(|content| map_tool_call_content(content)),
+        locations: tool_call
+            .fields
+            .locations
+            .as_ref()
+            .and_then(|locations| map_tool_call_locations(locations)),
+        meta: tool_call.meta.clone(),
+    }
+}
+
+fn map_permission_option(option: &PermissionOption) -> AcpPermissionOptionData {
+    AcpPermissionOptionData {
+        option_id: option.option_id.to_string(),
+        name: option.name.clone(),
+        kind: map_sdk_permission_option_kind(option.kind),
+        meta: option.meta.clone(),
+    }
+}
+
 fn map_tool_call_content(content: &[SdkToolCallContent]) -> Option<Vec<AcpToolCallContentItem>> {
     let items: Vec<AcpToolCallContentItem> = content
         .iter()
@@ -494,9 +649,9 @@ fn map_tool_call_locations(
 mod tests {
     use super::*;
     use agent_client_protocol::schema::{
-        SessionNotification, SessionUpdate, ToolCall as SdkToolCall,
-        ToolCallStatus as SdkToolCallStatus, ToolCallUpdate as SdkToolCallUpdate,
-        ToolCallUpdateFields, ToolKind as SdkToolKind,
+        PermissionOption, PermissionOptionKind as SdkPermissionOptionKind, SessionNotification,
+        SessionUpdate, ToolCall as SdkToolCall, ToolCallStatus as SdkToolCallStatus,
+        ToolCallUpdate as SdkToolCallUpdate, ToolCallUpdateFields, ToolKind as SdkToolKind,
     };
     use serde_json::json;
 
@@ -651,6 +806,39 @@ mod tests {
         assert_eq!(json["data"]["update"]["status"], "completed");
         assert!(json["data"]["update"].get("title").is_none());
         assert!(json["data"]["update"].get("rawInput").is_none());
+    }
+
+    #[test]
+    fn permission_request_maps_to_snake_case_event_data() {
+        let request = RequestPermissionRequest::new(
+            "sess-1",
+            SdkToolCallUpdate::new(
+                "tool-1",
+                ToolCallUpdateFields::new()
+                    .title("Write file")
+                    .kind(SdkToolKind::Edit)
+                    .raw_input(json!({ "file_path": "/tmp/a.txt" })),
+            ),
+            vec![
+                PermissionOption::new("allow", "Allow", SdkPermissionOptionKind::AllowOnce),
+                PermissionOption::new("reject", "Reject", SdkPermissionOptionKind::RejectOnce),
+            ],
+        );
+
+        let event = AgentStreamEvent::AcpPermission(permission_request_to_event_data(&request));
+        let json = serde_json::to_value(&event).unwrap();
+
+        assert_eq!(json["type"], "acp_permission");
+        assert_eq!(json["data"]["session_id"], "sess-1");
+        assert_eq!(json["data"]["tool_call"]["tool_call_id"], "tool-1");
+        assert_eq!(
+            json["data"]["tool_call"]["raw_input"]["file_path"],
+            "/tmp/a.txt"
+        );
+        assert_eq!(json["data"]["options"][0]["option_id"], "allow");
+        assert_eq!(json["data"]["options"][0]["kind"], "allow_once");
+        assert!(json["data"].get("toolCall").is_none());
+        assert!(json["data"]["options"][0].get("optionId").is_none());
     }
 
     #[test]

@@ -522,23 +522,22 @@ impl ConversationService {
             .get_task(conversation_id)
             .ok_or_else(|| AppError::NotFound("No active agent for this conversation".into()))?;
 
-        // Verify the confirmation exists
         let confirmations = agent.get_confirmations();
-        let conf = confirmations
+        let conf_id = confirmations
             .iter()
             .find(|c| c.call_id == call_id)
-            .ok_or_else(|| AppError::NotFound(format!("Confirmation {call_id} not found")))?;
-        let conf_id = conf.id.clone();
+            .map(|c| c.id.clone());
 
         agent.confirm(&req.msg_id, call_id, req.data, req.always_allow)?;
 
-        // Broadcast confirmation.remove
-        let payload = serde_json::json!({
-            "conversation_id": conversation_id,
-            "id": conf_id,
-        });
-        let msg = WebSocketMessage::new("confirmation.remove", payload);
-        self.broadcaster.broadcast(msg);
+        if let Some(conf_id) = conf_id {
+            let payload = serde_json::json!({
+                "conversation_id": conversation_id,
+                "id": conf_id,
+            });
+            let msg = WebSocketMessage::new("confirmation.remove", payload);
+            self.broadcaster.broadcast(msg);
+        }
 
         Ok(())
     }

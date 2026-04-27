@@ -3,7 +3,7 @@ default:
     @just --list
 
 # Build in release mode and install to ~/.cargo/bin
-build:
+build: lint fmt
     cargo build --release
     cp target/release/aionui-backend ~/.cargo/bin/
     codesign --force --sign - ~/.cargo/bin/aionui-backend

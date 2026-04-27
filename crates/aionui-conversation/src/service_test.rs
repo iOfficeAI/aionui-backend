@@ -872,6 +872,7 @@ struct MockAgent {
     stopped: Mutex<bool>,
     confirmations: Mutex<Vec<Confirmation>>,
     approval_memory: Mutex<std::collections::HashMap<String, bool>>,
+    allow_direct_confirm: bool,
     /// Optional workspace override; falls back to "/tmp/test" when `None`.
     workspace_override: Option<String>,
 }
@@ -885,6 +886,7 @@ impl MockAgent {
             stopped: Mutex::new(false),
             confirmations: Mutex::new(vec![]),
             approval_memory: Mutex::new(std::collections::HashMap::new()),
+            allow_direct_confirm: false,
             workspace_override: None,
         }
     }
@@ -897,6 +899,20 @@ impl MockAgent {
             stopped: Mutex::new(false),
             confirmations: Mutex::new(confirmations),
             approval_memory: Mutex::new(std::collections::HashMap::new()),
+            allow_direct_confirm: false,
+            workspace_override: None,
+        }
+    }
+
+    fn with_direct_confirm(conversation_id: &str) -> Self {
+        let (event_tx, _) = broadcast::channel(64);
+        Self {
+            conversation_id: conversation_id.to_owned(),
+            event_tx,
+            stopped: Mutex::new(false),
+            confirmations: Mutex::new(vec![]),
+            approval_memory: Mutex::new(std::collections::HashMap::new()),
+            allow_direct_confirm: true,
             workspace_override: None,
         }
     }
@@ -941,6 +957,12 @@ impl IAgentManager for MockAgent {
         always_allow: bool,
     ) -> Result<(), AppError> {
         let mut confs = self.confirmations.lock().unwrap();
+        let existed = confs.iter().any(|c| c.call_id == call_id);
+        if !existed && !self.allow_direct_confirm {
+            return Err(AppError::NotFound(format!(
+                "Confirmation {call_id} not found"
+            )));
+        }
         if always_allow {
             if let Some(conf) = confs.iter().find(|c| c.call_id == call_id) {
                 let key = match (conf.action.as_deref(), conf.command_type.as_deref()) {
@@ -1543,6 +1565,35 @@ async fn confirm_nonexistent_call_id_returns_not_found() {
         .await
         .unwrap_err();
     assert!(matches!(err, AppError::NotFound(_)));
+}
+
+#[tokio::test]
+async fn confirm_without_confirmation_state_still_calls_agent() {
+    let (svc, broadcaster, _repo, _task_mgr) = make_service();
+    let task_mgr = Arc::new(MockTaskManager::new());
+
+    let conv = svc.create("user_1", make_create_req()).await.unwrap();
+    broadcaster.take_events();
+
+    let agent: AgentManagerHandle = Arc::new(MockAgent::with_direct_confirm(&conv.id));
+    task_mgr.insert_agent(&conv.id, agent);
+
+    let req = aionui_api_types::ConfirmRequest {
+        msg_id: "msg-1".into(),
+        data: json!("allow_once"),
+        always_allow: false,
+    };
+    svc.confirm(
+        "user_1",
+        &conv.id,
+        "call-1",
+        req,
+        &(task_mgr.clone() as Arc<dyn IWorkerTaskManager>),
+    )
+    .await
+    .unwrap();
+
+    assert!(broadcaster.take_events().is_empty());
 }
 
 #[tokio::test]

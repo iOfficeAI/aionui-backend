@@ -286,34 +286,6 @@ async fn acp_agent_model_info_captured() {
 
 #[tokio::test]
 #[ignore = "requires JSON-RPC mock agent"]
-async fn acp_agent_ensure_yolo_claude() {
-    let _guard = serial();
-    let (agent, _rx) = make_mock_agent(
-        r#"while read line; do echo "{\"type\":\"text\",\"data\":{\"content\":\"ok\"}}"; done"#,
-        AcpBackend::Claude,
-    )
-    .await;
-
-    let result = agent.ensure_yolo_mode().await;
-    assert!(result, "Claude should support YOLO mode");
-
-    agent.kill(None).unwrap();
-}
-
-#[tokio::test]
-#[ignore = "requires JSON-RPC mock agent"]
-async fn acp_agent_ensure_yolo_unsupported_backend() {
-    let _guard = serial();
-    let (agent, _rx) = make_mock_agent(r#"sleep 10"#, AcpBackend::Kiro).await;
-
-    let result = agent.ensure_yolo_mode().await;
-    assert!(!result, "Kiro should not support YOLO mode");
-
-    agent.kill(None).unwrap();
-}
-
-#[tokio::test]
-#[ignore = "requires JSON-RPC mock agent"]
 async fn acp_agent_kill_terminates_process() {
     let _guard = serial();
     let (agent, _rx) = make_mock_agent(
