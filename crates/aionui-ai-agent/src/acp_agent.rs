@@ -4,16 +4,15 @@ use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
-use crate::acp_protocol::{
-    AcpProtocol, CancelNotification, ContentBlock, LoadSessionRequest, NewSessionRequest,
-    PermissionDecision, PermissionRequest, PromptRequest, SessionId, SetSessionConfigOptionRequest,
-    SetSessionModeRequest, SetSessionModelRequest,
-};
-use crate::acp_runtime_snapshot::AcpRuntimeSnapshot;
+use crate::acp_protocol::{AcpProtocol, PermissionDecision, PermissionRequest};
 
-use crate::acp_runtime_snapshot::{
-    AgentCapabilities, SessionConfigOption, SessionModelState, UsageUpdate,
+use crate::acp_runtime_snapshot::AcpRuntimeSnapshot;
+use agent_client_protocol::schema::{
+    AgentCapabilities, CancelNotification, ContentBlock, LoadSessionRequest, NewSessionRequest,
+    PromptRequest, SessionConfigOption, SessionId, SessionModeState, SessionModelState,
+    SetSessionConfigOptionRequest, SetSessionModeRequest, SetSessionModelRequest, UsageUpdate,
 };
+
 use crate::cli_process::CliAgentProcess;
 use crate::stream_event::{AgentStreamEvent, permission_request_to_event_data};
 use crate::types::{AcpBuildExtra, SendMessageData};
@@ -114,6 +113,94 @@ pub struct AcpAgentManager {
     closing: std::sync::atomic::AtomicBool,
     /// Shared skill manager — used to discover skills for first-message injection.
     skill_manager: Arc<crate::skill_manager::AcpSkillManager>,
+}
+
+impl AcpAgentManager {
+    /// Current session mode id. Falls back to the configured session mode,
+    /// then to `"default"`. Reading a cached snapshot is infallible.
+    pub async fn modes(&self) -> Option<SessionModeState> {
+        let snapshot = self.runtime_snapshot.read().await;
+        snapshot.modes().cloned()
+    }
+
+    async fn _set_modes(&self, mode: &str) -> Result<(), AppError> {
+        let sid = self.require_session_id().await?;
+        self.protocol
+            .set_mode(SetSessionModeRequest::new(
+                SessionId::new(sid),
+                mode.to_owned(),
+            ))
+            .await
+            .map_err(AppError::from)
+            .map(|_| ())
+    }
+
+    /// Cached model info from the ACP backend, if any has been received.
+    pub async fn model_info(&self) -> Option<SessionModelState> {
+        let snapshot = self.runtime_snapshot.read().await;
+        snapshot.model_info().cloned()
+    }
+
+    /// Set the model for the current session.
+    pub async fn set_model_info(&self, model_id: &str) -> Result<(), AppError> {
+        let sid = self.require_session_id().await?;
+
+        self.protocol
+            .set_model(SetSessionModelRequest::new(
+                SessionId::new(sid),
+                model_id.to_owned(),
+            ))
+            .await
+            .map_err(AppError::from)?;
+
+        // Update the snapshot immediately since SDK does not send a
+        // CurrentModelUpdate notification for model changes.
+        {
+            let mut snapshot = self.runtime_snapshot.write().await;
+            if let Some(info) = snapshot.model_info().cloned() {
+                let updated = SessionModelState::new(model_id.to_owned(), info.available_models);
+                snapshot.set_model_info(updated);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Cached session configuration options.
+    pub async fn config_options(&self) -> Vec<SessionConfigOption> {
+        let snapshot = self.runtime_snapshot.read().await;
+        snapshot
+            .config_options()
+            .map(<[SessionConfigOption]>::to_vec)
+            .unwrap_or_default()
+    }
+
+    /// Set a session configuration option.
+    pub async fn set_config_option(&self, config_id: &str, value: &str) -> Result<(), AppError> {
+        let sid = self.require_session_id().await?;
+
+        self.protocol
+            .set_config_option(SetSessionConfigOptionRequest::new(
+                SessionId::new(sid),
+                config_id.to_owned(),
+                value.to_owned(),
+            ))
+            .await
+            .map_err(AppError::from)
+            .map(|_| ())
+    }
+
+    /// Agent capabilities captured during the ACP initialize handshake.
+    pub async fn agent_capabilities(&self) -> Option<AgentCapabilities> {
+        let snapshot = self.runtime_snapshot.read().await;
+        snapshot.agent_capabilities().cloned()
+    }
+
+    /// Cached context usage info from the ACP backend.
+    pub async fn usage(&self) -> Option<UsageUpdate> {
+        let snapshot = self.runtime_snapshot.read().await;
+        snapshot.context_usage().cloned()
+    }
 }
 
 impl AcpAgentManager {
@@ -280,13 +367,28 @@ impl AcpAgentManager {
             crate::stream_event::StartEventData { session_id: None },
         ));
 
-        let session_id = self
+        let session_response = self
             .protocol
             .new_session(NewSessionRequest::new(&self.workspace))
             .await
             .map_err(AppError::from)?;
 
-        let sid = session_id.to_string();
+        let sid = session_response.session_id.to_string();
+
+        // Populate the runtime snapshot from the session response
+        {
+            let mut snapshot = self.runtime_snapshot.write().await;
+            if let Some(models) = session_response.models {
+                snapshot.set_model_info(models);
+            }
+            if let Some(modes) = session_response.modes {
+                snapshot.set_modes(modes);
+            }
+            if let Some(config_options) = session_response.config_options {
+                snapshot.set_config_options(config_options);
+            }
+        }
+        self.emit_snapshot_events().await;
         {
             let mut state = self.state.write().await;
             state.session_id = Some(sid.clone());
@@ -343,14 +445,28 @@ impl AcpAgentManager {
         if strategy == SessionResumeStrategy::SessionLoad
             && let Some(sid) = session_id
         {
-            self.protocol
+            let resp = self
+                .protocol
                 .load_session(LoadSessionRequest::new(
                     SessionId::new(sid),
                     &self.workspace,
                 ))
                 .await
                 .map_err(AppError::from)?;
+
+            let mut snapshot = self.runtime_snapshot.write().await;
+            if let Some(models) = resp.models {
+                snapshot.set_model_info(models);
+            }
+            if let Some(modes) = resp.modes {
+                snapshot.set_modes(modes);
+            }
+            if let Some(config_options) = resp.config_options {
+                snapshot.set_config_options(config_options);
+            }
         }
+
+        self.emit_snapshot_events().await;
 
         self.prompt_existing_session(data, session_id).await
     }
@@ -389,69 +505,47 @@ impl AcpAgentManager {
         Ok(())
     }
 
-    // -- ACP-specific extended methods (beyond IAgentManager) --
+    /// Emit model/mode/config events from the current snapshot so the frontend
+    /// receives the initial session state via WebSocket immediately after
+    /// session creation or load.
+    async fn emit_snapshot_events(&self) {
+        use aionui_api_types::{ModelInfoEntry, ModelInfoPayload};
 
-    /// Current session mode id. Falls back to the configured session mode,
-    /// then to `"default"`. Reading a cached snapshot is infallible.
-    pub async fn mode_id(&self) -> String {
         let snapshot = self.runtime_snapshot.read().await;
-        snapshot
-            .current_mode_id()
-            .or_else(|| self.config.session_mode.clone())
-            .unwrap_or_else(|| "default".to_owned())
-    }
-
-    /// Cached model info from the ACP backend, if any has been received.
-    pub async fn model_info(&self) -> Option<SessionModelState> {
-        let snapshot = self.runtime_snapshot.read().await;
-        snapshot.model_info().cloned()
-    }
-
-    /// Cached session configuration options.
-    pub async fn config_options(&self) -> Vec<SessionConfigOption> {
-        let snapshot = self.runtime_snapshot.read().await;
-        snapshot
-            .config_options()
-            .map(<[SessionConfigOption]>::to_vec)
-            .unwrap_or_default()
-    }
-
-    /// Agent capabilities captured during the ACP initialize handshake.
-    pub async fn agent_capabilities(&self) -> Option<AgentCapabilities> {
-        let snapshot = self.runtime_snapshot.read().await;
-        snapshot.agent_capabilities().cloned()
-    }
-
-    /// Cached context usage info from the ACP backend.
-    pub async fn usage(&self) -> Option<UsageUpdate> {
-        let snapshot = self.runtime_snapshot.read().await;
-        snapshot.context_usage().cloned()
-    }
-    /// Set the model for the current session.
-    pub async fn set_model(&self, model_id: &str) -> Result<(), AppError> {
-        let sid = self.require_session_id().await?;
-
-        self.protocol
-            .set_model(SetSessionModelRequest::new(
-                SessionId::new(sid),
-                model_id.to_owned(),
-            ))
-            .await
-            .map_err(AppError::from)
-    }
-
-    /// Set a session configuration option.
-    pub async fn set_config_option(&self, config_id: &str, value: &str) -> Result<(), AppError> {
-        let sid = self.require_session_id().await?;
-
-        self.protocol
-            .set_config_option(SetSessionConfigOptionRequest::new(
-                SessionId::new(sid),
-                config_id.to_owned(),
-                value.to_owned(),
-            ))
-            .await
-            .map_err(AppError::from)
+        if let Some(models) = snapshot.model_info() {
+            let current_id = models.current_model_id.to_string();
+            let available: Vec<ModelInfoEntry> = models
+                .available_models
+                .iter()
+                .map(|am| ModelInfoEntry {
+                    id: am.model_id.to_string(),
+                    label: am.name.clone(),
+                })
+                .collect();
+            let current_label = available
+                .iter()
+                .find(|e| e.id == current_id)
+                .map(|e| e.label.clone())
+                .unwrap_or_else(|| current_id.clone());
+            let payload = ModelInfoPayload {
+                current_model_id: Some(current_id),
+                current_model_label: Some(current_label),
+                available_models: available,
+            };
+            if let Ok(v) = serde_json::to_value(&payload) {
+                let _ = self.event_tx.send(AgentStreamEvent::AcpModelInfo(v));
+            }
+        }
+        if let Some(modes) = snapshot.modes()
+            && let Ok(v) = serde_json::to_value(modes)
+        {
+            let _ = self.event_tx.send(AgentStreamEvent::AcpModeInfo(v));
+        }
+        if let Some(config_options) = snapshot.config_options()
+            && let Ok(v) = serde_json::to_value(config_options)
+        {
+            let _ = self.event_tx.send(AgentStreamEvent::AcpConfigOption(v));
+        }
     }
 
     /// Request the ACP backend to load available slash commands.
@@ -605,7 +699,12 @@ impl crate::agent_manager::IAgentManager for AcpAgentManager {
 
     async fn get_mode(&self) -> Result<aionui_api_types::AgentModeResponse, AppError> {
         Ok(aionui_api_types::AgentModeResponse {
-            mode: self.mode_id().await,
+            mode: self
+                .modes()
+                .await
+                .map(|modes| modes.current_mode_id.to_string())
+                .or_else(|| self.config.session_mode.clone())
+                .unwrap_or_else(|| "default".to_owned()),
             initialized: self.session_id().await.is_some(),
         })
     }
@@ -619,6 +718,7 @@ impl crate::agent_manager::IAgentManager for AcpAgentManager {
             ))
             .await
             .map_err(AppError::from)
+            .map(|_| ())
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

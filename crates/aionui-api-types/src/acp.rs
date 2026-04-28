@@ -58,6 +58,30 @@ pub struct SetModelRequest {
     pub model_id: String,
 }
 
+/// A single available model entry in the frontend-facing model info response.
+#[derive(Debug, Clone, Serialize)]
+pub struct ModelInfoEntry {
+    pub id: String,
+    pub label: String,
+}
+
+/// Frontend-compatible model info response.
+///
+/// Maps from the SDK's camelCase `SessionModelState` to the snake_case
+/// `AcpModelInfo` format the renderer expects.
+#[derive(Debug, Serialize)]
+pub struct GetModelInfoResponse {
+    pub model_info: Option<ModelInfoPayload>,
+}
+
+/// Inner model info payload matching the frontend's `AcpModelInfo` type.
+#[derive(Debug, Clone, Serialize)]
+pub struct ModelInfoPayload {
+    pub current_model_id: Option<String>,
+    pub current_model_label: Option<String>,
+    pub available_models: Vec<ModelInfoEntry>,
+}
+
 /// Request body for probing model information.
 #[derive(Debug, Deserialize)]
 pub struct ProbeModelRequest {

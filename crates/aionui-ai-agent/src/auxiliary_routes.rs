@@ -6,23 +6,20 @@ use axum::extract::{Extension, Json, Path, Query, State};
 use axum::routing::{get, post};
 
 use crate::acp_agent::AcpAgentManager;
-use crate::acp_runtime_snapshot::{
-    AgentCapabilities, SessionConfigOption, SessionModelState, UsageUpdate,
-};
+use crate::acp_runtime_snapshot::{AgentCapabilities, SessionConfigOption, UsageUpdate};
 use crate::agent_manager::AgentManagerHandle;
 use crate::openclaw::OpenClawAgentManager;
 use crate::task_manager::IWorkerTaskManager;
 use crate::types::SlashCommandItem;
 use aionui_api_types::{
-    AgentModeResponse, ApiResponse, SetConfigOptionRequest, SetConfigOptionsRequest,
-    SetModeRequest, SetModelRequest, SideQuestionRequest, SideQuestionResponse,
-    WorkspaceBrowseQuery, WorkspaceEntry,
+    AgentModeResponse, ApiResponse, GetModelInfoResponse, ModelInfoEntry, ModelInfoPayload,
+    SetConfigOptionRequest, SetConfigOptionsRequest, SetModeRequest, SetModelRequest,
+    SideQuestionRequest, SideQuestionResponse, WorkspaceBrowseQuery, WorkspaceEntry,
 };
 use aionui_auth::CurrentUser;
 use aionui_common::{AgentType, AppError};
 use aionui_db::IConversationRepository;
 use serde::Deserialize;
-use tracing::debug;
 
 /// Router state for auxiliary conversation routes.
 #[derive(Clone)]
@@ -289,7 +286,7 @@ async fn get_model(
     State(state): State<AuxiliaryRouterState>,
     Extension(_user): Extension<CurrentUser>,
     Path(id): Path<String>,
-) -> Result<Json<ApiResponse<Option<SessionModelState>>>, AppError> {
+) -> Result<Json<ApiResponse<GetModelInfoResponse>>, AppError> {
     let handle = get_task(&state, &id)?;
 
     if handle.agent_type() != AgentType::Acp {
@@ -299,9 +296,33 @@ async fn get_model(
     }
 
     let acp = downcast_acp(&handle)?;
-    let resp = acp.model_info().await;
-    debug!("Current ACP model info for conversation {id}: {resp:?}");
-    Ok(Json(ApiResponse::ok(resp)))
+    let sdk_model = acp.model_info().await;
+
+    let model_info = sdk_model.map(|m| {
+        let available: Vec<ModelInfoEntry> = m
+            .available_models
+            .iter()
+            .map(|am| ModelInfoEntry {
+                id: am.model_id.to_string(),
+                label: am.name.clone(),
+            })
+            .collect();
+
+        let current_id = m.current_model_id.to_string();
+        let current_label = available
+            .iter()
+            .find(|e| e.id == current_id)
+            .map(|e| e.label.clone())
+            .unwrap_or_else(|| current_id.clone());
+
+        ModelInfoPayload {
+            current_model_id: Some(current_id),
+            current_model_label: Some(current_label),
+            available_models: available,
+        }
+    });
+
+    Ok(Json(ApiResponse::ok(GetModelInfoResponse { model_info })))
 }
 
 async fn set_model(
@@ -323,7 +344,7 @@ async fn set_model(
     }
 
     let acp = downcast_acp(&handle)?;
-    acp.set_model(&req.model_id).await?;
+    acp.set_model_info(&req.model_id).await?;
     Ok(Json(ApiResponse::success()))
 }
 

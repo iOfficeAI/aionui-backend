@@ -2,7 +2,6 @@ use crate::stream_event::AgentStreamEvent;
 pub use agent_client_protocol::schema::{
     AgentCapabilities, SessionConfigOption, SessionModeState, SessionModelState, UsageUpdate,
 };
-use agent_client_protocol::schema::{ConfigOptionUpdate, CurrentModeUpdate};
 
 #[derive(Debug, Clone, Default)]
 pub struct AcpRuntimeSnapshot {
@@ -29,6 +28,7 @@ impl AcpRuntimeSnapshot {
     pub fn agent_capabilities(&self) -> Option<&AgentCapabilities> {
         self.agent_capabilities.as_ref()
     }
+
     pub fn set_modes(&mut self, modes: SessionModeState) {
         self.modes = Some(modes);
     }
@@ -48,23 +48,25 @@ impl AcpRuntimeSnapshot {
     pub fn apply_event(&mut self, event: &AgentStreamEvent) {
         match event {
             AgentStreamEvent::AcpModeInfo(value) => {
-                if let Ok(update) = serde_json::from_value::<CurrentModeUpdate>(value.clone()) {
-                    self.apply_mode_update(update);
-                }
-            }
-            AgentStreamEvent::AcpConfigOption(value) => {
-                if let Ok(update) = serde_json::from_value::<ConfigOptionUpdate>(value.clone()) {
-                    self.apply_config_update(update);
+                if let Ok(update) = serde_json::from_value::<SessionModeState>(value.clone()) {
+                    self.modes = Some(update);
                 }
             }
             AgentStreamEvent::AcpModelInfo(value) => {
-                if let Ok(model_info) = serde_json::from_value::<SessionModelState>(value.clone()) {
-                    self.model_info = Some(model_info);
+                if let Ok(update) = serde_json::from_value::<SessionModelState>(value.clone()) {
+                    self.model_info = Some(update);
+                }
+            }
+            AgentStreamEvent::AcpConfigOption(value) => {
+                if let Ok(update) =
+                    serde_json::from_value::<Vec<SessionConfigOption>>(value.clone())
+                {
+                    self.config_options = Some(update);
                 }
             }
             AgentStreamEvent::AcpContextUsage(value) => {
-                if let Ok(usage) = serde_json::from_value::<UsageUpdate>(value.clone()) {
-                    self.context_usage = Some(usage);
+                if let Ok(update) = serde_json::from_value::<UsageUpdate>(value.clone()) {
+                    self.context_usage = Some(update);
                 }
             }
             _ => {}
@@ -76,33 +78,13 @@ impl AcpRuntimeSnapshot {
             .as_ref()
             .map(|modes| modes.current_mode_id.to_string())
     }
-
-    fn apply_mode_update(&mut self, update: CurrentModeUpdate) {
-        match &mut self.modes {
-            Some(modes) => {
-                modes.current_mode_id = update.current_mode_id;
-                if update.meta.is_some() {
-                    modes.meta = update.meta;
-                }
-            }
-            None => {
-                self.modes = Some(
-                    SessionModeState::new(update.current_mode_id, Vec::new()).meta(update.meta),
-                );
-            }
-        }
-    }
-
-    fn apply_config_update(&mut self, update: ConfigOptionUpdate) {
-        self.config_options = Some(update.config_options);
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use agent_client_protocol::schema::{
-        ConfigOptionUpdate, ModelInfo, SessionConfigOption, SessionConfigSelectOption, SessionMode,
-        SessionModeState, SessionModelState, UsageUpdate,
+        ModelInfo, SessionConfigOption, SessionConfigSelectOption, SessionMode, SessionModeState,
+        SessionModelState, UsageUpdate,
     };
     use serde_json::json;
 
@@ -142,12 +124,14 @@ mod tests {
     #[test]
     fn applies_config_update_into_sdk_config_options() {
         let mut snapshot = AcpRuntimeSnapshot::default();
-        snapshot.apply_config_update(ConfigOptionUpdate::new(vec![SessionConfigOption::select(
-            "mode",
-            "Mode",
-            "code",
-            vec![SessionConfigSelectOption::new("code", "Code")],
-        )]));
+        snapshot.apply_event(&AgentStreamEvent::AcpConfigOption(json!([
+            SessionConfigOption::select(
+                "mode",
+                "Mode",
+                "code",
+                vec![SessionConfigSelectOption::new("code", "Code")],
+            )
+        ])));
 
         let config_options = snapshot
             .config_options()
