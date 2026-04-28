@@ -440,8 +440,20 @@ fn build_agent_extra(
 
 fn parse_agent_type(backend: &str) -> Result<AgentType, TeamError> {
     let quoted = format!("\"{backend}\"");
-    serde_json::from_str::<AgentType>(&quoted)
-        .map_err(|_| TeamError::InvalidRequest(format!("unsupported backend: {backend}")))
+    // Try as AcpBackend sub-type first (e.g. "claude", "gemini", "qwen").
+    // New Gemini conversations use AgentType::Acp + backend=gemini; the
+    // legacy AgentType::Gemini variant is kept only for historical rows
+    // and must not be produced for fresh team agents.
+    if serde_json::from_str::<AcpBackend>(&quoted).is_ok() {
+        return Ok(AgentType::Acp);
+    }
+    // Then try as AgentType (e.g. "acp", "nanobot", "aionrs").
+    if let Ok(t) = serde_json::from_str::<AgentType>(&quoted) {
+        return Ok(t);
+    }
+    Err(TeamError::InvalidRequest(format!(
+        "unsupported backend: {backend}"
+    )))
 }
 
 #[cfg(test)]
@@ -454,6 +466,13 @@ mod tests {
         assert_eq!(parse_agent_type("nanobot").unwrap(), AgentType::Nanobot);
         assert_eq!(parse_agent_type("remote").unwrap(), AgentType::Remote);
         assert_eq!(parse_agent_type("aionrs").unwrap(), AgentType::Aionrs);
+    }
+
+    #[test]
+    fn parse_agent_type_acp_sub_backend_returns_acp() {
+        assert_eq!(parse_agent_type("claude").unwrap(), AgentType::Acp);
+        assert_eq!(parse_agent_type("gemini").unwrap(), AgentType::Acp);
+        assert_eq!(parse_agent_type("qwen").unwrap(), AgentType::Acp);
     }
 
     #[test]
