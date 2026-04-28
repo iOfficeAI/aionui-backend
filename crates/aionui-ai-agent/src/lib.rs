@@ -3,6 +3,7 @@ pub mod acp_agent;
 pub mod acp_error;
 pub mod acp_protocol;
 pub mod acp_routes;
+pub mod acp_runtime_snapshot;
 pub mod acp_service;
 pub mod agent_manager;
 pub mod agent_registry;

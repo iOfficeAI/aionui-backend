@@ -59,11 +59,7 @@ pub async fn inject_first_message_prefix(
 mod tests {
     use super::*;
     use aionui_extension::{BUILTIN_SKILLS_ENV_VAR, resolve_skill_paths};
-    use std::sync::Mutex;
     use tempfile::TempDir;
-
-    /// `BUILTIN_SKILLS_ENV_VAR` is process-global; serialize tests that set it.
-    static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
     fn test_mgr(base: &std::path::Path) -> Arc<AcpSkillManager> {
         let paths = Arc::new(resolve_skill_paths(base, base));
@@ -72,14 +68,13 @@ mod tests {
 
     /// Point the embedded corpus at an empty dir so tests don't pick up
     /// real auto-inject builtin skills.
-    struct EmptyBuiltinGuard(std::sync::MutexGuard<'static, ()>);
+    struct EmptyBuiltinGuard;
     impl EmptyBuiltinGuard {
         fn new(empty_path: &std::path::Path) -> Self {
-            let g = ENV_MUTEX.lock().unwrap();
             unsafe {
                 std::env::set_var(BUILTIN_SKILLS_ENV_VAR, empty_path);
             }
-            Self(g)
+            Self
         }
     }
     impl Drop for EmptyBuiltinGuard {

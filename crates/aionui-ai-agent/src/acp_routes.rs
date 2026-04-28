@@ -2,21 +2,19 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::extract::rejection::JsonRejection;
-use axum::extract::{Extension, Json, Path, State};
-use axum::routing::{get, post, put};
+use axum::extract::{Extension, Json, State};
+use axum::routing::{get, post};
 
 use aionui_api_types::{
     AcpEnvResponse, AcpHealthCheckRequest, AcpHealthCheckResponse, ApiResponse, DetectCliRequest,
-    DetectCliResponse, ProbeModelRequest, SetConfigOptionRequest, SetModelRequest,
+    DetectCliResponse, ProbeModelRequest,
 };
 use aionui_auth::CurrentUser;
-use aionui_common::{AgentType, AppError};
+use aionui_common::AppError;
 
-use crate::acp_agent::AcpAgentManager;
 use crate::acp_service;
-use crate::agent_manager::AgentManagerHandle;
 use crate::task_manager::IWorkerTaskManager;
-use crate::types::{AcpModelInfo, AcpSessionConfigOption};
+use crate::types::AcpModelInfo;
 
 /// Router state for ACP management routes.
 #[derive(Clone)]
@@ -26,7 +24,7 @@ pub struct AcpRouterState {
 
 /// Build the ACP management router.
 ///
-/// Includes both global ACP routes and per-conversation session routes.
+/// Includes global ACP routes.
 /// All routes require authentication (applied by the caller).
 pub fn acp_routes(state: AcpRouterState) -> Router {
     Router::new()
@@ -35,51 +33,7 @@ pub fn acp_routes(state: AcpRouterState) -> Router {
         .route("/api/acp/health-check", post(health_check))
         .route("/api/acp/env", get(get_env))
         .route("/api/acp/probe-model", post(probe_model))
-        // Per-conversation ACP session routes
-        .route(
-            "/api/conversations/{id}/acp/model",
-            get(get_model).put(set_model),
-        )
-        .route("/api/conversations/{id}/acp/config", get(get_config))
-        .route(
-            "/api/conversations/{id}/acp/config/{configId}",
-            put(set_config_option),
-        )
         .with_state(state)
-}
-
-/// Get the active ACP agent task for a conversation.
-///
-/// Returns the handle (keeping the Arc alive) so callers can downcast.
-/// Returns `NotFound` if no active task exists, `BadRequest` if not ACP.
-fn require_acp_task(
-    state: &AcpRouterState,
-    conversation_id: &str,
-) -> Result<AgentManagerHandle, AppError> {
-    let handle = state
-        .worker_task_manager
-        .get_task(conversation_id)
-        .ok_or_else(|| {
-            AppError::NotFound(format!(
-                "No active agent for conversation '{conversation_id}'"
-            ))
-        })?;
-
-    if handle.agent_type() != AgentType::Acp {
-        return Err(AppError::BadRequest(
-            "This operation is only available for ACP agents".into(),
-        ));
-    }
-
-    Ok(handle)
-}
-
-/// Downcast an `AgentManagerHandle` to `&AcpAgentManager`.
-fn downcast_acp(handle: &AgentManagerHandle) -> Result<&AcpAgentManager, AppError> {
-    handle
-        .as_any()
-        .downcast_ref::<AcpAgentManager>()
-        .ok_or_else(|| AppError::Internal("Failed to downcast agent to AcpAgentManager".into()))
 }
 
 // ── Global ACP routes ────────────────────────────────────────────
@@ -128,65 +82,4 @@ async fn probe_model(
     }
     // Full model probing will be wired when integrated with real ACP sessions (6.15)
     Ok(Json(ApiResponse::ok(None)))
-}
-
-// ── Per-conversation ACP session routes ──────────────────────────
-
-async fn get_model(
-    State(state): State<AcpRouterState>,
-    Extension(_user): Extension<CurrentUser>,
-    Path(id): Path<String>,
-) -> Result<Json<ApiResponse<Option<AcpModelInfo>>>, AppError> {
-    let handle = require_acp_task(&state, &id)?;
-    let acp = downcast_acp(&handle)?;
-    let info = acp.get_model_info().await;
-    Ok(Json(ApiResponse::ok(info)))
-}
-
-async fn set_model(
-    State(state): State<AcpRouterState>,
-    Extension(_user): Extension<CurrentUser>,
-    Path(id): Path<String>,
-    body: Result<Json<SetModelRequest>, JsonRejection>,
-) -> Result<Json<ApiResponse<()>>, AppError> {
-    let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
-    if req.model_id.trim().is_empty() {
-        return Err(AppError::BadRequest("modelId must not be empty".into()));
-    }
-    let handle = require_acp_task(&state, &id)?;
-    let acp = downcast_acp(&handle)?;
-    acp.set_model(&req.model_id).await?;
-    Ok(Json(ApiResponse::success()))
-}
-
-async fn get_config(
-    State(state): State<AcpRouterState>,
-    Extension(_user): Extension<CurrentUser>,
-    Path(id): Path<String>,
-) -> Result<Json<ApiResponse<Vec<AcpSessionConfigOption>>>, AppError> {
-    let handle = require_acp_task(&state, &id)?;
-    let acp = downcast_acp(&handle)?;
-    acp.get_config_options().await?;
-    // Config options arrive via event stream; return empty for sync response
-    Ok(Json(ApiResponse::ok(Vec::new())))
-}
-
-#[derive(serde::Deserialize)]
-struct ConfigPathParams {
-    id: String,
-    #[serde(rename = "configId")]
-    config_id: String,
-}
-
-async fn set_config_option(
-    State(state): State<AcpRouterState>,
-    Extension(_user): Extension<CurrentUser>,
-    Path(params): Path<ConfigPathParams>,
-    body: Result<Json<SetConfigOptionRequest>, JsonRejection>,
-) -> Result<Json<ApiResponse<()>>, AppError> {
-    let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
-    let handle = require_acp_task(&state, &params.id)?;
-    let acp = downcast_acp(&handle)?;
-    acp.set_config_option(&params.config_id, &req.value).await?;
-    Ok(Json(ApiResponse::success()))
 }

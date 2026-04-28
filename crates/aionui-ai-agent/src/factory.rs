@@ -149,6 +149,7 @@ async fn build_agent(
             .await?;
             let arc = Arc::new(agent);
             arc.start_permission_handler();
+            arc.start_runtime_snapshot_tracker();
             Ok(arc as AgentManagerHandle)
         }
         AgentType::OpenclawGateway => {

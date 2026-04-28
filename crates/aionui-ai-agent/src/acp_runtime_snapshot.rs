@@ -1,0 +1,184 @@
+use crate::stream_event::AgentStreamEvent;
+pub use agent_client_protocol::schema::{
+    AgentCapabilities, SessionConfigOption, SessionModeState, SessionModelState, UsageUpdate,
+};
+use agent_client_protocol::schema::{ConfigOptionUpdate, CurrentModeUpdate};
+
+#[derive(Debug, Clone, Default)]
+pub struct AcpRuntimeSnapshot {
+    agent_capabilities: Option<AgentCapabilities>,
+    modes: Option<SessionModeState>,
+    model_info: Option<SessionModelState>,
+    config_options: Option<Vec<SessionConfigOption>>,
+    context_usage: Option<UsageUpdate>,
+}
+
+impl AcpRuntimeSnapshot {
+    pub fn modes(&self) -> Option<&SessionModeState> {
+        self.modes.as_ref()
+    }
+    pub fn model_info(&self) -> Option<&SessionModelState> {
+        self.model_info.as_ref()
+    }
+    pub fn config_options(&self) -> Option<&[SessionConfigOption]> {
+        self.config_options.as_deref()
+    }
+    pub fn context_usage(&self) -> Option<&UsageUpdate> {
+        self.context_usage.as_ref()
+    }
+    pub fn agent_capabilities(&self) -> Option<&AgentCapabilities> {
+        self.agent_capabilities.as_ref()
+    }
+    pub fn set_modes(&mut self, modes: SessionModeState) {
+        self.modes = Some(modes);
+    }
+    pub fn set_model_info(&mut self, model_info: SessionModelState) {
+        self.model_info = Some(model_info);
+    }
+    pub fn set_config_options(&mut self, config_options: Vec<SessionConfigOption>) {
+        self.config_options = Some(config_options);
+    }
+    pub fn set_context_usage(&mut self, context_usage: UsageUpdate) {
+        self.context_usage = Some(context_usage);
+    }
+    pub fn set_agent_capabilities(&mut self, agent_capabilities: AgentCapabilities) {
+        self.agent_capabilities = Some(agent_capabilities);
+    }
+
+    pub fn apply_event(&mut self, event: &AgentStreamEvent) {
+        match event {
+            AgentStreamEvent::AcpModeInfo(value) => {
+                if let Ok(update) = serde_json::from_value::<CurrentModeUpdate>(value.clone()) {
+                    self.apply_mode_update(update);
+                }
+            }
+            AgentStreamEvent::AcpConfigOption(value) => {
+                if let Ok(update) = serde_json::from_value::<ConfigOptionUpdate>(value.clone()) {
+                    self.apply_config_update(update);
+                }
+            }
+            AgentStreamEvent::AcpModelInfo(value) => {
+                if let Ok(model_info) = serde_json::from_value::<SessionModelState>(value.clone()) {
+                    self.model_info = Some(model_info);
+                }
+            }
+            AgentStreamEvent::AcpContextUsage(value) => {
+                if let Ok(usage) = serde_json::from_value::<UsageUpdate>(value.clone()) {
+                    self.context_usage = Some(usage);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub fn current_mode_id(&self) -> Option<String> {
+        self.modes
+            .as_ref()
+            .map(|modes| modes.current_mode_id.to_string())
+    }
+
+    fn apply_mode_update(&mut self, update: CurrentModeUpdate) {
+        match &mut self.modes {
+            Some(modes) => {
+                modes.current_mode_id = update.current_mode_id;
+                if update.meta.is_some() {
+                    modes.meta = update.meta;
+                }
+            }
+            None => {
+                self.modes = Some(
+                    SessionModeState::new(update.current_mode_id, Vec::new()).meta(update.meta),
+                );
+            }
+        }
+    }
+
+    fn apply_config_update(&mut self, update: ConfigOptionUpdate) {
+        self.config_options = Some(update.config_options);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use agent_client_protocol::schema::{
+        ConfigOptionUpdate, ModelInfo, SessionConfigOption, SessionConfigSelectOption, SessionMode,
+        SessionModeState, SessionModelState, UsageUpdate,
+    };
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn stores_agent_capabilities() {
+        let mut snapshot = AcpRuntimeSnapshot::default();
+        snapshot.set_agent_capabilities(AgentCapabilities::new().load_session(true));
+
+        let caps = snapshot
+            .agent_capabilities()
+            .expect("agent capabilities should be cached");
+        assert!(caps.load_session);
+    }
+
+    #[test]
+    fn applies_mode_update_into_session_mode_state() {
+        let mut snapshot = AcpRuntimeSnapshot::default();
+        snapshot.set_modes(SessionModeState::new(
+            "code",
+            vec![
+                SessionMode::new("code", "Code"),
+                SessionMode::new("plan", "Plan"),
+            ],
+        ));
+
+        snapshot.apply_event(&AgentStreamEvent::AcpModeInfo(json!({
+            "currentModeId": "plan"
+        })));
+
+        let modes = snapshot.modes().expect("modes should exist");
+        assert_eq!(modes.current_mode_id.to_string(), "plan");
+        assert_eq!(modes.available_modes.len(), 2);
+    }
+
+    #[test]
+    fn applies_config_update_into_sdk_config_options() {
+        let mut snapshot = AcpRuntimeSnapshot::default();
+        snapshot.apply_config_update(ConfigOptionUpdate::new(vec![SessionConfigOption::select(
+            "mode",
+            "Mode",
+            "code",
+            vec![SessionConfigSelectOption::new("code", "Code")],
+        )]));
+
+        let config_options = snapshot
+            .config_options()
+            .expect("config options should be cached");
+        assert_eq!(config_options.len(), 1);
+        assert_eq!(config_options[0].name, "Mode");
+    }
+
+    #[test]
+    fn stores_model_info_and_usage() {
+        let mut snapshot = AcpRuntimeSnapshot::default();
+        snapshot.set_model_info(SessionModelState::new(
+            "claude-sonnet-4",
+            vec![ModelInfo::new("claude-sonnet-4", "Claude Sonnet 4")],
+        ));
+        snapshot.set_context_usage(UsageUpdate::new(1024, 8192));
+
+        assert_eq!(
+            snapshot
+                .model_info()
+                .expect("model info should be cached")
+                .current_model_id
+                .to_string(),
+            "claude-sonnet-4"
+        );
+        assert_eq!(
+            snapshot
+                .context_usage()
+                .expect("usage should be cached")
+                .used,
+            1024
+        );
+    }
+}

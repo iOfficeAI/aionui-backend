@@ -25,8 +25,10 @@ mod websocket;
 
 pub use acp::{
     AcpEnvResponse, AcpHealthCheckRequest, AcpHealthCheckResponse, AgentModeResponse,
-    DetectCliRequest, DetectCliResponse, ProbeModelRequest, SetConfigOptionRequest, SetModeRequest,
-    SetModelRequest, TestCustomAgentRequest, TestCustomAgentResponse,
+    DetectCliRequest, DetectCliResponse, ProbeModelRequest, SessionConfigOptionUpdate,
+    SetConfigOptionRequest, SetConfigOptionsRequest, SetModeRequest, SetModelRequest,
+    SideQuestionRequest, SideQuestionResponse, TestCustomAgentRequest, TestCustomAgentResponse,
+    WorkspaceBrowseQuery, WorkspaceEntry,
 };
 pub use agent::AgentInfo;
 pub use agent_discovery::{AgentSource, DetectedAgent, EnvVar};

@@ -8,8 +8,8 @@
 //! running inside `connect_with`. This is required because `block_task()` only
 //! works within the `connect_with` closure's execution context.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, RwLock};
 
 use agent_client_protocol::schema::{
     ClientNotification, ClientRequest, InitializeRequest, ProtocolVersion,
@@ -31,9 +31,9 @@ use crate::stream_event::{self, AgentStreamEvent};
 // Re-export SDK types used in public method signatures.
 pub use agent_client_protocol::schema::{
     AuthenticateRequest, CancelNotification, CloseSessionRequest, ContentBlock, ExtNotification,
-    ExtRequest, ForkSessionRequest, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
-    McpServer, Meta, NewSessionRequest, PromptRequest, ResumeSessionRequest, SessionId,
-    SetSessionConfigOptionRequest, SetSessionModeRequest, SetSessionModelRequest,
+    ExtRequest, ForkSessionRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
+    LoadSessionRequest, McpServer, Meta, NewSessionRequest, PromptRequest, ResumeSessionRequest,
+    SessionId, SetSessionConfigOptionRequest, SetSessionModeRequest, SetSessionModelRequest,
 };
 
 /// Type alias to shorten `agent_client_protocol::Responder<RequestPermissionResponse>`.
@@ -129,6 +129,8 @@ pub struct AcpProtocol {
     cmd_tx: mpsc::Sender<AcpCommand>,
     /// Whether the SDK connection is still alive.
     alive: Arc<AtomicBool>,
+    /// Cached initialize response from the ACP handshake.
+    initialize_response: Arc<RwLock<Option<InitializeResponse>>>,
 }
 
 impl AcpProtocol {
@@ -145,12 +147,13 @@ impl AcpProtocol {
     ) -> Result<Self, AcpError> {
         let alive = Arc::new(AtomicBool::new(true));
         let alive_clone = Arc::clone(&alive);
+        let initialize_response = Arc::new(RwLock::new(None));
 
         // Command channel: external methods → SDK event loop
         let (cmd_tx, cmd_rx) = mpsc::channel::<AcpCommand>(32);
 
         // Signal that init completed successfully
-        let (init_tx, init_rx) = oneshot::channel::<Result<(), AcpError>>();
+        let (init_tx, init_rx) = oneshot::channel::<Result<InitializeResponse, AcpError>>();
 
         let _bg_task = tokio::spawn(run_sdk_event_loop(
             stdin,
@@ -175,13 +178,24 @@ impl AcpProtocol {
                     stderr: "Init channel dropped".into(),
                 })?;
 
-        init_result?;
+        let init_response = init_result?;
+        *initialize_response.write().unwrap() = Some(init_response);
 
         Ok(Self {
             cmd_tx,
             _bg_task,
             alive,
+            initialize_response,
         })
+    }
+
+    pub fn initialize_response(&self) -> Option<InitializeResponse> {
+        self.initialize_response.read().unwrap().clone()
+    }
+
+    pub fn agent_capabilities(&self) -> Option<agent_client_protocol::schema::AgentCapabilities> {
+        self.initialize_response()
+            .map(|response| response.agent_capabilities)
     }
 
     /// Create a new ACP session.
@@ -320,7 +334,7 @@ impl AcpProtocol {
 /// Returns `Err(())` when the handshake failed (the caller should bail out).
 async fn execute_initialize(
     connection: &ConnectionTo<Agent>,
-    init_tx: oneshot::Sender<Result<(), AcpError>>,
+    init_tx: oneshot::Sender<Result<InitializeResponse, AcpError>>,
 ) -> Result<(), ()> {
     let req = InitializeRequest::new(ProtocolVersion::LATEST);
     log_request("initialize", &json_str(&req));
@@ -332,7 +346,7 @@ async fn execute_initialize(
         let _ = init_tx.send(Err(AcpError::from_sdk(e, "initialize")));
         return Err(());
     }
-    let _ = init_tx.send(Ok(()));
+    let _ = init_tx.send(raw.map_err(|e| AcpError::from_sdk(e, "initialize")));
     Ok(())
 }
 
@@ -348,7 +362,7 @@ async fn run_sdk_event_loop(
     event_tx: broadcast::Sender<AgentStreamEvent>,
     permission_tx: mpsc::Sender<PermissionRequest>,
     cmd_rx: mpsc::Receiver<AcpCommand>,
-    init_tx: oneshot::Sender<Result<(), AcpError>>,
+    init_tx: oneshot::Sender<Result<InitializeResponse, AcpError>>,
     alive: Arc<AtomicBool>,
 ) {
     let transport = ByteStreams::new(stdin.compat_write(), stdout.compat());

@@ -5,17 +5,24 @@ use axum::extract::rejection::JsonRejection;
 use axum::extract::{Extension, Json, Path, Query, State};
 use axum::routing::{get, post};
 
-use aionui_api_types::{AgentModeResponse, ApiResponse, SetModeRequest};
-use aionui_auth::CurrentUser;
-use aionui_common::{AgentType, AppError};
-use aionui_db::IConversationRepository;
-use serde::{Deserialize, Serialize};
-
 use crate::acp_agent::AcpAgentManager;
+use crate::acp_runtime_snapshot::{
+    AgentCapabilities, SessionConfigOption, SessionModelState, UsageUpdate,
+};
 use crate::agent_manager::AgentManagerHandle;
 use crate::openclaw::OpenClawAgentManager;
 use crate::task_manager::IWorkerTaskManager;
 use crate::types::SlashCommandItem;
+use aionui_api_types::{
+    AgentModeResponse, ApiResponse, SetConfigOptionRequest, SetConfigOptionsRequest,
+    SetModeRequest, SetModelRequest, SideQuestionRequest, SideQuestionResponse,
+    WorkspaceBrowseQuery, WorkspaceEntry,
+};
+use aionui_auth::CurrentUser;
+use aionui_common::{AgentType, AppError};
+use aionui_db::IConversationRepository;
+use serde::Deserialize;
+use tracing::debug;
 
 /// Router state for auxiliary conversation routes.
 #[derive(Clone)]
@@ -28,18 +35,38 @@ pub struct AuxiliaryRouterState {
 pub fn auxiliary_routes(state: AuxiliaryRouterState) -> Router {
     Router::new()
         .route("/api/conversations/{id}/workspace", get(browse_workspace))
-        .route("/api/conversations/{id}/side-question", post(side_question))
         .route(
             "/api/conversations/{id}/reload-context",
             post(reload_context),
         )
         .route(
-            "/api/conversations/{id}/slash-commands",
-            get(get_slash_commands),
+            "/api/conversations/{id}/acp/side-question",
+            post(acp_side_question),
         )
         .route(
-            "/api/conversations/{id}/mode",
-            get(get_agent_mode).put(set_agent_mode),
+            "/api/conversations/{id}/acp/slash-commands",
+            get(get_acp_slash_commands),
+        )
+        .route(
+            "/api/conversations/{id}/acp/mode",
+            get(get_acp_mode).put(set_acp_mode),
+        )
+        .route(
+            "/api/conversations/{id}/acp/model",
+            get(get_acp_model).put(set_acp_model),
+        )
+        .route(
+            "/api/conversations/{id}/acp/config",
+            get(get_acp_config_options).put(set_acp_config_options),
+        )
+        .route(
+            "/api/conversations/{id}/acp/config/{configId}",
+            get(get_acp_config_option).put(set_acp_config_option),
+        )
+        .route("/api/conversations/{id}/acp/usage", get(get_acp_usage))
+        .route(
+            "/api/conversations/{id}/acp/agent-capabilities",
+            get(get_acp_agent_capabilities),
         )
         .route(
             "/api/conversations/{id}/openclaw/runtime",
@@ -48,68 +75,11 @@ pub fn auxiliary_routes(state: AuxiliaryRouterState) -> Router {
         .with_state(state)
 }
 
-// ── Generic mode endpoints ────────────────────────────────────────
-
-async fn get_agent_mode(
-    State(state): State<AuxiliaryRouterState>,
-    Extension(_user): Extension<CurrentUser>,
-    Path(id): Path<String>,
-) -> Result<Json<ApiResponse<AgentModeResponse>>, AppError> {
-    let handle = state
-        .worker_task_manager
-        .get_task(&id)
-        .ok_or_else(|| AppError::NotFound(format!("No active agent for conversation '{id}'")))?;
-    let resp = handle.get_mode().await?;
-    Ok(Json(ApiResponse::ok(resp)))
-}
-
-async fn set_agent_mode(
-    State(state): State<AuxiliaryRouterState>,
-    Extension(_user): Extension<CurrentUser>,
-    Path(id): Path<String>,
-    body: Result<Json<SetModeRequest>, JsonRejection>,
-) -> Result<Json<ApiResponse<()>>, AppError> {
-    let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
-    if req.mode.trim().is_empty() {
-        return Err(AppError::BadRequest("mode must not be empty".into()));
-    }
-    let handle = state
-        .worker_task_manager
-        .get_task(&id)
-        .ok_or_else(|| AppError::NotFound(format!("No active agent for conversation '{id}'")))?;
-    handle.set_mode(&req.mode).await?;
-    Ok(Json(ApiResponse::success()))
-}
-
-// ── Request / Response types ───────────────────────────────────────
-
-/// Query parameters for workspace browse.
 #[derive(Debug, Deserialize)]
-pub struct WorkspaceBrowseQuery {
-    pub path: String,
-    pub search: Option<String>,
-}
-
-/// A file or directory entry in the workspace.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DirOrFile {
-    pub name: String,
-    #[serde(rename = "type")]
-    pub entry_type: String,
-}
-
-/// Request body for side question.
-#[derive(Debug, Deserialize)]
-pub struct SideQuestionRequest {
-    pub question: String,
-}
-
-/// Response for side question.
-#[derive(Debug, Serialize)]
-pub struct SideQuestionResponse {
-    pub status: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub answer: Option<String>,
+struct ConfigPathParams {
+    id: String,
+    #[serde(rename = "configId")]
+    config_id: String,
 }
 
 // ── Max depth for workspace traversal ──────────────────────────────
@@ -117,18 +87,12 @@ const MAX_DIR_DEPTH: usize = 10;
 
 // ── Route handlers ─────────────────────────────────────────────────
 
-/// GET /api/conversations/:id/workspace
-///
-/// Browse the workspace directory associated with a conversation.
-///
-/// Reads the workspace path from `conversation.extra.workspace` in the
-/// database so it works before any agent session has been started.
 async fn browse_workspace(
     State(state): State<AuxiliaryRouterState>,
     Extension(_user): Extension<CurrentUser>,
     Path(id): Path<String>,
     Query(query): Query<WorkspaceBrowseQuery>,
-) -> Result<Json<ApiResponse<Vec<DirOrFile>>>, AppError> {
+) -> Result<Json<ApiResponse<Vec<WorkspaceEntry>>>, AppError> {
     if query.path.trim().is_empty() {
         return Err(AppError::BadRequest("path must not be empty".into()));
     }
@@ -209,7 +173,7 @@ async fn browse_workspace(
             "file"
         };
 
-        entries.push(DirOrFile {
+        entries.push(WorkspaceEntry {
             name,
             entry_type: entry_type.into(),
         });
@@ -228,11 +192,20 @@ async fn browse_workspace(
     Ok(Json(ApiResponse::ok(entries)))
 }
 
-/// POST /api/conversations/:id/side-question
-///
-/// Ask a side question without interrupting the main conversation.
-/// Only supported for ACP Claude backend.
-async fn side_question(
+async fn reload_context(
+    State(state): State<AuxiliaryRouterState>,
+    Extension(_user): Extension<CurrentUser>,
+    Path(id): Path<String>,
+) -> Result<Json<ApiResponse<()>>, AppError> {
+    let _handle = get_task(&state, &id)?;
+
+    // Context reload triggers re-discovery of skills and workspace state.
+    // The specific reload behavior varies by agent type and will be
+    // fully integrated in Phase 6.15. For now, acknowledge the request.
+    Ok(Json(ApiResponse::success()))
+}
+
+async fn acp_side_question(
     State(state): State<AuxiliaryRouterState>,
     Extension(_user): Extension<CurrentUser>,
     Path(id): Path<String>,
@@ -252,10 +225,7 @@ async fn side_question(
         })));
     }
 
-    let acp = handle
-        .as_any()
-        .downcast_ref::<AcpAgentManager>()
-        .ok_or_else(|| AppError::Internal("Failed to downcast to AcpAgentManager".into()))?;
+    let acp = downcast_acp(&handle)?;
 
     // Check if the backend is Claude (side question is only supported for Claude)
     let backend = acp.backend();
@@ -276,26 +246,7 @@ async fn side_question(
     })))
 }
 
-/// POST /api/conversations/:id/reload-context
-///
-/// Reload the session context (skills, workspace state, etc.).
-async fn reload_context(
-    State(state): State<AuxiliaryRouterState>,
-    Extension(_user): Extension<CurrentUser>,
-    Path(id): Path<String>,
-) -> Result<Json<ApiResponse<()>>, AppError> {
-    let _handle = get_task(&state, &id)?;
-
-    // Context reload triggers re-discovery of skills and workspace state.
-    // The specific reload behavior varies by agent type and will be
-    // fully integrated in Phase 6.15. For now, acknowledge the request.
-    Ok(Json(ApiResponse::success()))
-}
-
-/// GET /api/conversations/:id/slash-commands
-///
-/// Get the list of available slash commands for the conversation.
-async fn get_slash_commands(
+async fn get_acp_slash_commands(
     State(state): State<AuxiliaryRouterState>,
     Extension(_user): Extension<CurrentUser>,
     Path(id): Path<String>,
@@ -307,12 +258,7 @@ async fn get_slash_commands(
         return Ok(Json(ApiResponse::ok(Vec::new())));
     }
 
-    let acp = handle
-        .as_any()
-        .downcast_ref::<AcpAgentManager>()
-        .ok_or_else(|| AppError::Internal("Failed to downcast to AcpAgentManager".into()))?;
-
-    // Trigger the CLI to send slash commands via the event stream
+    let acp = downcast_acp(&handle)?;
     acp.load_slash_commands().await?;
 
     // Slash commands arrive asynchronously via the event stream.
@@ -321,9 +267,206 @@ async fn get_slash_commands(
     Ok(Json(ApiResponse::ok(Vec::new())))
 }
 
-/// GET /api/conversations/:id/openclaw/runtime
-///
-/// Get OpenClaw runtime diagnostic information.
+async fn get_acp_mode(
+    State(state): State<AuxiliaryRouterState>,
+    Extension(_user): Extension<CurrentUser>,
+    Path(id): Path<String>,
+) -> Result<Json<ApiResponse<AgentModeResponse>>, AppError> {
+    let handle = get_task(&state, &id)?;
+
+    if handle.agent_type() != AgentType::Acp {
+        return Err(AppError::BadRequest(
+            "This endpoint is only available for ACP agents".into(),
+        ));
+    }
+
+    Ok(Json(ApiResponse::ok(handle.get_mode().await?)))
+}
+
+async fn set_acp_mode(
+    State(state): State<AuxiliaryRouterState>,
+    Extension(_user): Extension<CurrentUser>,
+    Path(id): Path<String>,
+    body: Result<Json<SetModeRequest>, JsonRejection>,
+) -> Result<Json<ApiResponse<()>>, AppError> {
+    let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
+    if req.mode.trim().is_empty() {
+        return Err(AppError::BadRequest("mode must not be empty".into()));
+    }
+    let handle = get_task(&state, &id)?;
+    if handle.agent_type() != AgentType::Acp {
+        return Err(AppError::BadRequest(
+            "This endpoint is only available for ACP agents".into(),
+        ));
+    }
+    handle.set_mode(&req.mode).await?;
+    Ok(Json(ApiResponse::success()))
+}
+
+async fn get_acp_model(
+    State(state): State<AuxiliaryRouterState>,
+    Extension(_user): Extension<CurrentUser>,
+    Path(id): Path<String>,
+) -> Result<Json<ApiResponse<Option<SessionModelState>>>, AppError> {
+    let handle = get_task(&state, &id)?;
+
+    if handle.agent_type() != AgentType::Acp {
+        return Err(AppError::BadRequest(
+            "This endpoint is only available for ACP agents".into(),
+        ));
+    }
+
+    let acp = downcast_acp(&handle)?;
+    let resp = acp.model_info().await;
+    debug!("Current ACP model info for conversation {id}: {resp:?}");
+    Ok(Json(ApiResponse::ok(resp)))
+}
+
+async fn set_acp_model(
+    State(state): State<AuxiliaryRouterState>,
+    Extension(_user): Extension<CurrentUser>,
+    Path(id): Path<String>,
+    body: Result<Json<SetModelRequest>, JsonRejection>,
+) -> Result<Json<ApiResponse<()>>, AppError> {
+    let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
+    if req.model_id.trim().is_empty() {
+        return Err(AppError::BadRequest("model_id must not be empty".into()));
+    }
+
+    let handle = get_task(&state, &id)?;
+    if handle.agent_type() != AgentType::Acp {
+        return Err(AppError::BadRequest(
+            "Model switching is not supported for this agent type".into(),
+        ));
+    }
+
+    let acp = downcast_acp(&handle)?;
+    acp.set_model(&req.model_id).await?;
+    Ok(Json(ApiResponse::success()))
+}
+
+async fn get_acp_config_option(
+    State(state): State<AuxiliaryRouterState>,
+    Extension(_user): Extension<CurrentUser>,
+    Path(params): Path<ConfigPathParams>,
+) -> Result<Json<ApiResponse<Option<SessionConfigOption>>>, AppError> {
+    let handle = get_task(&state, &params.id)?;
+
+    if handle.agent_type() != AgentType::Acp {
+        return Err(AppError::BadRequest(
+            "This endpoint is only available for ACP agents".into(),
+        ));
+    }
+
+    let acp = downcast_acp(&handle)?;
+    let config_option = acp
+        .config_options()
+        .await
+        .into_iter()
+        .find(|opt| *opt.id.0 == *params.config_id);
+    Ok(Json(ApiResponse::ok(config_option)))
+}
+
+async fn set_acp_config_option(
+    State(state): State<AuxiliaryRouterState>,
+    Extension(_user): Extension<CurrentUser>,
+    Path(params): Path<ConfigPathParams>,
+    body: Result<Json<SetConfigOptionRequest>, JsonRejection>,
+) -> Result<Json<ApiResponse<()>>, AppError> {
+    let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
+    let handle = get_task(&state, &params.id)?;
+
+    if handle.agent_type() != AgentType::Acp {
+        return Err(AppError::BadRequest(
+            "Config updates are not supported for this agent type".into(),
+        ));
+    }
+
+    let acp = downcast_acp(&handle)?;
+    acp.set_config_option(&params.config_id, &req.value).await?;
+    Ok(Json(ApiResponse::success()))
+}
+
+async fn get_acp_config_options(
+    State(state): State<AuxiliaryRouterState>,
+    Extension(_user): Extension<CurrentUser>,
+    Path(id): Path<String>,
+) -> Result<Json<ApiResponse<Vec<SessionConfigOption>>>, AppError> {
+    let handle = get_task(&state, &id)?;
+
+    if handle.agent_type() != AgentType::Acp {
+        return Err(AppError::BadRequest(
+            "This endpoint is only available for ACP agents".into(),
+        ));
+    }
+
+    let acp = downcast_acp(&handle)?;
+    Ok(Json(ApiResponse::ok(acp.config_options().await)))
+}
+
+async fn set_acp_config_options(
+    State(state): State<AuxiliaryRouterState>,
+    Extension(_user): Extension<CurrentUser>,
+    Path(id): Path<String>,
+    body: Result<Json<SetConfigOptionsRequest>, JsonRejection>,
+) -> Result<Json<ApiResponse<()>>, AppError> {
+    let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
+    let handle = get_task(&state, &id)?;
+
+    if handle.agent_type() != AgentType::Acp {
+        return Err(AppError::BadRequest(
+            "Config updates are not supported for this agent type".into(),
+        ));
+    }
+
+    let acp = downcast_acp(&handle)?;
+    for update in req.config_options {
+        if update.config_id.trim().is_empty() {
+            return Err(AppError::BadRequest("config_id must not be empty".into()));
+        }
+        acp.set_config_option(&update.config_id, &update.value)
+            .await?;
+    }
+
+    Ok(Json(ApiResponse::success()))
+}
+
+async fn get_acp_usage(
+    State(state): State<AuxiliaryRouterState>,
+    Extension(_user): Extension<CurrentUser>,
+    Path(id): Path<String>,
+) -> Result<Json<ApiResponse<Option<UsageUpdate>>>, AppError> {
+    let handle = get_task(&state, &id)?;
+
+    if handle.agent_type() != AgentType::Acp {
+        return Err(AppError::BadRequest(
+            "This endpoint is only available for ACP agents".into(),
+        ));
+    }
+
+    let acp = downcast_acp(&handle)?;
+    let usage = acp.usage().await;
+    Ok(Json(ApiResponse::ok(usage)))
+}
+
+async fn get_acp_agent_capabilities(
+    State(state): State<AuxiliaryRouterState>,
+    Extension(_user): Extension<CurrentUser>,
+    Path(id): Path<String>,
+) -> Result<Json<ApiResponse<Option<AgentCapabilities>>>, AppError> {
+    let handle = get_task(&state, &id)?;
+
+    if handle.agent_type() != AgentType::Acp {
+        return Err(AppError::BadRequest(
+            "This endpoint is only available for ACP agents".into(),
+        ));
+    }
+
+    let acp = downcast_acp(&handle)?;
+    let capabilities = acp.agent_capabilities().await;
+    Ok(Json(ApiResponse::ok(capabilities)))
+}
+
 async fn get_openclaw_runtime(
     State(state): State<AuxiliaryRouterState>,
     Extension(_user): Extension<CurrentUser>,
@@ -360,4 +503,11 @@ fn get_task(
                 "No active agent for conversation '{conversation_id}'"
             ))
         })
+}
+
+fn downcast_acp(handle: &AgentManagerHandle) -> Result<&AcpAgentManager, AppError> {
+    handle
+        .as_any()
+        .downcast_ref::<AcpAgentManager>()
+        .ok_or_else(|| AppError::Internal("Failed to downcast to AcpAgentManager".into()))
 }

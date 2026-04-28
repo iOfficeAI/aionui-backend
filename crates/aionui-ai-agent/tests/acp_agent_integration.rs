@@ -146,6 +146,7 @@ fn event_type_name(event: &AgentStreamEvent) -> &'static str {
         AgentStreamEvent::Thinking(_) => "Thinking",
         AgentStreamEvent::Plan(_) => "Plan",
         AgentStreamEvent::Permission(_) => "Permission",
+        AgentStreamEvent::AcpPermission(_) => "AcpPermission",
         AgentStreamEvent::AcpToolCall(_) => "AcpToolCall",
         AgentStreamEvent::AvailableCommands(_) => "AvailableCommands",
         AgentStreamEvent::SkillSuggest(_) => "SkillSuggest",
@@ -280,19 +281,19 @@ async fn acp_agent_error_event_sets_finished() {
 async fn acp_agent_model_info_captured() {
     let _guard = serial();
     let (agent, mut rx) = make_mock_agent(
-        r#"echo '{"type":"acp_model_info","data":{"model_id":"claude-sonnet-4","model_name":"Claude Sonnet 4","provider":"anthropic"}}' && sleep 0.5"#,
+        r#"echo '{"type":"acp_model_info","data":{"current_model_id":"claude-sonnet-4","current_model_label":"Claude Sonnet 4","available_models":[{"id":"claude-sonnet-4","label":"Claude Sonnet 4"},{"id":"claude-opus-4","label":"Claude Opus 4"}],"can_switch":true,"source":"models","source_detail":"acp-models"}}' && sleep 0.5"#,
         AcpBackend::Claude,
     )
     .await;
 
     wait_for_event(&mut rx, |e| matches!(e, AgentStreamEvent::AcpModelInfo(_))).await;
 
-    let info = agent.get_model_info().await;
+    let info = agent.model_info().await;
     assert!(info.is_some(), "Model info should be captured");
     let info = info.unwrap();
-    assert_eq!(info.model_id, "claude-sonnet-4");
-    assert_eq!(info.model_name, Some("Claude Sonnet 4".into()));
-    assert_eq!(info.provider, Some("anthropic".into()));
+    assert_eq!(&*info.current_model_id.0, "claude-sonnet-4");
+    assert_eq!(info.available_models.len(), 2);
+    assert_eq!(info.available_models[0].name, "Claude Sonnet 4");
 
     agent.kill(None).unwrap();
 }
