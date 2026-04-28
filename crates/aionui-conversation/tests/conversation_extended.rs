@@ -6,6 +6,7 @@ use aionui_api_types::{
 };
 use aionui_common::{ConversationStatus, generate_prefixed_id, now_ms};
 use aionui_conversation::ConversationService;
+use aionui_conversation::skill_resolver::SkillResolver;
 use aionui_db::models::MessageRow;
 use aionui_db::{IConversationRepository, SqliteConversationRepository, init_database_memory};
 use aionui_realtime::EventBroadcaster;
@@ -32,6 +33,15 @@ impl EventBroadcaster for TestBroadcaster {
     }
 }
 
+struct EmptySkillResolver;
+
+#[async_trait::async_trait]
+impl SkillResolver for EmptySkillResolver {
+    async fn auto_inject_names(&self) -> Vec<String> {
+        Vec::new()
+    }
+}
+
 async fn setup() -> (
     ConversationService,
     Arc<SqliteConversationRepository>,
@@ -44,6 +54,7 @@ async fn setup() -> (
         repo.clone(),
         broadcaster.clone(),
         std::env::temp_dir(),
+        Arc::new(EmptySkillResolver),
     );
     (svc, repo, broadcaster)
 }

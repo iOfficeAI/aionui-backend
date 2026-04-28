@@ -172,11 +172,16 @@ pub struct ReadBuiltinResourceRequest {
 }
 
 /// Request body for `POST /api/skills/materialize-for-agent`.
+///
+/// Callers pass the resolved skill snapshot (see
+/// `conversation.extra.skills`). For backwards compatibility with pre-
+/// snapshot clients that still emit `enabled_skills`, the alias below
+/// accepts either spelling; remove the alias after the frontend PR lands.
 #[derive(Debug, Clone, Deserialize)]
 pub struct MaterializeSkillsRequest {
     pub conversation_id: String,
-    #[serde(default)]
-    pub enabled_skills: Vec<String>,
+    #[serde(default, alias = "enabled_skills")]
+    pub skills: Vec<String>,
 }
 
 /// Response for `POST /api/skills/materialize-for-agent`.
@@ -271,18 +276,28 @@ mod tests {
     fn test_materialize_request_roundtrip() {
         let raw = json!({
             "conversation_id": "conv-abc",
-            "enabled_skills": ["mermaid", "pdf"],
+            "skills": ["mermaid", "pdf"],
         });
         let req: MaterializeSkillsRequest = serde_json::from_value(raw).unwrap();
         assert_eq!(req.conversation_id, "conv-abc");
-        assert_eq!(req.enabled_skills, vec!["mermaid", "pdf"]);
+        assert_eq!(req.skills, vec!["mermaid", "pdf"]);
+    }
+
+    #[test]
+    fn test_materialize_request_accepts_legacy_enabled_skills_alias() {
+        let raw = json!({
+            "conversation_id": "conv-abc",
+            "enabled_skills": ["pdf"],
+        });
+        let req: MaterializeSkillsRequest = serde_json::from_value(raw).unwrap();
+        assert_eq!(req.skills, vec!["pdf"]);
     }
 
     #[test]
     fn test_materialize_request_default_enabled() {
         let raw = json!({"conversation_id": "conv-abc"});
         let req: MaterializeSkillsRequest = serde_json::from_value(raw).unwrap();
-        assert!(req.enabled_skills.is_empty());
+        assert!(req.skills.is_empty());
     }
 
     #[test]

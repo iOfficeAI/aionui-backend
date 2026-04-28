@@ -335,7 +335,7 @@ async fn materialize_for_agent(
     let dir = skill_service::materialize_skills_for_agent(
         &state.skill_paths,
         &req.conversation_id,
-        &req.enabled_skills,
+        &req.skills,
     )
     .await?;
     Ok(Json(ApiResponse::ok(MaterializeSkillsResponse {

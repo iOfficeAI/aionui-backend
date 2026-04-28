@@ -61,8 +61,7 @@ async fn make_mock_agent(
         agent_name: None,
         custom_agent_id: None,
         preset_context: None,
-        enabled_skills: vec![],
-        exclude_builtin_skills: vec![],
+        skills: vec![],
         preset_assistant_id: None,
         session_mode: None,
         cron_job_id: None,
@@ -158,7 +157,18 @@ fn event_type_name(event: &AgentStreamEvent) -> &'static str {
         AgentStreamEvent::System(_) => "System",
         AgentStreamEvent::RequestTrace(_) => "RequestTrace",
         AgentStreamEvent::SlashCommandsUpdated(_) => "SlashCommandsUpdated",
+        AgentStreamEvent::AcpPermission(_) => "AcpPermission",
     }
+}
+
+#[test]
+fn acp_build_extra_populates_skills_from_extra_json() {
+    let json = serde_json::json!({
+        "backend": "claude",
+        "skills": ["cron", "pdf"],
+    });
+    let extra: aionui_ai_agent::AcpBuildExtra = serde_json::from_value(json).unwrap();
+    assert_eq!(extra.skills, vec!["cron".to_owned(), "pdf".to_owned()]);
 }
 
 // -- Tests --

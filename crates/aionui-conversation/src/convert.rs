@@ -11,6 +11,18 @@ use aionui_db::models::MessageRow;
 ///
 /// Parses string enum fields and JSON text fields back into typed values.
 pub fn row_to_response(row: ConversationRow) -> Result<ConversationResponse, AppError> {
+    let extra: serde_json::Value = serde_json::from_str(&row.extra)
+        .map_err(|e| AppError::Internal(format!("Invalid extra JSON: {e}")))?;
+    row_to_response_with_extra(row, extra)
+}
+
+/// Same as [`row_to_response`] but takes a pre-parsed `extra` value. Used
+/// by callers that need to mutate `extra` (e.g. lazy `skills` backfill)
+/// before building the response DTO.
+pub fn row_to_response_with_extra(
+    row: ConversationRow,
+    extra: serde_json::Value,
+) -> Result<ConversationResponse, AppError> {
     let agent_type: AgentType = string_to_enum(&row.r#type)?;
     let status: ConversationStatus = match row.status.as_deref() {
         None | Some("") => ConversationStatus::Finished,
@@ -25,9 +37,6 @@ pub fn row_to_response(row: ConversationRow) -> Result<ConversationResponse, App
         .as_deref()
         .map(parse_provider_with_model)
         .transpose()?;
-
-    let extra: serde_json::Value = serde_json::from_str(&row.extra)
-        .map_err(|e| AppError::Internal(format!("Invalid extra JSON: {e}")))?;
 
     Ok(ConversationResponse {
         id: row.id,

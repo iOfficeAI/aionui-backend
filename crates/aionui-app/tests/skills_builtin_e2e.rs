@@ -300,7 +300,10 @@ async fn list_skills_builtin_entries_carry_relative_location() {
 // ===========================================================================
 
 #[tokio::test]
-async fn materialize_for_agent_writes_auto_inject_flat() {
+async fn materialize_for_agent_writes_named_skill_flat() {
+    // Post-snapshot contract: `materialize-for-agent` does NOT implicitly
+    // include auto-inject. Callers pass the fully resolved snapshot;
+    // naming an auto-inject skill produces a flat `{name}/SKILL.md` entry.
     let fx = fixture_embedded().await;
 
     let resp = fx
@@ -311,7 +314,7 @@ async fn materialize_for_agent_writes_auto_inject_flat() {
             "/api/skills/materialize-for-agent",
             json!({
                 "conversation_id": "conv-happy",
-                "enabled_skills": [],
+                "skills": ["cron"],
             }),
             &fx.token,
             &fx.csrf,
@@ -326,7 +329,7 @@ async fn materialize_for_agent_writes_auto_inject_flat() {
     assert!(dir.is_dir(), "agent-skills dir must exist: {dir_path}");
     assert!(
         dir.join("cron").join("SKILL.md").exists(),
-        "cron auto-inject not materialized at {dir_path}/cron/SKILL.md",
+        "cron skill not materialized at {dir_path}/cron/SKILL.md",
     );
     // Flat layout — no `auto-inject` wrapper remains.
     assert!(

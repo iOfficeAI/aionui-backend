@@ -57,12 +57,11 @@ pub struct AcpBuildExtra {
     /// Preset context to inject.
     #[serde(default)]
     pub preset_context: Option<String>,
-    /// Skills to enable for this session.
+    /// Resolved skill snapshot for the session. Populated from
+    /// `conversation.extra.skills` by the factory. No runtime filtering —
+    /// what the caller sends is what the agent sees.
     #[serde(default)]
-    pub enabled_skills: Vec<String>,
-    /// Builtin auto-inject skills to exclude from this session.
-    #[serde(default)]
-    pub exclude_builtin_skills: Vec<String>,
+    pub skills: Vec<String>,
     /// Preset assistant ID.
     #[serde(default)]
     pub preset_assistant_id: Option<String>,
@@ -96,9 +95,10 @@ pub struct OpenClawBuildExtra {
     pub agent_name: Option<String>,
     /// OpenClaw gateway configuration.
     pub gateway: OpenClawGatewayConfig,
-    /// Skills to enable.
+    /// Resolved skill snapshot for the session. Populated from
+    /// `conversation.extra.skills` by the factory.
     #[serde(default)]
-    pub enabled_skills: Vec<String>,
+    pub skills: Vec<String>,
     /// Preset assistant ID.
     #[serde(default)]
     pub preset_assistant_id: Option<String>,
@@ -207,18 +207,18 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn acp_build_extra_backcompat_no_new_fields() {
-        // Legacy payloads without exclude_builtin_skills should still deserialize
+    fn acp_build_extra_accepts_payload_without_skills() {
+        // Legacy payloads without skills should still deserialize.
         let legacy = r#"{"backend":"claude"}"#;
         let parsed: AcpBuildExtra = serde_json::from_str(legacy).unwrap();
-        assert!(parsed.exclude_builtin_skills.is_empty());
+        assert!(parsed.skills.is_empty());
     }
 
     #[test]
-    fn acp_build_extra_accepts_exclude_builtin_skills() {
-        let with_field = r#"{"backend":"claude","exclude_builtin_skills":["cron"]}"#;
+    fn acp_build_extra_accepts_skills() {
+        let with_field = r#"{"backend":"claude","skills":["cron","pdf"]}"#;
         let parsed: AcpBuildExtra = serde_json::from_str(with_field).unwrap();
-        assert_eq!(parsed.exclude_builtin_skills, vec!["cron"]);
+        assert_eq!(parsed.skills, vec!["cron".to_owned(), "pdf".to_owned()]);
     }
 
     #[test]

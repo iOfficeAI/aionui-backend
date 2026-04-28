@@ -557,8 +557,8 @@ fn builtin_skill_exists(paths: &SkillPaths, skill_name: &str) -> bool {
 // D2. Per-agent skill materialization
 // ---------------------------------------------------------------------------
 
-/// Materialize built-in and selected opt-in skills into a per-conversation
-/// directory under `{data_dir}/agent-skills/{conversation_id}/`.
+/// Materialize the listed skills into a per-conversation directory
+/// under `{data_dir}/agent-skills/{conversation_id}/`.
 ///
 /// Layout is flat: every skill lands at `{target}/{name}/SKILL.md`,
 /// regardless of whether it originated from the `auto-inject/` subtree
@@ -566,18 +566,16 @@ fn builtin_skill_exists(paths: &SkillPaths, skill_name: &str) -> bool {
 /// directory is flattened away because gemini CLI's `--extensions`
 /// loader expects one skill per subdir.
 ///
-/// Order of precedence (later writes overwrite earlier ones, with a
-/// warning logged on collision):
-/// 1. All auto-inject skills
-/// 2. User opt-in skills listed in `enabled_skills` (embedded / disk / user / extension)
-///
-/// Unknown names in `enabled_skills` are silently skipped — a warning is
-/// emitted but the operation still returns success. Returns the
-/// absolute path of the target directory.
+/// Callers pass the fully resolved snapshot — this function does NOT
+/// implicitly include auto-inject; the caller (e.g. the
+/// `ConversationService::create` snapshot) is the source of truth.
+/// Unknown names are silently skipped — a warning is emitted but the
+/// operation still returns success. Returns the absolute path of the
+/// target directory.
 pub async fn materialize_skills_for_agent(
     paths: &SkillPaths,
     conversation_id: &str,
-    enabled_skills: &[String],
+    skills: &[String],
 ) -> Result<PathBuf, ExtensionError> {
     validate_filename(conversation_id)?;
 
@@ -593,61 +591,27 @@ pub async fn materialize_skills_for_agent(
     }
     tokio::fs::create_dir_all(&target).await?;
 
-    // 1. Auto-inject (always).
-    write_auto_inject_skills(paths, &target).await?;
-
-    // 2. Opt-in enabled skills.
-    for name in enabled_skills {
+    for name in skills {
         if name.is_empty() {
             continue;
         }
         if name.contains('/') || name.contains('\\') || name.contains("..") {
-            warn!(skill = %name, "skipping enabled skill with invalid name");
+            warn!(skill = %name, "skipping skill with invalid name");
             continue;
         }
-        if target.join(name).exists() {
-            warn!(
-                skill = %name,
-                "enabled skill overlaps auto-inject name; opt-in copy wins"
-            );
-        }
-        let wrote = write_opt_in_skill(paths, name, &target).await?;
+        let wrote = write_skill_by_name(paths, name, &target).await?;
         if !wrote {
-            warn!(skill = %name, "enabled skill not found in any source");
+            warn!(skill = %name, "skill not found in any source");
         }
     }
 
     Ok(target)
 }
 
-async fn write_auto_inject_skills(paths: &SkillPaths, target: &Path) -> Result<(), ExtensionError> {
-    let auto_dir = paths.builtin_skills_dir.join(BUILTIN_AUTO_SKILLS_SUBDIR);
-    if !auto_dir.is_dir() {
-        return Ok(());
-    }
-    let mut entries = match tokio::fs::read_dir(&auto_dir).await {
-        Ok(e) => e,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(ExtensionError::Io(e)),
-    };
-    while let Ok(Some(entry)) = entries.next_entry().await {
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-            continue;
-        };
-        let dest = target.join(name);
-        copy_dir_recursive(&path, &dest).await?;
-    }
-    Ok(())
-}
-
-/// Write a single opt-in skill into `{target}/{name}/`. Resolves in
-/// order: builtin top-level → builtin auto-inject → user skills dir.
-/// Returns `true` if the skill was found and written.
-async fn write_opt_in_skill(
+/// Write a single named skill into `{target}/{name}/`. Resolves in
+/// order: embedded/disk builtin (top-level + auto-inject) → user
+/// skills dir. Returns `true` if the skill was found and written.
+async fn write_skill_by_name(
     paths: &SkillPaths,
     name: &str,
     target: &Path,
@@ -1903,20 +1867,32 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn materialize_includes_auto_inject() {
+    async fn materialize_resolves_auto_inject_skill_by_name() {
+        // Auto-inject skills are now only materialized when the caller
+        // names them explicitly (see `ConversationService::create`
+        // snapshot). Passing `&[]` yields an empty dir; passing a known
+        // auto-inject name (e.g. "cron") writes it at the flat layout.
         let tmp = TempDir::new().unwrap();
         let paths = make_embedded_paths(tmp.path()).await;
 
-        let dir = materialize_skills_for_agent(&paths, "conv-auto", &[])
+        let empty = materialize_skills_for_agent(&paths, "conv-empty", &[])
             .await
             .unwrap();
-        // At least one auto-inject skill (cron) lands flat under dir/{name}/SKILL.md.
+        assert!(empty.is_dir());
         assert!(
-            dir.join("cron").join(SKILL_MANIFEST_FILE).exists(),
-            "auto-inject cron skill not materialized"
+            !empty.join("cron").exists(),
+            "auto-inject must NOT be implicit anymore"
+        );
+
+        let named = materialize_skills_for_agent(&paths, "conv-named", &["cron".to_owned()])
+            .await
+            .unwrap();
+        assert!(
+            named.join("cron").join(SKILL_MANIFEST_FILE).exists(),
+            "named auto-inject skill not materialized"
         );
         assert!(
-            !dir.join(BUILTIN_AUTO_SKILLS_SUBDIR).exists(),
+            !named.join(BUILTIN_AUTO_SKILLS_SUBDIR).exists(),
             "auto-inject/ wrapper should be flattened away; layout is flat"
         );
     }
@@ -1948,7 +1924,7 @@ mod tests {
             materialize_skills_for_agent(&paths, "conv-missing", &["no-such-skill".to_string()])
                 .await
                 .unwrap();
-        // Unknown name silently skipped; auto-inject still present.
+        // Unknown name is silently skipped; the dir exists but stays empty.
         assert!(dir.is_dir());
         assert!(!dir.join("no-such-skill").exists());
     }

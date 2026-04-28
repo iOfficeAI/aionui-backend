@@ -22,6 +22,7 @@ use serde_json::json;
 use tokio::sync::broadcast;
 
 use crate::service::ConversationService;
+use crate::skill_resolver::FixedSkillResolver;
 
 // ── Mock EventBroadcaster ──────────────────────────────────────────
 
@@ -238,12 +239,24 @@ fn make_service() -> (
     Arc<MockRepo>,
     Arc<dyn IWorkerTaskManager>,
 ) {
+    make_service_with_resolver(Arc::new(FixedSkillResolver { names: vec![] }))
+}
+
+fn make_service_with_resolver(
+    skill_resolver: Arc<dyn crate::skill_resolver::SkillResolver>,
+) -> (
+    ConversationService,
+    Arc<MockBroadcaster>,
+    Arc<MockRepo>,
+    Arc<dyn IWorkerTaskManager>,
+) {
     let repo = Arc::new(MockRepo::new());
     let broadcaster = Arc::new(MockBroadcaster::new());
     let svc = ConversationService::new_with_workspace_root(
         repo.clone(),
         broadcaster.clone(),
         std::path::PathBuf::from(std::env::temp_dir()),
+        skill_resolver,
     );
     let task_mgr: Arc<dyn IWorkerTaskManager> = Arc::new(MockTaskManager::new());
     (svc, broadcaster, repo, task_mgr)
@@ -1694,4 +1707,234 @@ async fn check_approval_not_found() {
         .await
         .unwrap_err();
     assert!(matches!(err, AppError::NotFound(_)));
+}
+
+// ── Skill snapshot tests ───────────────────────────────────────────
+
+#[tokio::test]
+async fn create_writes_extra_skills_from_auto_inject_and_preset() {
+    let resolver = Arc::new(FixedSkillResolver {
+        names: vec!["cron".into(), "todo-tracker".into()],
+    });
+    let (svc, _broadcaster, _repo, _task_mgr) = make_service_with_resolver(resolver);
+
+    let req: CreateConversationRequest = serde_json::from_value(json!({
+        "type": "acp",
+        "name": "t",
+        "extra": {
+            "workspace": "/project",
+            "backend": "claude",
+            "preset_enabled_skills": ["pdf", "cron"],
+            "exclude_auto_inject_skills": ["todo-tracker"],
+        },
+    }))
+    .unwrap();
+    let resp = svc.create("user-1", req).await.unwrap();
+
+    assert_eq!(resp.extra["skills"], json!(["cron", "pdf"]));
+    assert!(resp.extra.get("preset_enabled_skills").is_none());
+    assert!(resp.extra.get("exclude_auto_inject_skills").is_none());
+}
+
+#[tokio::test]
+async fn create_writes_empty_skills_when_no_auto_inject_and_no_preset() {
+    let resolver = Arc::new(FixedSkillResolver { names: vec![] });
+    let (svc, _broadcaster, _repo, _task_mgr) = make_service_with_resolver(resolver);
+
+    let req: CreateConversationRequest = serde_json::from_value(json!({
+        "type": "acp",
+        "extra": { "workspace": "/project", "backend": "claude" },
+    }))
+    .unwrap();
+    let resp = svc.create("user-1", req).await.unwrap();
+
+    assert_eq!(resp.extra["skills"], json!([]));
+}
+
+#[tokio::test]
+async fn update_rejects_extra_skills() {
+    let (svc, _broadcaster, _repo, task_mgr) = make_service();
+
+    let req: CreateConversationRequest = serde_json::from_value(json!({
+        "type": "acp",
+        "extra": { "workspace": "/project", "backend": "claude" },
+    }))
+    .unwrap();
+    let resp = svc.create("u", req).await.unwrap();
+
+    let update_req: UpdateConversationRequest = serde_json::from_value(json!({
+        "extra": { "skills": ["cron"] },
+    }))
+    .unwrap();
+    let err = svc
+        .update("u", &resp.id, update_req, &task_mgr)
+        .await
+        .unwrap_err();
+
+    match err {
+        AppError::BadRequest(msg) => assert!(msg.contains("skills"), "msg = {msg:?}"),
+        other => panic!("expected BadRequest, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn update_allows_other_extra_fields() {
+    let (svc, _broadcaster, _repo, task_mgr) = make_service();
+
+    let req: CreateConversationRequest = serde_json::from_value(json!({
+        "type": "acp",
+        "extra": { "workspace": "/project", "backend": "claude" },
+    }))
+    .unwrap();
+    let resp = svc.create("u", req).await.unwrap();
+
+    let update_req: UpdateConversationRequest = serde_json::from_value(json!({
+        "extra": { "current_model_id": "claude-3-5-sonnet" },
+    }))
+    .unwrap();
+    let updated = svc
+        .update("u", &resp.id, update_req, &task_mgr)
+        .await
+        .unwrap();
+
+    assert_eq!(updated.extra["current_model_id"], "claude-3-5-sonnet");
+}
+
+#[tokio::test]
+async fn get_backfills_legacy_row_and_persists() {
+    let resolver = Arc::new(FixedSkillResolver {
+        names: vec!["cron".into(), "todo-tracker".into()],
+    });
+    let (svc, _broadcaster, repo, _task_mgr) = make_service_with_resolver(resolver);
+
+    // Seed a legacy row directly via the repo — simulates a pre-migration
+    // conversation that the service has never touched.
+    let legacy_row = ConversationRow {
+        id: "legacy-1".into(),
+        user_id: "user-1".into(),
+        name: "legacy".into(),
+        r#type: "acp".into(),
+        extra: serde_json::to_string(&json!({
+            "workspace": "/tmp/x",
+            "enabled_skills": ["pdf"],
+            "exclude_builtin_skills": ["todo-tracker"],
+            "loaded_skills": [{"name": "cron", "description": "stale"}],
+        }))
+        .unwrap(),
+        model: None,
+        status: Some("finished".into()),
+        source: Some("aionui".into()),
+        channel_chat_id: None,
+        pinned: false,
+        pinned_at: None,
+        created_at: 0,
+        updated_at: 0,
+    };
+    repo.create(&legacy_row).await.unwrap();
+
+    let resp = svc.get("user-1", "legacy-1").await.unwrap();
+    assert_eq!(resp.extra["skills"], json!(["cron", "pdf"]));
+    assert!(resp.extra.get("enabled_skills").is_none());
+    assert!(resp.extra.get("exclude_builtin_skills").is_none());
+    assert!(resp.extra.get("loaded_skills").is_none());
+
+    // Second read returns the same result.
+    let resp2 = svc.get("user-1", "legacy-1").await.unwrap();
+    assert_eq!(resp2.extra["skills"], json!(["cron", "pdf"]));
+
+    // Verify the row on disk was persisted with the new shape.
+    let persisted = repo.get("legacy-1").await.unwrap().unwrap();
+    let persisted_extra: serde_json::Value = serde_json::from_str(&persisted.extra).unwrap();
+    assert_eq!(persisted_extra["skills"], json!(["cron", "pdf"]));
+    assert!(persisted_extra.get("enabled_skills").is_none());
+    assert!(persisted_extra.get("exclude_builtin_skills").is_none());
+    assert!(persisted_extra.get("loaded_skills").is_none());
+}
+
+#[tokio::test]
+async fn list_backfills_mixed_rows() {
+    let resolver = Arc::new(FixedSkillResolver {
+        names: vec!["cron".into()],
+    });
+    let (svc, _broadcaster, repo, _task_mgr) = make_service_with_resolver(resolver);
+
+    // Row 1: legacy (needs backfill).
+    let legacy = ConversationRow {
+        id: "a".into(),
+        user_id: "u".into(),
+        name: "a".into(),
+        r#type: "acp".into(),
+        extra: serde_json::to_string(&json!({
+            "workspace": "/tmp/a",
+            "enabled_skills": ["pdf"],
+        }))
+        .unwrap(),
+        model: None,
+        status: None,
+        source: None,
+        channel_chat_id: None,
+        pinned: false,
+        pinned_at: None,
+        created_at: 1,
+        updated_at: 1,
+    };
+    // Row 2: already migrated.
+    let modern = ConversationRow {
+        id: "b".into(),
+        user_id: "u".into(),
+        name: "b".into(),
+        r#type: "acp".into(),
+        extra: serde_json::to_string(&json!({
+            "workspace": "/tmp/b",
+            "skills": ["cron", "pdf"],
+        }))
+        .unwrap(),
+        model: None,
+        status: None,
+        source: None,
+        channel_chat_id: None,
+        pinned: false,
+        pinned_at: None,
+        created_at: 2,
+        updated_at: 2,
+    };
+    repo.create(&legacy).await.unwrap();
+    repo.create(&modern).await.unwrap();
+
+    let resp = svc
+        .list("u", ListConversationsQuery::default())
+        .await
+        .unwrap();
+    let extras: Vec<_> = resp.items.iter().map(|c| c.extra.clone()).collect();
+    assert!(extras.iter().any(|e| e["skills"] == json!(["cron", "pdf"])));
+}
+
+#[tokio::test]
+async fn create_honors_legacy_alias_fields_from_clone_merge() {
+    let resolver = Arc::new(FixedSkillResolver {
+        names: vec!["cron".into()],
+    });
+    let (svc, _broadcaster, _repo, _task_mgr) = make_service_with_resolver(resolver);
+
+    // Legacy-shaped extra — what clone_create might merge in from an
+    // unmigrated source conversation.
+    let req: CreateConversationRequest = serde_json::from_value(json!({
+        "type": "acp",
+        "extra": {
+            "workspace": "/project",
+            "backend": "claude",
+            "enabled_skills": ["pdf"],
+            "exclude_builtin_skills": ["cron"],
+            "loaded_skills": [{"name": "cron", "description": "stale"}],
+        },
+    }))
+    .unwrap();
+    let resp = svc.create("u", req).await.unwrap();
+
+    // Legacy enabled_skills ["pdf"] surfaces as preset; legacy exclude drops
+    // cron; snapshot = {} ∪ ["pdf"] = ["pdf"].
+    assert_eq!(resp.extra["skills"], json!(["pdf"]));
+    assert!(resp.extra.get("enabled_skills").is_none());
+    assert!(resp.extra.get("exclude_builtin_skills").is_none());
+    assert!(resp.extra.get("loaded_skills").is_none());
 }

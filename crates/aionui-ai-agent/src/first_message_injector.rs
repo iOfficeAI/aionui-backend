@@ -13,10 +13,8 @@ use crate::skill_manager::{AcpSkillManager, prepare_first_message_with_skills_in
 pub struct InjectionConfig<'a> {
     /// Preset context (assistant-level system prompt injection).
     pub preset_context: Option<&'a str>,
-    /// Skills the user explicitly enabled for this session.
-    pub enabled_skills: &'a [String],
-    /// Builtin auto-inject skills the user disabled.
-    pub exclude_builtin_skills: &'a [String],
+    /// Resolved skill names (snapshot from `conversation.extra.skills`).
+    pub skills: &'a [String],
     /// True iff the agent's native CLI reads skills from the workspace
     /// without needing prompt injection. Derived by callers from
     /// `AcpBackend::native_skills_dirs().is_some()` for ACP, or hardcoded
@@ -31,8 +29,8 @@ pub struct InjectionConfig<'a> {
 /// - If `native_skill_support && !custom_workspace`: **light mode** — only
 ///   `preset_context` prepended as an `[Assistant Rules]` block (if present).
 ///   The native CLI handles skill discovery via workspace symlinks.
-/// - Else: **heavy mode** — `preset_context` + skills index injected via
-///   `prepare_first_message_with_skills_index`.
+/// - Else: **heavy mode** — `preset_context` + resolved skills index
+///   injected via `prepare_first_message_with_skills_index`.
 pub async fn inject_first_message_prefix(
     content: &str,
     manager: &Arc<AcpSkillManager>,
@@ -41,35 +39,20 @@ pub async fn inject_first_message_prefix(
     let use_native = config.native_skill_support && !config.custom_workspace;
 
     if use_native {
-        // Light mode: only preset_context, no skill discovery
-        match config.preset_context {
+        return match config.preset_context {
             Some(ctx) if !ctx.is_empty() => {
                 format!("[Assistant Rules]\n{ctx}\n[/Assistant Rules]\n\n{content}")
             }
             _ => content.to_string(),
-        }
-    } else {
-        // Heavy mode: discover skills then inject index
-        let enabled = if config.enabled_skills.is_empty() {
-            None
-        } else {
-            Some(config.enabled_skills)
         };
-        let exclude = if config.exclude_builtin_skills.is_empty() {
-            None
-        } else {
-            Some(config.exclude_builtin_skills)
-        };
-
-        let skills = manager.discover_skills(enabled, exclude).await;
-
-        let has_context = config.preset_context.is_some_and(|s| !s.is_empty());
-        if skills.is_empty() && !has_context {
-            return content.to_string();
-        }
-
-        prepare_first_message_with_skills_index(content, &skills, config.preset_context)
     }
+
+    let skills = manager.discover_by_names(config.skills).await;
+    let has_context = config.preset_context.is_some_and(|s| !s.is_empty());
+    if skills.is_empty() && !has_context {
+        return content.to_string();
+    }
+    prepare_first_message_with_skills_index(content, &skills, config.preset_context)
 }
 
 #[cfg(test)]
@@ -117,8 +100,7 @@ mod tests {
             &mgr,
             InjectionConfig {
                 preset_context: Some("Be concise."),
-                enabled_skills: &[],
-                exclude_builtin_skills: &[],
+                skills: &[],
                 native_skill_support: true,
                 custom_workspace: false,
             },
@@ -140,8 +122,7 @@ mod tests {
             &mgr,
             InjectionConfig {
                 preset_context: None,
-                enabled_skills: &[],
-                exclude_builtin_skills: &[],
+                skills: &[],
                 native_skill_support: true,
                 custom_workspace: false,
             },
@@ -161,8 +142,7 @@ mod tests {
             &mgr,
             InjectionConfig {
                 preset_context: None,
-                enabled_skills: &[],
-                exclude_builtin_skills: &[],
+                skills: &[],
                 native_skill_support: false,
                 custom_workspace: false,
             },
@@ -182,8 +162,7 @@ mod tests {
             &mgr,
             InjectionConfig {
                 preset_context: Some("Rule 1."),
-                enabled_skills: &[],
-                exclude_builtin_skills: &[],
+                skills: &[],
                 native_skill_support: false,
                 custom_workspace: false,
             },
@@ -193,6 +172,42 @@ mod tests {
         assert!(out.contains("[Assistant Rules]"));
         assert!(out.contains("Rule 1."));
         assert!(out.ends_with("Go."));
+    }
+
+    #[tokio::test]
+    async fn heavy_mode_with_resolved_skills_injects_index() {
+        // Set up a builtin skills dir with two skills; pass only one in `skills`.
+        let tmp = TempDir::new().unwrap();
+        let auto = tmp.path().join("auto-inject");
+        std::fs::create_dir_all(auto.join("cron")).unwrap();
+        std::fs::write(
+            auto.join("cron").join("SKILL.md"),
+            "---\nname: cron\ndescription: Schedule stuff\n---\nBody.",
+        )
+        .unwrap();
+        std::fs::create_dir_all(auto.join("pdf")).unwrap();
+        std::fs::write(
+            auto.join("pdf").join("SKILL.md"),
+            "---\nname: pdf\ndescription: Render PDFs\n---\nBody.",
+        )
+        .unwrap();
+        let _guard = EmptyBuiltinGuard::new(tmp.path());
+        let mgr = test_mgr(tmp.path());
+
+        let out = inject_first_message_prefix(
+            "Hello",
+            &mgr,
+            InjectionConfig {
+                preset_context: None,
+                skills: &["cron".to_owned()],
+                native_skill_support: false,
+                custom_workspace: false,
+            },
+        )
+        .await;
+        assert!(out.contains("cron"));
+        assert!(!out.contains("pdf"));
+        assert!(out.ends_with("Hello"));
     }
 
     #[tokio::test]
@@ -206,8 +221,7 @@ mod tests {
             &mgr,
             InjectionConfig {
                 preset_context: Some("Custom rule"),
-                enabled_skills: &[],
-                exclude_builtin_skills: &[],
+                skills: &[],
                 native_skill_support: true,
                 custom_workspace: true, // <-- overrides native
             },

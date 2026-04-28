@@ -765,6 +765,14 @@ mod tests {
             fn broadcast(&self, _: WebSocketMessage<serde_json::Value>) {}
         }
 
+        struct StubSkillResolver;
+        #[async_trait::async_trait]
+        impl aionui_conversation::skill_resolver::SkillResolver for StubSkillResolver {
+            async fn auto_inject_names(&self) -> Vec<String> {
+                Vec::new()
+            }
+        }
+
         let stub_broadcaster: Arc<dyn aionui_realtime::EventBroadcaster> =
             Arc::new(StubBroadcaster);
         let stub_repo: Arc<dyn IConversationRepository> = Arc::new(StubConvRepo);
@@ -772,6 +780,7 @@ mod tests {
             Arc::clone(&stub_repo),
             stub_broadcaster,
             std::env::temp_dir(),
+            Arc::new(StubSkillResolver),
         ));
 
         JobExecutor::new(Arc::new(StubTaskManager), stub_repo, conv_service, guard)

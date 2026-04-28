@@ -8,6 +8,7 @@ use aionui_common::{
     AgentKillReason, AgentType, AppError, ConversationSource, ConversationStatus, TimestampMs,
 };
 use aionui_conversation::ConversationService;
+use aionui_conversation::skill_resolver::SkillResolver;
 use aionui_db::{SqliteConversationRepository, init_database_memory};
 use aionui_realtime::EventBroadcaster;
 use serde_json::json;
@@ -62,6 +63,15 @@ impl IWorkerTaskManager for NoopTaskManager {
     }
 }
 
+struct EmptySkillResolver;
+
+#[async_trait::async_trait]
+impl SkillResolver for EmptySkillResolver {
+    async fn auto_inject_names(&self) -> Vec<String> {
+        Vec::new()
+    }
+}
+
 async fn setup() -> (
     ConversationService,
     Arc<TestBroadcaster>,
@@ -74,6 +84,7 @@ async fn setup() -> (
         repo,
         broadcaster.clone(),
         std::env::temp_dir(),
+        Arc::new(EmptySkillResolver),
     );
     let task_mgr: Arc<dyn IWorkerTaskManager> = Arc::new(NoopTaskManager);
     (svc, broadcaster, task_mgr)

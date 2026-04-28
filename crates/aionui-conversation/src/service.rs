@@ -17,8 +17,10 @@ use aionui_realtime::EventBroadcaster;
 use tracing::{debug, info, warn};
 
 use crate::convert::{
-    row_to_message_response, row_to_response, search_row_to_item, string_to_enum,
+    row_to_message_response, row_to_response, row_to_response_with_extra, search_row_to_item,
+    string_to_enum,
 };
+use crate::skill_resolver::SkillResolver;
 use crate::stream_relay::StreamRelay;
 
 #[async_trait::async_trait]
@@ -32,18 +34,21 @@ pub struct ConversationService {
     broadcaster: Arc<dyn EventBroadcaster>,
     delete_hooks: Vec<Arc<dyn OnConversationDelete>>,
     workspace_root: std::path::PathBuf,
+    skill_resolver: Arc<dyn SkillResolver>,
 }
 
 impl ConversationService {
     pub fn new(
         repo: Arc<dyn IConversationRepository>,
         broadcaster: Arc<dyn EventBroadcaster>,
+        skill_resolver: Arc<dyn SkillResolver>,
     ) -> Self {
         Self {
             repo,
             broadcaster,
             delete_hooks: Vec::new(),
             workspace_root: std::path::PathBuf::from("data"),
+            skill_resolver,
         }
     }
 
@@ -51,12 +56,14 @@ impl ConversationService {
         repo: Arc<dyn IConversationRepository>,
         broadcaster: Arc<dyn EventBroadcaster>,
         workspace_root: std::path::PathBuf,
+        skill_resolver: Arc<dyn SkillResolver>,
     ) -> Self {
         Self {
             repo,
             broadcaster,
             delete_hooks: Vec::new(),
             workspace_root,
+            skill_resolver,
         }
     }
 
@@ -64,12 +71,14 @@ impl ConversationService {
         repo: Arc<dyn IConversationRepository>,
         broadcaster: Arc<dyn EventBroadcaster>,
         delete_hooks: Vec<Arc<dyn OnConversationDelete>>,
+        skill_resolver: Arc<dyn SkillResolver>,
     ) -> Self {
         Self {
             repo,
             broadcaster,
             delete_hooks,
             workspace_root: std::path::PathBuf::from("data"),
+            skill_resolver,
         }
     }
 
@@ -114,6 +123,60 @@ impl ConversationService {
             extra["workspace"] = serde_json::Value::String(ws_path.to_string_lossy().into_owned());
         }
 
+        // Consume transient skill-shaping inputs and freeze the initial
+        // `skills` snapshot into `extra.skills`. These request-only fields
+        // must not land in the stored row. Legacy names (`enabled_skills`,
+        // `exclude_builtin_skills`) are accepted as aliases so that
+        // `clone_create` — which merges a source conversation's legacy
+        // `extra` into the new request — keeps working on pre-snapshot rows
+        // until every legacy row has been backfilled (§7.1).
+        fn take_string_array(
+            obj: &mut serde_json::Map<String, serde_json::Value>,
+            keys: &[&str],
+        ) -> Vec<String> {
+            for key in keys {
+                if let Some(v) = obj.remove(*key)
+                    && let Ok(arr) = serde_json::from_value::<Vec<String>>(v)
+                {
+                    return arr;
+                }
+            }
+            Vec::new()
+        }
+
+        let (preset_enabled, exclude_auto_inject) = match extra.as_object_mut() {
+            Some(obj) => {
+                let preset = take_string_array(obj, &["preset_enabled_skills", "enabled_skills"]);
+                let exclude = take_string_array(
+                    obj,
+                    &["exclude_auto_inject_skills", "exclude_builtin_skills"],
+                );
+                // Strip the stale cache field if a clone copied it in.
+                obj.remove("loaded_skills");
+                (preset, exclude)
+            }
+            None => (Vec::new(), Vec::new()),
+        };
+
+        let auto_inject_names = self.skill_resolver.auto_inject_names().await;
+        let initial_skills = crate::skill_snapshot::compute_initial_skills(
+            &auto_inject_names,
+            &preset_enabled,
+            &exclude_auto_inject,
+        );
+
+        if let Some(obj) = extra.as_object_mut() {
+            obj.insert(
+                "skills".to_owned(),
+                serde_json::Value::Array(
+                    initial_skills
+                        .into_iter()
+                        .map(serde_json::Value::String)
+                        .collect(),
+                ),
+            );
+        }
+
         let row = aionui_db::models::ConversationRow {
             id: id.clone(),
             user_id: user_id.to_owned(),
@@ -156,7 +219,11 @@ impl ConversationService {
             .await?
             .filter(|r| r.user_id == user_id)
             .ok_or_else(|| AppError::NotFound(format!("Conversation {id} not found")))?;
-        row_to_response(row)
+
+        let mut extra: serde_json::Value = serde_json::from_str(&row.extra)
+            .map_err(|e| AppError::Internal(format!("Invalid extra JSON: {e}")))?;
+        self.backfill_extra_inplace(&row.id, &mut extra).await;
+        row_to_response_with_extra(row, extra)
     }
 
     /// List conversations with cursor-based pagination and optional filters.
@@ -179,24 +246,30 @@ impl ConversationService {
         // (e.g. an abandoned agent_type='gemini' conversation post-migration)
         // must not take down the whole listing. Skip-and-log is the
         // explicit resilience contract from the Gemini→ACP migration spec.
-        let items = result
-            .items
-            .into_iter()
-            .filter_map(|row| {
-                let row_id = row.id.clone();
-                match row_to_response(row) {
-                    Ok(resp) => Some(resp),
-                    Err(err) => {
-                        warn!(
-                            conversation_id = %row_id,
-                            error = %err,
-                            "Skipping unreadable conversation row in list"
-                        );
-                        None
-                    }
+        let mut items = Vec::with_capacity(result.items.len());
+        for row in result.items {
+            let row_id = row.id.clone();
+            let mut extra: serde_json::Value = match serde_json::from_str(&row.extra) {
+                Ok(v) => v,
+                Err(err) => {
+                    warn!(
+                        conversation_id = %row_id,
+                        error = %err,
+                        "Skipping unreadable conversation row in list"
+                    );
+                    continue;
                 }
-            })
-            .collect();
+            };
+            self.backfill_extra_inplace(&row_id, &mut extra).await;
+            match row_to_response_with_extra(row, extra) {
+                Ok(resp) => items.push(resp),
+                Err(err) => warn!(
+                    conversation_id = %row_id,
+                    error = %err,
+                    "Skipping unreadable conversation row in list"
+                ),
+            }
+        }
 
         Ok(PaginatedResult {
             items,
@@ -223,6 +296,17 @@ impl ConversationService {
             .await?
             .filter(|r| r.user_id == user_id)
             .ok_or_else(|| AppError::NotFound(format!("Conversation {id} not found")))?;
+
+        // Snapshot invariant: once written at create time, `extra.skills`
+        // must not be re-shaped by PATCH. The frontend must clone the
+        // conversation to produce a new snapshot.
+        if let Some(incoming) = &req.extra
+            && incoming.get("skills").is_some()
+        {
+            return Err(AppError::BadRequest(
+                "extra.skills is immutable post-creation".into(),
+            ));
+        }
 
         let now = now_ms();
 
@@ -843,6 +927,40 @@ impl ConversationService {
         });
         let event = WebSocketMessage::new("conversation.listChanged", payload);
         self.broadcaster.broadcast(event);
+    }
+
+    /// Backfill `extra.skills` if the row predates the snapshot model.
+    /// Persists the mutation asynchronously; failures are logged and
+    /// swallowed so a read path never 500s because of a backfill write
+    /// failure.
+    async fn backfill_extra_inplace(&self, conversation_id: &str, extra: &mut serde_json::Value) {
+        let auto_inject = self.skill_resolver.auto_inject_names().await;
+        let mutated = crate::skill_snapshot::backfill_skills_if_missing(extra, &auto_inject);
+        if !mutated {
+            return;
+        }
+        let serialized = match serde_json::to_string(extra) {
+            Ok(s) => s,
+            Err(e) => {
+                warn!(
+                    conversation_id,
+                    error = %e,
+                    "backfill serialize failed; returning in-memory value"
+                );
+                return;
+            }
+        };
+        let update = ConversationRowUpdate {
+            extra: Some(serialized),
+            ..Default::default()
+        };
+        if let Err(e) = self.repo.update(conversation_id, &update).await {
+            warn!(
+                conversation_id,
+                error = %e,
+                "backfill persist failed; returning in-memory value"
+            );
+        }
     }
 }
 

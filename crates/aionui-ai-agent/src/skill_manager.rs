@@ -136,6 +136,56 @@ impl AcpSkillManager {
         index
     }
 
+    /// Populate the cache with only the named skills (no filtering by
+    /// auto-inject/opt-in). Returns the resulting index. Used by the
+    /// snapshot-driven first-message injector.
+    pub async fn discover_by_names(&self, names: &[String]) -> Vec<SkillIndex> {
+        // Always reset state so repeated calls produce a deterministic cache.
+        if names.is_empty() {
+            let mut cache = self.cache.write().await;
+            cache.clear();
+            let mut discovered = self.discovered.write().await;
+            *discovered = true;
+            return Vec::new();
+        }
+        let items = match aionui_extension::list_available_skills(&self.paths).await {
+            Ok(v) => v,
+            Err(e) => {
+                warn!(error = %e, "discover_by_names: list_available_skills failed");
+                Vec::new()
+            }
+        };
+
+        let wanted: std::collections::HashSet<&String> = names.iter().collect();
+        let mut cache = self.cache.write().await;
+        cache.clear();
+        for item in items {
+            if !wanted.contains(&item.name) {
+                continue;
+            }
+            cache.insert(
+                item.name.clone(),
+                SkillDefinition {
+                    name: item.name.clone(),
+                    description: item.description.clone(),
+                    location: std::path::PathBuf::from(&item.location),
+                    source: item.source,
+                    relative_location: item.relative_location.clone(),
+                    body: None,
+                },
+            );
+        }
+        let mut discovered = self.discovered.write().await;
+        *discovered = true;
+        cache
+            .values()
+            .map(|d| SkillIndex {
+                name: d.name.clone(),
+                description: d.description.clone(),
+            })
+            .collect()
+    }
+
     /// Return the current skill index without re-scanning.
     pub async fn get_skills_index(&self) -> Vec<SkillIndex> {
         let cache = self.cache.read().await;
