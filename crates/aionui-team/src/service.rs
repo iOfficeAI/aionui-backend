@@ -3,7 +3,7 @@ use std::sync::Arc;
 use aionui_api_types::{
     AddAgentRequest, CreateConversationRequest, CreateTeamRequest, TeamAgentResponse, TeamResponse,
 };
-use aionui_common::{AgentType, ProviderWithModel, generate_id, now_ms};
+use aionui_common::{AcpBackend, AgentType, ProviderWithModel, generate_id, now_ms};
 use aionui_conversation::ConversationService;
 use aionui_db::models::TeamRow;
 use aionui_db::{ITeamRepository, UpdateTeamParams};
@@ -411,19 +411,27 @@ impl TeamSessionService {
 
 /// Build the extra JSON for a team agent's conversation.
 ///
-/// Merges team membership (`teamId`) with the agent-identification fields
-/// that the factory needs (`agent_id`) so the agent registry can resolve
-/// the CLI command.  Mirrors the `extra` shape that single-chat frontends
-/// send directly in `POST /api/conversations`.
+/// Stores `agent_id` (from `custom_agent_id`) so the factory can resolve the
+/// agent in the registry.  `backend` is stored only when it is a recognised
+/// ACP sub-backend name (e.g. "claude") — the `AgentType` string "acp" is
+/// intentionally omitted because it is not a valid `AcpBackend` variant and
+/// would cause `AcpBuildExtra` deserialization to fail in the factory.
 fn build_agent_extra(
     team_id: &str,
     backend: &str,
     custom_agent_id: Option<&str>,
 ) -> serde_json::Value {
-    let mut extra = serde_json::json!({
-        "teamId": team_id,
-        "backend": backend,
-    });
+    let mut extra = serde_json::json!({ "teamId": team_id });
+
+    // Include backend only when it is a valid AcpBackend sub-backend name
+    // (e.g. "claude").  The AgentType string "acp" is intentionally excluded:
+    // it is not a valid AcpBackend variant and would cause AcpBuildExtra
+    // deserialization to fail in the factory.
+    let quoted = format!("\"{backend}\"");
+    if serde_json::from_str::<AcpBackend>(&quoted).is_ok() {
+        extra["backend"] = serde_json::Value::String(backend.to_owned());
+    }
+
     if let Some(id) = custom_agent_id {
         extra["agent_id"] = serde_json::Value::String(id.to_owned());
     }
@@ -463,24 +471,37 @@ mod tests {
     }
 
     #[test]
-    fn build_agent_extra_includes_team_id_and_backend() {
+    fn build_agent_extra_excludes_backend_for_agent_type_string() {
+        // "acp" is an AgentType discriminant, NOT a valid AcpBackend variant.
+        // Storing it in extra would cause AcpBuildExtra deserialization to fail.
         let extra = build_agent_extra("team-1", "acp", None);
         assert_eq!(extra["teamId"], "team-1");
-        assert_eq!(extra["backend"], "acp");
+        assert!(extra.get("backend").is_none());
+        assert!(extra.get("agent_id").is_none());
+    }
+
+    #[test]
+    fn build_agent_extra_includes_backend_for_valid_acp_sub_backend() {
+        // "claude" is a valid AcpBackend variant — must be stored so the factory
+        // can use it without a registry lookup.
+        let extra = build_agent_extra("team-2", "claude", None);
+        assert_eq!(extra["teamId"], "team-2");
+        assert_eq!(extra["backend"], "claude");
         assert!(extra.get("agent_id").is_none());
     }
 
     #[test]
     fn build_agent_extra_includes_agent_id_when_custom_agent_id_set() {
-        let extra = build_agent_extra("team-2", "acp", Some("registry-agent-x"));
-        assert_eq!(extra["teamId"], "team-2");
-        assert_eq!(extra["backend"], "acp");
+        let extra = build_agent_extra("team-3", "acp", Some("registry-agent-x"));
+        assert_eq!(extra["teamId"], "team-3");
         assert_eq!(extra["agent_id"], "registry-agent-x");
+        // "acp" is still not stored as backend
+        assert!(extra.get("backend").is_none());
     }
 
     #[test]
     fn build_agent_extra_without_custom_agent_id_has_no_agent_id_key() {
-        let extra = build_agent_extra("t3", "nanobot", None);
+        let extra = build_agent_extra("t4", "nanobot", None);
         assert!(extra.get("agent_id").is_none());
     }
 }
