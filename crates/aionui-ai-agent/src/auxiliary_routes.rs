@@ -39,34 +39,28 @@ pub fn auxiliary_routes(state: AuxiliaryRouterState) -> Router {
             "/api/conversations/{id}/reload-context",
             post(reload_context),
         )
+        .route("/api/conversations/{id}/side-question", post(side_question))
         .route(
-            "/api/conversations/{id}/acp/side-question",
-            post(acp_side_question),
+            "/api/conversations/{id}/slash-commands",
+            get(get_slash_commands),
+        )
+        .route("/api/conversations/{id}/mode", get(get_mode).put(set_mode))
+        .route(
+            "/api/conversations/{id}/model",
+            get(get_model).put(set_model),
         )
         .route(
-            "/api/conversations/{id}/acp/slash-commands",
-            get(get_acp_slash_commands),
+            "/api/conversations/{id}/config",
+            get(get_configs).put(set_configs),
         )
         .route(
-            "/api/conversations/{id}/acp/mode",
-            get(get_acp_mode).put(set_acp_mode),
+            "/api/conversations/{id}/config/{configId}",
+            get(get_config).put(set_config),
         )
+        .route("/api/conversations/{id}/usage", get(get_usage))
         .route(
-            "/api/conversations/{id}/acp/model",
-            get(get_acp_model).put(set_acp_model),
-        )
-        .route(
-            "/api/conversations/{id}/acp/config",
-            get(get_acp_config_options).put(set_acp_config_options),
-        )
-        .route(
-            "/api/conversations/{id}/acp/config/{configId}",
-            get(get_acp_config_option).put(set_acp_config_option),
-        )
-        .route("/api/conversations/{id}/acp/usage", get(get_acp_usage))
-        .route(
-            "/api/conversations/{id}/acp/agent-capabilities",
-            get(get_acp_agent_capabilities),
+            "/api/conversations/{id}/agent-capabilities",
+            get(get_agent_capabilities),
         )
         .route(
             "/api/conversations/{id}/openclaw/runtime",
@@ -205,7 +199,7 @@ async fn reload_context(
     Ok(Json(ApiResponse::success()))
 }
 
-async fn acp_side_question(
+async fn side_question(
     State(state): State<AuxiliaryRouterState>,
     Extension(_user): Extension<CurrentUser>,
     Path(id): Path<String>,
@@ -246,7 +240,7 @@ async fn acp_side_question(
     })))
 }
 
-async fn get_acp_slash_commands(
+async fn get_slash_commands(
     State(state): State<AuxiliaryRouterState>,
     Extension(_user): Extension<CurrentUser>,
     Path(id): Path<String>,
@@ -267,23 +261,16 @@ async fn get_acp_slash_commands(
     Ok(Json(ApiResponse::ok(Vec::new())))
 }
 
-async fn get_acp_mode(
+async fn get_mode(
     State(state): State<AuxiliaryRouterState>,
     Extension(_user): Extension<CurrentUser>,
     Path(id): Path<String>,
 ) -> Result<Json<ApiResponse<AgentModeResponse>>, AppError> {
     let handle = get_task(&state, &id)?;
-
-    if handle.agent_type() != AgentType::Acp {
-        return Err(AppError::BadRequest(
-            "This endpoint is only available for ACP agents".into(),
-        ));
-    }
-
     Ok(Json(ApiResponse::ok(handle.get_mode().await?)))
 }
 
-async fn set_acp_mode(
+async fn set_mode(
     State(state): State<AuxiliaryRouterState>,
     Extension(_user): Extension<CurrentUser>,
     Path(id): Path<String>,
@@ -294,16 +281,11 @@ async fn set_acp_mode(
         return Err(AppError::BadRequest("mode must not be empty".into()));
     }
     let handle = get_task(&state, &id)?;
-    if handle.agent_type() != AgentType::Acp {
-        return Err(AppError::BadRequest(
-            "This endpoint is only available for ACP agents".into(),
-        ));
-    }
     handle.set_mode(&req.mode).await?;
     Ok(Json(ApiResponse::success()))
 }
 
-async fn get_acp_model(
+async fn get_model(
     State(state): State<AuxiliaryRouterState>,
     Extension(_user): Extension<CurrentUser>,
     Path(id): Path<String>,
@@ -322,7 +304,7 @@ async fn get_acp_model(
     Ok(Json(ApiResponse::ok(resp)))
 }
 
-async fn set_acp_model(
+async fn set_model(
     State(state): State<AuxiliaryRouterState>,
     Extension(_user): Extension<CurrentUser>,
     Path(id): Path<String>,
@@ -345,7 +327,7 @@ async fn set_acp_model(
     Ok(Json(ApiResponse::success()))
 }
 
-async fn get_acp_config_option(
+async fn get_config(
     State(state): State<AuxiliaryRouterState>,
     Extension(_user): Extension<CurrentUser>,
     Path(params): Path<ConfigPathParams>,
@@ -367,7 +349,7 @@ async fn get_acp_config_option(
     Ok(Json(ApiResponse::ok(config_option)))
 }
 
-async fn set_acp_config_option(
+async fn set_config(
     State(state): State<AuxiliaryRouterState>,
     Extension(_user): Extension<CurrentUser>,
     Path(params): Path<ConfigPathParams>,
@@ -387,7 +369,7 @@ async fn set_acp_config_option(
     Ok(Json(ApiResponse::success()))
 }
 
-async fn get_acp_config_options(
+async fn get_configs(
     State(state): State<AuxiliaryRouterState>,
     Extension(_user): Extension<CurrentUser>,
     Path(id): Path<String>,
@@ -404,7 +386,7 @@ async fn get_acp_config_options(
     Ok(Json(ApiResponse::ok(acp.config_options().await)))
 }
 
-async fn set_acp_config_options(
+async fn set_configs(
     State(state): State<AuxiliaryRouterState>,
     Extension(_user): Extension<CurrentUser>,
     Path(id): Path<String>,
@@ -431,7 +413,7 @@ async fn set_acp_config_options(
     Ok(Json(ApiResponse::success()))
 }
 
-async fn get_acp_usage(
+async fn get_usage(
     State(state): State<AuxiliaryRouterState>,
     Extension(_user): Extension<CurrentUser>,
     Path(id): Path<String>,
@@ -449,7 +431,7 @@ async fn get_acp_usage(
     Ok(Json(ApiResponse::ok(usage)))
 }
 
-async fn get_acp_agent_capabilities(
+async fn get_agent_capabilities(
     State(state): State<AuxiliaryRouterState>,
     Extension(_user): Extension<CurrentUser>,
     Path(id): Path<String>,
