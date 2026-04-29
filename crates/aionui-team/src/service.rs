@@ -32,6 +32,10 @@ pub struct TeamSessionService {
     task_manager: Arc<dyn IWorkerTaskManager>,
     backend_binary_path: Arc<PathBuf>,
     sessions: Arc<DashMap<String, SessionEntry>>,
+    /// Per-team mutex serializing `add_agent` so concurrent callers cannot
+    /// read-modify-write the `agents` JSON with stale state (last-writer-wins
+    /// would otherwise drop entries).
+    add_agent_locks: Arc<DashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 impl TeamSessionService {
@@ -49,6 +53,7 @@ impl TeamSessionService {
             task_manager,
             backend_binary_path,
             sessions: Arc::new(DashMap::new()),
+            add_agent_locks: Arc::new(DashMap::new()),
         }
     }
 
@@ -202,6 +207,10 @@ impl TeamSessionService {
         self.repo.delete_tasks_by_team(team_id).await?;
         self.repo.delete_team(team_id).await?;
 
+        // Drop the per-team add_agent lock so the DashMap entry does not leak
+        // across team lifecycles (W4-D23).
+        self.add_agent_locks.remove(team_id);
+
         info!(team_id = %team_id, "Team removed");
         Ok(())
     }
@@ -231,6 +240,13 @@ impl TeamSessionService {
         team_id: &str,
         req: AddAgentRequest,
     ) -> Result<TeamAgentResponse, TeamError> {
+        let lock = self
+            .add_agent_locks
+            .entry(team_id.to_owned())
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone();
+        let _guard = lock.lock().await;
+
         let row = self
             .repo
             .get_team(team_id)

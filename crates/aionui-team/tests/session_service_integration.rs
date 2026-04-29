@@ -1258,6 +1258,86 @@ async fn d9_ensure_session_rollbacks_when_build_fails() {
 // Test: D11.5 remove_team cascades kill to every agent process
 // ===========================================================================
 
+// ===========================================================================
+// Test: W4-D23 add_agent_locks — per-team serialization prevents last-writer-
+// wins when two tasks race on add_agent.
+// ===========================================================================
+
+#[tokio::test]
+async fn w4_d23_concurrent_add_agent_preserves_every_insertion() {
+    // Two concurrent add_agent calls on the same team must both be persisted
+    // (no silent drop from unsynchronized read-modify-write on the agents
+    // JSON blob).
+    let svc = Arc::new(setup());
+    let created = svc
+        .create_team(
+            "user1",
+            CreateTeamRequest {
+                name: "T".into(),
+                agents: vec![TeamAgentInput {
+                    name: "Lead".into(),
+                    role: "lead".into(),
+                    backend: "acp".into(),
+                    model: "claude".into(),
+                    custom_agent_id: None,
+                }],
+            },
+        )
+        .await
+        .unwrap();
+
+    let svc_a = svc.clone();
+    let team_id_a = created.id.clone();
+    let task_a = tokio::spawn(async move {
+        svc_a
+            .add_agent(
+                "user1",
+                &team_id_a,
+                AddAgentRequest {
+                    name: "WorkerA".into(),
+                    role: "teammate".into(),
+                    backend: "acp".into(),
+                    model: "claude".into(),
+                    custom_agent_id: None,
+                },
+            )
+            .await
+    });
+
+    let svc_b = svc.clone();
+    let team_id_b = created.id.clone();
+    let task_b = tokio::spawn(async move {
+        svc_b
+            .add_agent(
+                "user1",
+                &team_id_b,
+                AddAgentRequest {
+                    name: "WorkerB".into(),
+                    role: "teammate".into(),
+                    backend: "acp".into(),
+                    model: "claude".into(),
+                    custom_agent_id: None,
+                },
+            )
+            .await
+    });
+
+    let (a, b) = tokio::join!(task_a, task_b);
+    a.unwrap().unwrap();
+    b.unwrap().unwrap();
+
+    let got = svc.get_team(&created.id).await.unwrap();
+    assert_eq!(
+        got.agents.len(),
+        3,
+        "both concurrent add_agent calls must be persisted (1 lead + 2 workers)"
+    );
+    let names: std::collections::HashSet<_> = got.agents.iter().map(|a| a.name.clone()).collect();
+    assert!(names.contains("Lead"));
+    assert!(names.contains("WorkerA"));
+    assert!(names.contains("WorkerB"));
+}
+
 #[tokio::test]
 async fn d115_remove_team_kills_every_agent_process() {
     let (svc, tm) = setup_with_factory(success_factory());
