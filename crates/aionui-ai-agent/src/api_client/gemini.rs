@@ -37,11 +37,7 @@ impl GeminiRotatingClient {
     /// Native Gemini `generateContent` call.
     ///
     /// POST /v1beta/models/{model}:generateContent?key={api_key}
-    pub async fn generate_content(
-        &self,
-        model: &str,
-        request: &Value,
-    ) -> Result<Value, ApiClientError> {
+    pub async fn generate_content(&self, model: &str, request: &Value) -> Result<Value, ApiClientError> {
         let model = model.to_string();
         self.inner
             .execute_with_retry(|client, base_url, api_key| {
@@ -291,11 +287,7 @@ pub fn clean_function_name(name: &str) -> String {
             cleaned.push('_');
         }
     }
-    if cleaned.is_empty() {
-        "_".to_string()
-    } else {
-        cleaned
-    }
+    if cleaned.is_empty() { "_".to_string() } else { cleaned }
 }
 
 #[cfg(test)]
@@ -329,9 +321,7 @@ mod tests {
 
     #[test]
     fn image_generation_prompt_detected() {
-        assert!(is_image_generation_prompt(
-            "Please generate an image of a cat"
-        ));
+        assert!(is_image_generation_prompt("Please generate an image of a cat"));
         assert!(is_image_generation_prompt("Create a picture of sunset"));
         assert!(is_image_generation_prompt("Draw me a photo"));
     }
@@ -374,18 +364,11 @@ mod tests {
         });
 
         let gemini = openai_to_gemini_request(&openai);
-        assert_eq!(
-            gemini["systemInstruction"]["parts"][0]["text"],
-            "You are helpful"
-        );
+        assert_eq!(gemini["systemInstruction"]["parts"][0]["text"], "You are helpful");
 
         // System message must NOT appear in contents (only in systemInstruction)
         let contents = gemini["contents"].as_array().unwrap();
-        assert_eq!(
-            contents.len(),
-            1,
-            "system message should not be in contents"
-        );
+        assert_eq!(contents.len(), 1, "system message should not be in contents");
         assert_eq!(contents[0]["role"], "user");
         assert_eq!(contents[0]["parts"][0]["text"], "Hi");
     }
@@ -452,9 +435,7 @@ mod tests {
         });
 
         let openai = gemini_to_openai_response(&gemini);
-        let tool_calls = openai["choices"][0]["message"]["tool_calls"]
-            .as_array()
-            .unwrap();
+        let tool_calls = openai["choices"][0]["message"]["tool_calls"].as_array().unwrap();
         assert_eq!(tool_calls.len(), 1);
         assert_eq!(tool_calls[0]["function"]["name"], "get_weather");
         assert_eq!(openai["choices"][0]["finish_reason"], "tool_calls");
@@ -482,13 +463,8 @@ mod tests {
         });
 
         let openai = gemini_to_openai_response(&gemini);
-        assert_eq!(
-            openai["choices"][0]["message"]["content"],
-            "Let me check the weather."
-        );
-        let tool_calls = openai["choices"][0]["message"]["tool_calls"]
-            .as_array()
-            .unwrap();
+        assert_eq!(openai["choices"][0]["message"]["content"], "Let me check the weather.");
+        let tool_calls = openai["choices"][0]["message"]["tool_calls"].as_array().unwrap();
         assert_eq!(tool_calls.len(), 1);
         assert_eq!(tool_calls[0]["function"]["name"], "get_weather");
     }
@@ -496,11 +472,7 @@ mod tests {
     #[test]
     fn constructs_with_correct_base_url() {
         let km = Arc::new(ApiKeyManager::new("test-key", None));
-        let client =
-            GeminiRotatingClient::new(km, "https://generativelanguage.googleapis.com", None, None);
-        assert_eq!(
-            client.base_url(),
-            "https://generativelanguage.googleapis.com"
-        );
+        let client = GeminiRotatingClient::new(km, "https://generativelanguage.googleapis.com", None, None);
+        assert_eq!(client.base_url(), "https://generativelanguage.googleapis.com");
     }
 }

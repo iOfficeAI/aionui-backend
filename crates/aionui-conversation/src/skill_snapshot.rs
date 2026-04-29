@@ -16,11 +16,8 @@ pub fn compute_initial_skills(
     exclude_auto_inject: &[String],
 ) -> Vec<String> {
     let excluded: std::collections::HashSet<&String> = exclude_auto_inject.iter().collect();
-    let mut out: std::collections::BTreeSet<String> = auto_inject
-        .iter()
-        .filter(|n| !excluded.contains(n))
-        .cloned()
-        .collect();
+    let mut out: std::collections::BTreeSet<String> =
+        auto_inject.iter().filter(|n| !excluded.contains(n)).cloned().collect();
     for name in preset_enabled {
         out.insert(name.clone());
     }
@@ -42,8 +39,7 @@ pub fn backfill_skills_if_missing(extra: &mut Value, auto_inject_now: &[String])
     let legacy_enabled = take_string_array(obj, "enabled_skills");
     let legacy_excluded = take_string_array(obj, "exclude_builtin_skills");
     let legacy_loaded = obj.remove("loaded_skills");
-    let had_legacy =
-        !legacy_enabled.is_empty() || !legacy_excluded.is_empty() || legacy_loaded.is_some();
+    let had_legacy = !legacy_enabled.is_empty() || !legacy_excluded.is_empty() || legacy_loaded.is_some();
 
     let needs_compute = !obj.contains_key("skills");
     if needs_compute {
@@ -80,11 +76,7 @@ mod tests {
 
     #[test]
     fn compute_initial_applies_exclude() {
-        let skills = compute_initial_skills(
-            &["cron".into(), "todo-tracker".into()],
-            &[],
-            &["cron".into()],
-        );
+        let skills = compute_initial_skills(&["cron".into(), "todo-tracker".into()], &[], &["cron".into()]);
         assert_eq!(skills, vec!["todo-tracker"]);
     }
 
@@ -104,8 +96,7 @@ mod tests {
             "exclude_builtin_skills": ["cron"],
             "loaded_skills": [{"name": "cron", "description": "old cache"}],
         });
-        let mutated =
-            backfill_skills_if_missing(&mut extra, &["cron".into(), "todo-tracker".into()]);
+        let mutated = backfill_skills_if_missing(&mut extra, &["cron".into(), "todo-tracker".into()]);
         assert!(mutated);
         assert_eq!(extra["skills"], json!(["pdf", "todo-tracker"]));
         assert!(extra.get("enabled_skills").is_none());

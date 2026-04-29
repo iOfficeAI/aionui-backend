@@ -81,8 +81,7 @@ mod tests {
             created_at: 0,
             updated_at: 0,
         };
-        let parsed: Vec<serde_json::Value> =
-            serde_json::from_str(&row.agents).expect("agents should be valid JSON");
+        let parsed: Vec<serde_json::Value> = serde_json::from_str(&row.agents).expect("agents should be valid JSON");
         assert!(parsed.is_empty());
     }
 
@@ -118,11 +117,9 @@ mod tests {
             created_at: 0,
             updated_at: 0,
         };
-        let blocked: Vec<String> =
-            serde_json::from_str(&row.blocked_by).expect("blocked_by should be valid JSON");
+        let blocked: Vec<String> = serde_json::from_str(&row.blocked_by).expect("blocked_by should be valid JSON");
         assert!(blocked.is_empty());
-        let blocks: Vec<String> =
-            serde_json::from_str(&row.blocks).expect("blocks should be valid JSON");
+        let blocks: Vec<String> = serde_json::from_str(&row.blocks).expect("blocks should be valid JSON");
         assert!(blocks.is_empty());
     }
 

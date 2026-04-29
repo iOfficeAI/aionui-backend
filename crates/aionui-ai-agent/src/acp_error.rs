@@ -85,15 +85,11 @@ impl AcpError {
             ErrorCode::MethodNotFound => AcpError::MethodNotFound {
                 method: context.to_owned(),
             },
-            ErrorCode::InvalidParams => AcpError::InvalidParams {
+            ErrorCode::InvalidParams => AcpError::InvalidParams { message: err.message },
+            ErrorCode::ParseError | ErrorCode::InvalidRequest | ErrorCode::InternalError => AcpError::AgentInternal {
                 message: err.message,
+                code: i32::from(err.code),
             },
-            ErrorCode::ParseError | ErrorCode::InvalidRequest | ErrorCode::InternalError => {
-                AcpError::AgentInternal {
-                    message: err.message,
-                    code: i32::from(err.code),
-                }
-            }
             _ => {
                 let code = i32::from(err.code);
                 // -32001, -32002: additional session-not-found codes used by some agents
@@ -123,14 +119,12 @@ impl From<AcpError> for AppError {
     fn from(err: AcpError) -> Self {
         match &err {
             // Process lifecycle → 502 Bad Gateway (upstream failure)
-            AcpError::SpawnFailed { .. }
-            | AcpError::StartupCrash { .. }
-            | AcpError::Disconnected { .. } => AppError::BadGateway(err.to_string()),
+            AcpError::SpawnFailed { .. } | AcpError::StartupCrash { .. } | AcpError::Disconnected { .. } => {
+                AppError::BadGateway(err.to_string())
+            }
 
             // Authentication → 401
-            AcpError::AuthRequired => {
-                AppError::Unauthorized("Agent requires authentication".into())
-            }
+            AcpError::AuthRequired => AppError::Unauthorized("Agent requires authentication".into()),
 
             // Session not found → 404
             AcpError::SessionNotFound { .. } => AppError::NotFound(err.to_string()),
@@ -201,18 +195,8 @@ mod tests {
             }
             .is_retryable()
         );
-        assert!(
-            !AcpError::MethodNotFound {
-                method: "foo".into()
-            }
-            .is_retryable()
-        );
-        assert!(
-            !AcpError::InvalidParams {
-                message: "bad".into()
-            }
-            .is_retryable()
-        );
+        assert!(!AcpError::MethodNotFound { method: "foo".into() }.is_retryable());
+        assert!(!AcpError::InvalidParams { message: "bad".into() }.is_retryable());
         assert!(!AcpError::NotConnected.is_retryable());
     }
 
@@ -283,29 +267,14 @@ mod tests {
     #[test]
     fn to_app_error_status_codes() {
         let cases: Vec<(AcpError, StatusCode)> = vec![
-            (
-                AcpError::SpawnFailed {
-                    message: "x".into(),
-                },
-                StatusCode::BAD_GATEWAY,
-            ),
+            (AcpError::SpawnFailed { message: "x".into() }, StatusCode::BAD_GATEWAY),
             (AcpError::AuthRequired, StatusCode::UNAUTHORIZED),
             (
-                AcpError::SessionNotFound {
-                    session_id: "s".into(),
-                },
+                AcpError::SessionNotFound { session_id: "s".into() },
                 StatusCode::NOT_FOUND,
             ),
-            (
-                AcpError::MethodNotFound { method: "m".into() },
-                StatusCode::BAD_REQUEST,
-            ),
-            (
-                AcpError::InvalidParams {
-                    message: "p".into(),
-                },
-                StatusCode::BAD_REQUEST,
-            ),
+            (AcpError::MethodNotFound { method: "m".into() }, StatusCode::BAD_REQUEST),
+            (AcpError::InvalidParams { message: "p".into() }, StatusCode::BAD_REQUEST),
             (
                 AcpError::AgentInternal {
                     message: "e".into(),
@@ -314,19 +283,12 @@ mod tests {
                 StatusCode::BAD_GATEWAY,
             ),
             (AcpError::NotConnected, StatusCode::INTERNAL_SERVER_ERROR),
-            (
-                AcpError::InitTimeout { timeout_secs: 30 },
-                StatusCode::BAD_GATEWAY,
-            ),
+            (AcpError::InitTimeout { timeout_secs: 30 }, StatusCode::BAD_GATEWAY),
         ];
 
         for (acp_err, expected_status) in cases {
             let app_err: AppError = acp_err.into();
-            assert_eq!(
-                app_err.status_code(),
-                expected_status,
-                "Mismatch for {app_err:?}"
-            );
+            assert_eq!(app_err.status_code(), expected_status, "Mismatch for {app_err:?}");
         }
     }
 

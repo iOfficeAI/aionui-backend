@@ -44,15 +44,9 @@ impl TeamMcpStdioServerSpec {
             command: backend_binary_path.to_owned(),
             args: vec!["mcp-bridge".to_owned()],
             env: vec![
-                (
-                    TeamMcpStdioConfig::ENV_PORT.to_owned(),
-                    cfg.port.to_string(),
-                ),
+                (TeamMcpStdioConfig::ENV_PORT.to_owned(), cfg.port.to_string()),
                 (TeamMcpStdioConfig::ENV_TOKEN.to_owned(), cfg.token.clone()),
-                (
-                    TeamMcpStdioConfig::ENV_SLOT_ID.to_owned(),
-                    cfg.slot_id.clone(),
-                ),
+                (TeamMcpStdioConfig::ENV_SLOT_ID.to_owned(), cfg.slot_id.clone()),
             ],
         }
     }
@@ -103,10 +97,7 @@ mod tests {
         let spec = TeamMcpStdioServerSpec::from_config("/p", &sample_cfg());
         let kv: std::collections::HashMap<_, _> = spec.env.iter().cloned().collect();
 
-        assert_eq!(
-            kv.get(TeamMcpStdioConfig::ENV_PORT).map(String::as_str),
-            Some("12345")
-        );
+        assert_eq!(kv.get(TeamMcpStdioConfig::ENV_PORT).map(String::as_str), Some("12345"));
         assert_eq!(
             kv.get(TeamMcpStdioConfig::ENV_TOKEN).map(String::as_str),
             Some("tok-abc")

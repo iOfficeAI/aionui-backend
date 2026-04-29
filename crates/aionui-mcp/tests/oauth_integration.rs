@@ -12,8 +12,7 @@ use aionui_mcp::McpOAuthService;
 
 async fn make_service() -> (McpOAuthService, Arc<dyn IOAuthTokenRepository>) {
     let db = aionui_db::init_database_memory().await.unwrap();
-    let repo: Arc<dyn IOAuthTokenRepository> =
-        Arc::new(SqliteOAuthTokenRepository::new(db.pool().clone()));
+    let repo: Arc<dyn IOAuthTokenRepository> = Arc::new(SqliteOAuthTokenRepository::new(db.pool().clone()));
     let svc = McpOAuthService::new(repo.clone(), reqwest::Client::new());
     // Keep db alive by leaking it (integration test only).
     std::mem::forget(db);
@@ -27,10 +26,7 @@ async fn make_service() -> (McpOAuthService, Arc<dyn IOAuthTokenRepository>) {
 #[tokio::test]
 async fn check_status_unauthenticated_returns_false() {
     let (svc, _repo) = make_service().await;
-    let status = svc
-        .check_oauth_status("https://new-server.example.com")
-        .await
-        .unwrap();
+    let status = svc.check_oauth_status("https://new-server.example.com").await.unwrap();
     assert!(!status.authenticated);
 }
 
@@ -54,10 +50,7 @@ async fn check_status_authenticated_returns_true() {
     .await
     .unwrap();
 
-    let status = svc
-        .check_oauth_status("https://mcp.example.com")
-        .await
-        .unwrap();
+    let status = svc.check_oauth_status("https://mcp.example.com").await.unwrap();
     assert!(status.authenticated);
 }
 
@@ -80,10 +73,7 @@ async fn check_status_expired_token_returns_false() {
     .await
     .unwrap();
 
-    let status = svc
-        .check_oauth_status("https://expired.example.com")
-        .await
-        .unwrap();
+    let status = svc.check_oauth_status("https://expired.example.com").await.unwrap();
     assert!(!status.authenticated);
 }
 
@@ -105,10 +95,7 @@ async fn check_status_no_expiry_treated_as_valid() {
     .await
     .unwrap();
 
-    let status = svc
-        .check_oauth_status("https://no-expiry.example.com")
-        .await
-        .unwrap();
+    let status = svc.check_oauth_status("https://no-expiry.example.com").await.unwrap();
     assert!(status.authenticated);
 }
 
@@ -185,20 +172,14 @@ async fn logout_deletes_stored_token() {
     .unwrap();
 
     // Verify token exists.
-    let status = svc
-        .check_oauth_status("https://logout.example.com")
-        .await
-        .unwrap();
+    let status = svc.check_oauth_status("https://logout.example.com").await.unwrap();
     assert!(status.authenticated);
 
     // Logout.
     svc.logout("https://logout.example.com").await.unwrap();
 
     // Verify token is gone.
-    let status = svc
-        .check_oauth_status("https://logout.example.com")
-        .await
-        .unwrap();
+    let status = svc.check_oauth_status("https://logout.example.com").await.unwrap();
     assert!(!status.authenticated);
 }
 
@@ -210,9 +191,7 @@ async fn logout_deletes_stored_token() {
 async fn logout_idempotent_for_unauthenticated() {
     let (svc, _repo) = make_service().await;
     // Should not error.
-    svc.logout("https://never-authed.example.com")
-        .await
-        .unwrap();
+    svc.logout("https://never-authed.example.com").await.unwrap();
 }
 
 // ---------------------------------------------------------------------------

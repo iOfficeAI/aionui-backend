@@ -3,8 +3,8 @@ use tracing::debug;
 
 use super::protocol::{AgentEvent, ApprovalRequestEvent, ChatEvent, ChatEventState, EventFrame};
 use crate::stream_event::{
-    AgentStreamEvent, ErrorEventData, FinishEventData, StartEventData, TextEventData,
-    ThinkingEventData, ToolCallEventData, ToolCallStatus,
+    AgentStreamEvent, ErrorEventData, FinishEventData, StartEventData, TextEventData, ThinkingEventData,
+    ToolCallEventData, ToolCallStatus,
 };
 
 #[derive(Default)]
@@ -87,8 +87,7 @@ fn map_chat_event(
                 }));
             }
 
-            if let Some(delta) = compute_text_delta(&chat.message, &mut text_state.accumulated_text)
-            {
+            if let Some(delta) = compute_text_delta(&chat.message, &mut text_state.accumulated_text) {
                 if text_state.current_msg_id.is_none() {
                     text_state.current_msg_id = Some(uuid::Uuid::new_v4().to_string());
                 }
@@ -96,9 +95,7 @@ fn map_chat_event(
             }
         }
         ChatEventState::Final => {
-            if text_state.accumulated_text.is_empty()
-                && !text_state.agent_assistant_fallback.is_empty()
-            {
+            if text_state.accumulated_text.is_empty() && !text_state.agent_assistant_fallback.is_empty() {
                 // Layer 2 fallback: use agent.assistant buffered text
                 if text_state.current_msg_id.is_none() {
                     text_state.current_msg_id = Some(uuid::Uuid::new_v4().to_string());
@@ -120,9 +117,7 @@ fn map_chat_event(
             text_state.turn_active = false;
         }
         ChatEventState::Error => {
-            let msg = chat
-                .error_message
-                .unwrap_or_else(|| "Unknown chat error".into());
+            let msg = chat.error_message.unwrap_or_else(|| "Unknown chat error".into());
             events.push(AgentStreamEvent::Error(ErrorEventData {
                 message: msg,
                 code: None,
@@ -158,20 +153,13 @@ fn map_agent_event(
 
     match stream {
         "thinking" | "thought" => {
-            let content = data
-                .get("text")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_owned();
+            let content = data.get("text").and_then(|v| v.as_str()).unwrap_or("").to_owned();
             if content.is_empty() {
                 return vec![];
             }
             vec![AgentStreamEvent::Thinking(ThinkingEventData {
                 content,
-                subject: data
-                    .get("subject")
-                    .and_then(|v| v.as_str())
-                    .map(String::from),
+                subject: data.get("subject").and_then(|v| v.as_str()).map(String::from),
                 duration: None,
                 status: Some("in_progress".into()),
             })]
@@ -195,10 +183,7 @@ fn map_agent_event(
 
 fn map_tool_event(data: &Value) -> Vec<AgentStreamEvent> {
     let phase = data.get("phase").and_then(|v| v.as_str()).unwrap_or("");
-    let is_error = data
-        .get("isError")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+    let is_error = data.get("isError").and_then(|v| v.as_bool()).unwrap_or(false);
 
     let status = match phase {
         "result" if is_error => ToolCallStatus::Error,
@@ -206,16 +191,8 @@ fn map_tool_event(data: &Value) -> Vec<AgentStreamEvent> {
         _ => ToolCallStatus::Running,
     };
 
-    let call_id = data
-        .get("toolCallId")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_owned();
-    let name = data
-        .get("name")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_owned();
+    let call_id = data.get("toolCallId").and_then(|v| v.as_str()).unwrap_or("").to_owned();
+    let name = data.get("name").and_then(|v| v.as_str()).unwrap_or("").to_owned();
     let args = data.get("args").cloned().unwrap_or_default();
 
     vec![AgentStreamEvent::ToolCall(ToolCallEventData {
@@ -244,9 +221,7 @@ fn map_approval_event(event: &EventFrame) -> Vec<AgentStreamEvent> {
     let call_id = tool_call
         .and_then(|tc| tc.tool_call_id.as_deref())
         .unwrap_or(&approval.request_id);
-    let action = tool_call
-        .and_then(|tc| tc.title.as_deref())
-        .unwrap_or("unknown");
+    let action = tool_call.and_then(|tc| tc.title.as_deref()).unwrap_or("unknown");
     let command_type = tool_call.and_then(|tc| tc.kind.as_deref());
 
     let confirmation = serde_json::json!({
@@ -344,14 +319,8 @@ mod tests {
         let mut state = TextFallbackState::new();
         state.reset_for_new_turn();
 
-        let e1 = make_event(
-            "chat",
-            json!({ "state": "delta", "message": { "content": "He" } }),
-        );
-        let e2 = make_event(
-            "chat",
-            json!({ "state": "delta", "message": { "content": "Hello" } }),
-        );
+        let e1 = make_event("chat", json!({ "state": "delta", "message": { "content": "He" } }));
+        let e2 = make_event("chat", json!({ "state": "delta", "message": { "content": "Hello" } }));
 
         let events1 = map_openclaw_event(&e1, &mut state, None);
         assert_eq!(events1.len(), 1);
@@ -394,10 +363,7 @@ mod tests {
         let mut state = TextFallbackState::new();
         state.reset_for_new_turn();
 
-        let event = make_event(
-            "chat",
-            json!({ "state": "error", "errorMessage": "rate limit" }),
-        );
+        let event = make_event("chat", json!({ "state": "error", "errorMessage": "rate limit" }));
         let events = map_openclaw_event(&event, &mut state, None);
 
         assert_eq!(events.len(), 1);
@@ -469,9 +435,7 @@ mod tests {
         let events = map_openclaw_event(&event, &mut state, None);
 
         assert_eq!(events.len(), 1);
-        assert!(
-            matches!(&events[0], AgentStreamEvent::ToolCall(tc) if tc.status == ToolCallStatus::Completed)
-        );
+        assert!(matches!(&events[0], AgentStreamEvent::ToolCall(tc) if tc.status == ToolCallStatus::Completed));
     }
 
     #[test]
@@ -487,9 +451,7 @@ mod tests {
         let events = map_openclaw_event(&event, &mut state, None);
 
         assert_eq!(events.len(), 1);
-        assert!(
-            matches!(&events[0], AgentStreamEvent::ToolCall(tc) if tc.status == ToolCallStatus::Error)
-        );
+        assert!(matches!(&events[0], AgentStreamEvent::ToolCall(tc) if tc.status == ToolCallStatus::Error));
     }
 
     #[test]
@@ -562,10 +524,7 @@ mod tests {
         let mut state = TextFallbackState::new();
         state.reset_for_new_turn();
 
-        let event = make_event(
-            "chat",
-            json!({ "state": "delta", "message": { "content": "x" } }),
-        );
+        let event = make_event("chat", json!({ "state": "delta", "message": { "content": "x" } }));
         let events = map_openclaw_event(&event, &mut state, Some("my-session"));
 
         assert!(!events.is_empty());
@@ -590,10 +549,7 @@ mod tests {
     #[test]
     fn extract_text_from_text_field() {
         let msg = json!({ "text": "fallback text" });
-        assert_eq!(
-            extract_text_from_message(&msg),
-            Some("fallback text".into())
-        );
+        assert_eq!(extract_text_from_message(&msg), Some("fallback text".into()));
     }
 
     #[test]
@@ -625,10 +581,7 @@ mod tests {
         let mut state = TextFallbackState::new();
         assert!(!state.turn_active);
 
-        let event = make_event(
-            "chat",
-            json!({ "state": "delta", "message": { "content": "Hi" } }),
-        );
+        let event = make_event("chat", json!({ "state": "delta", "message": { "content": "Hi" } }));
         let events = map_openclaw_event(&event, &mut state, None);
 
         assert_eq!(events.len(), 2);

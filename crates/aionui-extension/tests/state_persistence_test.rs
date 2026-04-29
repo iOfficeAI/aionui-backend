@@ -6,9 +6,7 @@
 
 use std::collections::HashMap;
 
-use aionui_extension::{
-    ExtensionState, ExtensionStateStore, load_states_from_file, save_states_to_file,
-};
+use aionui_extension::{ExtensionState, ExtensionStateStore, load_states_from_file, save_states_to_file};
 use tempfile::TempDir;
 
 // ---------------------------------------------------------------------------

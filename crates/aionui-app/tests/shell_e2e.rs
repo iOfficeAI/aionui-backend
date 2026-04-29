@@ -29,9 +29,8 @@ impl MultipartBuilder {
     fn add_text(mut self, name: &str, value: &str) -> Self {
         self.parts
             .extend_from_slice(format!("--{}\r\n", self.boundary).as_bytes());
-        self.parts.extend_from_slice(
-            format!("Content-Disposition: form-data; name=\"{name}\"\r\n\r\n").as_bytes(),
-        );
+        self.parts
+            .extend_from_slice(format!("Content-Disposition: form-data; name=\"{name}\"\r\n\r\n").as_bytes());
         self.parts.extend_from_slice(value.as_bytes());
         self.parts.extend_from_slice(b"\r\n");
         self
@@ -41,8 +40,7 @@ impl MultipartBuilder {
         self.parts
             .extend_from_slice(format!("--{}\r\n", self.boundary).as_bytes());
         self.parts.extend_from_slice(
-            format!("Content-Disposition: form-data; name=\"{name}\"; filename=\"{filename}\"\r\n")
-                .as_bytes(),
+            format!("Content-Disposition: form-data; name=\"{name}\"; filename=\"{filename}\"\r\n").as_bytes(),
         );
         self.parts
             .extend_from_slice(format!("Content-Type: {mime}\r\n\r\n").as_bytes());
@@ -59,13 +57,7 @@ impl MultipartBuilder {
     }
 }
 
-fn multipart_request(
-    uri: &str,
-    content_type: &str,
-    body: Vec<u8>,
-    token: &str,
-    csrf: &str,
-) -> Request<Body> {
+fn multipart_request(uri: &str, content_type: &str, body: Vec<u8>, token: &str, csrf: &str) -> Request<Body> {
     Request::builder()
         .method("POST")
         .uri(uri)
@@ -77,12 +69,7 @@ fn multipart_request(
         .unwrap()
 }
 
-async fn set_stt_config(
-    app: &mut axum::Router,
-    token: &str,
-    csrf: &str,
-    config: serde_json::Value,
-) {
+async fn set_stt_config(app: &mut axum::Router, token: &str, csrf: &str, config: serde_json::Value) {
     let req = json_with_token(
         "PUT",
         "/api/settings/client",
@@ -264,13 +251,7 @@ async fn sh14_open_external_empty_url() {
     let (mut app, services) = build_app_with_noop_opener().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
-    let req = json_with_token(
-        "POST",
-        "/api/shell/open-external",
-        json!({ "url": "" }),
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("POST", "/api/shell/open-external", json!({ "url": "" }), &token, &csrf);
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }

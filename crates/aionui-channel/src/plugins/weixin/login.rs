@@ -92,9 +92,7 @@ async fn login_flow(tx: mpsc::Sender<WeixinLoginEvent>) {
         Ok(c) => c,
         Err(e) => {
             let _ = tx
-                .send(WeixinLoginEvent::Error(format!(
-                    "HTTP client init failed: {e}"
-                )))
+                .send(WeixinLoginEvent::Error(format!("HTTP client init failed: {e}")))
                 .await;
             return;
         }
@@ -110,9 +108,7 @@ async fn login_flow(tx: mpsc::Sender<WeixinLoginEvent>) {
         Err(e) => {
             error!(error = %e, "Failed to fetch WeChat QR code");
             let _ = tx
-                .send(WeixinLoginEvent::Error(format!(
-                    "Failed to fetch QR code: {e}"
-                )))
+                .send(WeixinLoginEvent::Error(format!("Failed to fetch QR code: {e}")))
                 .await;
             return;
         }
@@ -122,9 +118,7 @@ async fn login_flow(tx: mpsc::Sender<WeixinLoginEvent>) {
         Some(t) if !t.is_empty() => t,
         _ => {
             let _ = tx
-                .send(WeixinLoginEvent::Error(
-                    "QR code response missing ticket".into(),
-                ))
+                .send(WeixinLoginEvent::Error("QR code response missing ticket".into()))
                 .await;
             return;
         }
@@ -141,9 +135,7 @@ async fn login_flow(tx: mpsc::Sender<WeixinLoginEvent>) {
 
     loop {
         if tokio::time::Instant::now() >= deadline {
-            let _ = tx
-                .send(WeixinLoginEvent::Error("QR code login timeout".into()))
-                .await;
+            let _ = tx.send(WeixinLoginEvent::Error("QR code login timeout".into())).await;
             return;
         }
 
@@ -180,9 +172,7 @@ async fn login_flow(tx: mpsc::Sender<WeixinLoginEvent>) {
                         return;
                     }
                     "expired" => {
-                        let _ = tx
-                            .send(WeixinLoginEvent::Error("QR code expired".into()))
-                            .await;
+                        let _ = tx.send(WeixinLoginEvent::Error("QR code expired".into())).await;
                         return;
                     }
                     // "wait" or unknown → keep polling

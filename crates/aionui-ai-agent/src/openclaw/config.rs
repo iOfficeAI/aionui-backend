@@ -25,12 +25,7 @@ pub struct AuthFileConfig {
 }
 
 const STATE_DIR_NAMES: &[&str] = &[".openclaw", ".clawdbot", ".moltbot", ".moldbot"];
-const CONFIG_FILE_NAMES: &[&str] = &[
-    "openclaw.json",
-    "clawdbot.json",
-    "moltbot.json",
-    "moldbot.json",
-];
+const CONFIG_FILE_NAMES: &[&str] = &["openclaw.json", "clawdbot.json", "moltbot.json", "moldbot.json"];
 
 fn resolve_state_dir() -> Option<PathBuf> {
     if let Ok(dir) = std::env::var("OPENCLAW_STATE_DIR") {
@@ -228,10 +223,7 @@ mod tests {
 }"#;
         let config: OpenClawFileConfig = serde_json::from_str(json).unwrap();
         assert_eq!(get_gateway_port(Some(&config)), 9999);
-        assert_eq!(
-            get_gateway_auth_password(Some(&config)).as_deref(),
-            Some("my-pass")
-        );
+        assert_eq!(get_gateway_auth_password(Some(&config)).as_deref(), Some("my-pass"));
         assert!(get_gateway_auth_token(Some(&config)).is_none());
     }
 

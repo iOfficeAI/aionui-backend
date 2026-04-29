@@ -364,9 +364,7 @@ mod tests {
     #[test]
     fn reply_keyboard_markup_serializes() {
         let markup = ReplyMarkup::ReplyKeyboard(ReplyKeyboardMarkup {
-            keyboard: vec![vec![KeyboardButton {
-                text: "/start".into(),
-            }]],
+            keyboard: vec![vec![KeyboardButton { text: "/start".into() }]],
             resize_keyboard: Some(true),
             one_time_keyboard: None,
         });

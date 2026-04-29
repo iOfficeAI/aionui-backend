@@ -7,9 +7,9 @@ use tracing::warn;
 
 use aionui_api_types::{
     ApiResponse, BatchImportMcpServersRequest, CreateMcpServerRequest, DetectedMcpServerResponse,
-    McpConnectionTestResult, McpServerResponse, McpSyncResult, OAuthCheckStatusRequest,
-    OAuthLoginRequest, OAuthLoginResponse, OAuthLogoutRequest, OAuthStatusResponse,
-    RemoveFromAgentsRequest, SyncToAgentsRequest, TestMcpConnectionRequest, UpdateMcpServerRequest,
+    McpConnectionTestResult, McpServerResponse, McpSyncResult, OAuthCheckStatusRequest, OAuthLoginRequest,
+    OAuthLoginResponse, OAuthLogoutRequest, OAuthStatusResponse, RemoveFromAgentsRequest, SyncToAgentsRequest,
+    TestMcpConnectionRequest, UpdateMcpServerRequest,
 };
 use aionui_common::AppError;
 
@@ -219,10 +219,7 @@ async fn remove_from_agents(
     body: Result<Json<RemoveFromAgentsRequest>, JsonRejection>,
 ) -> Result<Json<ApiResponse<McpSyncResult>>, AppError> {
     let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
-    let result = state
-        .sync_service
-        .remove_from_agents(&req.server_names)
-        .await?;
+    let result = state.sync_service.remove_from_agents(&req.server_names).await?;
     Ok(Json(ApiResponse::ok(result)))
 }
 
@@ -236,10 +233,7 @@ async fn oauth_check_status(
     body: Result<Json<OAuthCheckStatusRequest>, JsonRejection>,
 ) -> Result<Json<ApiResponse<OAuthStatusResponse>>, AppError> {
     let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
-    let status = state
-        .oauth_service
-        .check_oauth_status(&req.server_url)
-        .await?;
+    let status = state.oauth_service.check_oauth_status(&req.server_url).await?;
     Ok(Json(ApiResponse::ok(status)))
 }
 
@@ -267,9 +261,7 @@ async fn oauth_logout(
 }
 
 /// `GET /api/mcp/oauth/authenticated` — list server URLs with stored tokens.
-async fn oauth_authenticated(
-    State(state): State<McpRouterState>,
-) -> Result<Json<ApiResponse<Vec<String>>>, AppError> {
+async fn oauth_authenticated(State(state): State<McpRouterState>) -> Result<Json<ApiResponse<Vec<String>>>, AppError> {
     let urls = state.oauth_service.get_authenticated_servers().await?;
     Ok(Json(ApiResponse::ok(urls)))
 }

@@ -32,10 +32,7 @@ async fn t2_1_create_user_duplicate_username_returns_conflict() {
     r.create_user("dup", "h1").await.unwrap();
 
     let err = r.create_user("dup", "h2").await.unwrap_err();
-    assert!(
-        matches!(err, DbError::Conflict(_)),
-        "expected Conflict, got: {err:?}"
-    );
+    assert!(matches!(err, DbError::Conflict(_)), "expected Conflict, got: {err:?}");
 }
 
 // -- T2.2 Find by username --
@@ -151,9 +148,7 @@ async fn t2_8_primary_webui_user_prefers_system_over_admin() {
 #[tokio::test]
 async fn t2_9_set_system_user_credentials_updates_username_and_hash() {
     let r = repo().await;
-    r.set_system_user_credentials("newadmin", "secure_hash")
-        .await
-        .unwrap();
+    r.set_system_user_credentials("newadmin", "secure_hash").await.unwrap();
 
     let user = r.get_system_user().await.unwrap().unwrap();
     assert_eq!(user.username, "newadmin");
@@ -165,14 +160,8 @@ async fn t2_9_set_system_user_credentials_conflict_with_existing_username() {
     let r = repo().await;
     r.create_user("existing", "h").await.unwrap();
 
-    let err = r
-        .set_system_user_credentials("existing", "hash")
-        .await
-        .unwrap_err();
-    assert!(
-        matches!(err, DbError::Conflict(_)),
-        "expected Conflict, got: {err:?}"
-    );
+    let err = r.set_system_user_credentials("existing", "hash").await.unwrap_err();
+    assert!(matches!(err, DbError::Conflict(_)), "expected Conflict, got: {err:?}");
 }
 
 // -- T2.10 Update password --
@@ -209,10 +198,7 @@ async fn t2_11_update_username_conflict_with_existing() {
     let other = r.create_user("free", "h").await.unwrap();
 
     let err = r.update_username(&other.id, "taken").await.unwrap_err();
-    assert!(
-        matches!(err, DbError::Conflict(_)),
-        "expected Conflict, got: {err:?}"
-    );
+    assert!(matches!(err, DbError::Conflict(_)), "expected Conflict, got: {err:?}");
 }
 
 // -- T2.12 Update last login --

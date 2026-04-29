@@ -90,10 +90,7 @@ mod tests {
     #[tokio::test]
     async fn upsert_creates_settings() {
         let (repo, _db) = setup().await;
-        let s = repo
-            .upsert_settings("zh-CN", false, true, true, false)
-            .await
-            .unwrap();
+        let s = repo.upsert_settings("zh-CN", false, true, true, false).await.unwrap();
 
         assert_eq!(s.id, 1);
         assert_eq!(s.language, "zh-CN");
@@ -107,9 +104,7 @@ mod tests {
     #[tokio::test]
     async fn upsert_then_get_returns_same() {
         let (repo, _db) = setup().await;
-        repo.upsert_settings("en-US", true, false, false, true)
-            .await
-            .unwrap();
+        repo.upsert_settings("en-US", true, false, false, true).await.unwrap();
 
         let s = repo.get_settings().await.unwrap().unwrap();
         assert_eq!(s.language, "en-US");
@@ -122,13 +117,8 @@ mod tests {
     #[tokio::test]
     async fn upsert_overwrites_existing() {
         let (repo, _db) = setup().await;
-        repo.upsert_settings("en-US", true, false, false, false)
-            .await
-            .unwrap();
-        let s = repo
-            .upsert_settings("ja-JP", false, true, true, true)
-            .await
-            .unwrap();
+        repo.upsert_settings("en-US", true, false, false, false).await.unwrap();
+        let s = repo.upsert_settings("ja-JP", false, true, true, true).await.unwrap();
 
         assert_eq!(s.language, "ja-JP");
         assert!(!s.notification_enabled);

@@ -17,10 +17,7 @@ async fn settings_get_default_values_with_auth() {
     let (mut app, services) = build_app().await;
     let (token, _csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
-    let resp = app
-        .oneshot(get_with_token("/api/settings", &token))
-        .await
-        .unwrap();
+    let resp = app.oneshot(get_with_token("/api/settings", &token)).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let json = body_json(resp).await;
     assert_eq!(json["success"], true);
@@ -46,10 +43,7 @@ async fn settings_patch_and_get_with_auth() {
     assert_eq!(json["data"]["language"], "zh-CN");
     assert_eq!(json["data"]["notification_enabled"], false);
 
-    let resp = app
-        .oneshot(get_with_token("/api/settings", &token))
-        .await
-        .unwrap();
+    let resp = app.oneshot(get_with_token("/api/settings", &token)).await.unwrap();
     let json = body_json(resp).await;
     assert_eq!(json["data"]["language"], "zh-CN");
     assert_eq!(json["data"]["notification_enabled"], false);
@@ -109,13 +103,7 @@ async fn client_prefs_empty_then_write_with_auth() {
     assert_eq!(json["data"]["pet.size"], 360);
     assert_eq!(json["data"]["system.closeToTray"], true);
 
-    let req = json_with_token(
-        "PUT",
-        "/api/settings/client",
-        json!({"theme": null}),
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("PUT", "/api/settings/client", json!({"theme": null}), &token, &csrf);
     let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 

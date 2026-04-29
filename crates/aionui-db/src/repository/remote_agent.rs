@@ -20,11 +20,7 @@ pub trait IRemoteAgentRepository: Send + Sync {
     async fn create(&self, params: CreateRemoteAgentParams<'_>) -> Result<RemoteAgentRow, DbError>;
 
     /// Updates an existing remote agent. Returns `DbError::NotFound` if the ID doesn't exist.
-    async fn update(
-        &self,
-        id: &str,
-        params: UpdateRemoteAgentParams<'_>,
-    ) -> Result<RemoteAgentRow, DbError>;
+    async fn update(&self, id: &str, params: UpdateRemoteAgentParams<'_>) -> Result<RemoteAgentRow, DbError>;
 
     /// Deletes a remote agent by ID. Returns `DbError::NotFound` if the ID doesn't exist.
     async fn delete(&self, id: &str) -> Result<(), DbError>;

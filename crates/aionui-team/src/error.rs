@@ -91,17 +91,8 @@ mod tests {
 
     #[test]
     fn display_messages() {
-        assert_eq!(
-            TeamError::TeamNotFound("t1".into()).to_string(),
-            "Team not found: t1"
-        );
-        assert_eq!(
-            TeamError::AgentNotFound("s1".into()).to_string(),
-            "Agent not found: s1"
-        );
-        assert_eq!(
-            TeamError::TaskNotFound("tk1".into()).to_string(),
-            "Task not found: tk1"
-        );
+        assert_eq!(TeamError::TeamNotFound("t1".into()).to_string(), "Team not found: t1");
+        assert_eq!(TeamError::AgentNotFound("s1".into()).to_string(), "Agent not found: s1");
+        assert_eq!(TeamError::TaskNotFound("tk1".into()).to_string(), "Task not found: tk1");
     }
 }

@@ -7,9 +7,8 @@ use axum::http::StatusCode;
 use axum::routing::{get, post};
 
 use aionui_api_types::{
-    AddAgentRequest, ApiResponse, CreateTeamRequest, RenameAgentRequest, RenameTeamRequest,
-    SendAgentMessageRequest, SendTeamMessageRequest, TeamAgentResponse, TeamListResponse,
-    TeamResponse,
+    AddAgentRequest, ApiResponse, CreateTeamRequest, RenameAgentRequest, RenameTeamRequest, SendAgentMessageRequest,
+    SendTeamMessageRequest, TeamAgentResponse, TeamListResponse, TeamResponse,
 };
 use aionui_auth::CurrentUser;
 use aionui_common::AppError;
@@ -27,23 +26,14 @@ pub fn team_routes(state: TeamRouterState) -> Router {
         .route("/api/teams/{id}", get(get_team).delete(remove_team))
         .route("/api/teams/{id}/name", axum::routing::patch(rename_team))
         .route("/api/teams/{id}/agents", post(add_agent))
-        .route(
-            "/api/teams/{id}/agents/{slot_id}",
-            axum::routing::delete(remove_agent),
-        )
+        .route("/api/teams/{id}/agents/{slot_id}", axum::routing::delete(remove_agent))
         .route(
             "/api/teams/{id}/agents/{slot_id}/name",
             axum::routing::patch(rename_agent),
         )
         .route("/api/teams/{id}/messages", post(send_message))
-        .route(
-            "/api/teams/{id}/agents/{slot_id}/messages",
-            post(send_message_to_agent),
-        )
-        .route(
-            "/api/teams/{id}/session",
-            post(ensure_session).delete(stop_session),
-        )
+        .route("/api/teams/{id}/agents/{slot_id}/messages", post(send_message_to_agent))
+        .route("/api/teams/{id}/session", post(ensure_session).delete(stop_session))
         .with_state(state)
 }
 
@@ -57,9 +47,7 @@ async fn create_team(
     Ok((StatusCode::CREATED, Json(ApiResponse::ok(team))))
 }
 
-async fn list_teams(
-    State(state): State<TeamRouterState>,
-) -> Result<Json<ApiResponse<TeamListResponse>>, AppError> {
+async fn list_teams(State(state): State<TeamRouterState>) -> Result<Json<ApiResponse<TeamListResponse>>, AppError> {
     let teams = state.service.list_teams().await?;
     Ok(Json(ApiResponse::ok(teams)))
 }
@@ -139,10 +127,7 @@ async fn send_message(
     body: Result<Json<SendTeamMessageRequest>, JsonRejection>,
 ) -> Result<Json<ApiResponse<()>>, AppError> {
     let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
-    state
-        .service
-        .send_message(&id, &req.content, req.files)
-        .await?;
+    state.service.send_message(&id, &req.content, req.files).await?;
     Ok(Json(ApiResponse::success()))
 }
 

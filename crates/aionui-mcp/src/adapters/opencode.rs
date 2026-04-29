@@ -49,40 +49,34 @@ impl McpAgentAdapter for OpencodeAdapter {
     }
 
     async fn detect_existing(&self) -> Result<Vec<DetectedServer>, McpError> {
-        let path =
-            config_file_path().ok_or_else(|| McpError::AgentNotInstalled("opencode".into()))?;
+        let path = config_file_path().ok_or_else(|| McpError::AgentNotInstalled("opencode".into()))?;
 
         if !path.exists() {
             return Ok(Vec::new());
         }
 
-        let content = tokio::fs::read_to_string(&path).await.map_err(|e| {
-            McpError::AgentOperationFailed(format!("failed to read {}: {e}", path.display()))
-        })?;
+        let content = tokio::fs::read_to_string(&path)
+            .await
+            .map_err(|e| McpError::AgentOperationFailed(format!("failed to read {}: {e}", path.display())))?;
 
         let root = parse_jsonc(&content)?;
         parse_mcp_field(&root)
     }
 
-    async fn install_server(
-        &self,
-        name: &str,
-        transport: &McpServerTransport,
-    ) -> Result<(), McpError> {
-        let path =
-            config_file_path().ok_or_else(|| McpError::AgentNotInstalled("opencode".into()))?;
+    async fn install_server(&self, name: &str, transport: &McpServerTransport) -> Result<(), McpError> {
+        let path = config_file_path().ok_or_else(|| McpError::AgentNotInstalled("opencode".into()))?;
 
         let mut root = if path.exists() {
-            let content = tokio::fs::read_to_string(&path).await.map_err(|e| {
-                McpError::AgentOperationFailed(format!("failed to read {}: {e}", path.display()))
-            })?;
+            let content = tokio::fs::read_to_string(&path)
+                .await
+                .map_err(|e| McpError::AgentOperationFailed(format!("failed to read {}: {e}", path.display())))?;
             parse_jsonc(&content)?
         } else {
             // Ensure directory exists
             if let Some(parent) = path.parent() {
-                tokio::fs::create_dir_all(parent).await.map_err(|e| {
-                    McpError::AgentOperationFailed(format!("failed to create dir: {e}"))
-                })?;
+                tokio::fs::create_dir_all(parent)
+                    .await
+                    .map_err(|e| McpError::AgentOperationFailed(format!("failed to create dir: {e}")))?;
             }
             serde_json::json!({})
         };
@@ -99,28 +93,26 @@ impl McpAgentAdapter for OpencodeAdapter {
 
         mcp_obj.insert(name.to_owned(), transport_to_json(transport));
 
-        let output = serde_json::to_string_pretty(&root).map_err(|e| {
-            McpError::AgentOperationFailed(format!("failed to serialize config: {e}"))
-        })?;
+        let output = serde_json::to_string_pretty(&root)
+            .map_err(|e| McpError::AgentOperationFailed(format!("failed to serialize config: {e}")))?;
 
-        tokio::fs::write(&path, output).await.map_err(|e| {
-            McpError::AgentOperationFailed(format!("failed to write {}: {e}", path.display()))
-        })?;
+        tokio::fs::write(&path, output)
+            .await
+            .map_err(|e| McpError::AgentOperationFailed(format!("failed to write {}: {e}", path.display())))?;
 
         Ok(())
     }
 
     async fn remove_server(&self, name: &str) -> Result<(), McpError> {
-        let path =
-            config_file_path().ok_or_else(|| McpError::AgentNotInstalled("opencode".into()))?;
+        let path = config_file_path().ok_or_else(|| McpError::AgentNotInstalled("opencode".into()))?;
 
         if !path.exists() {
             return Ok(());
         }
 
-        let content = tokio::fs::read_to_string(&path).await.map_err(|e| {
-            McpError::AgentOperationFailed(format!("failed to read {}: {e}", path.display()))
-        })?;
+        let content = tokio::fs::read_to_string(&path)
+            .await
+            .map_err(|e| McpError::AgentOperationFailed(format!("failed to read {}: {e}", path.display())))?;
 
         let mut root = parse_jsonc(&content)?;
 
@@ -136,13 +128,12 @@ impl McpAgentAdapter for OpencodeAdapter {
             return Ok(());
         }
 
-        let output = serde_json::to_string_pretty(&root).map_err(|e| {
-            McpError::AgentOperationFailed(format!("failed to serialize config: {e}"))
-        })?;
+        let output = serde_json::to_string_pretty(&root)
+            .map_err(|e| McpError::AgentOperationFailed(format!("failed to serialize config: {e}")))?;
 
-        tokio::fs::write(&path, output).await.map_err(|e| {
-            McpError::AgentOperationFailed(format!("failed to write {}: {e}", path.display()))
-        })?;
+        tokio::fs::write(&path, output)
+            .await
+            .map_err(|e| McpError::AgentOperationFailed(format!("failed to write {}: {e}", path.display())))?;
 
         Ok(())
     }
@@ -255,10 +246,7 @@ fn parse_mcp_field(root: &serde_json::Value) -> Result<Vec<DetectedServer>, McpE
 
 /// Parse a single server entry from the `mcp` object.
 fn parse_server_entry(name: &str, config: &serde_json::Value) -> Option<DetectedServer> {
-    let transport_type = config
-        .get("type")
-        .and_then(|v| v.as_str())
-        .unwrap_or("stdio");
+    let transport_type = config.get("type").and_then(|v| v.as_str()).unwrap_or("stdio");
 
     let transport = match transport_type {
         "stdio" => {
@@ -266,11 +254,7 @@ fn parse_server_entry(name: &str, config: &serde_json::Value) -> Option<Detected
             let args = config
                 .get("args")
                 .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_str().map(String::from))
-                        .collect()
-                })
+                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
                 .unwrap_or_default();
             let env = config
                 .get("env")
@@ -511,10 +495,7 @@ mod tests {
         });
         let servers = parse_mcp_field(&root).unwrap();
         assert_eq!(servers.len(), 1);
-        assert!(matches!(
-            servers[0].transport,
-            McpServerTransport::Http { .. }
-        ));
+        assert!(matches!(servers[0].transport, McpServerTransport::Http { .. }));
     }
 
     #[test]
@@ -560,10 +541,7 @@ mod tests {
         });
         let servers = parse_mcp_field(&root).unwrap();
         assert_eq!(servers.len(), 1);
-        assert!(matches!(
-            servers[0].transport,
-            McpServerTransport::Stdio { .. }
-        ));
+        assert!(matches!(servers[0].transport, McpServerTransport::Stdio { .. }));
     }
 
     // -- transport_to_json ----------------------------------------------------

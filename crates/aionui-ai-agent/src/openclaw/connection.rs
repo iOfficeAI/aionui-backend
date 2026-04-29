@@ -13,8 +13,8 @@ use tracing::{debug, error, warn};
 
 use super::device_identity::{DeviceIdentity, build_device_auth_params};
 use super::protocol::{
-    AuthParams, CLIENT_DISPLAY_NAME, CLIENT_ID, CLIENT_MODE, CLIENT_VERSION, ClientInfo,
-    ConnectParams, EventFrame, HelloOk, IncomingFrame, OPENCLAW_PROTOCOL_VERSION, RequestFrame,
+    AuthParams, CLIENT_DISPLAY_NAME, CLIENT_ID, CLIENT_MODE, CLIENT_VERSION, ClientInfo, ConnectParams, EventFrame,
+    HelloOk, IncomingFrame, OPENCLAW_PROTOCOL_VERSION, RequestFrame,
 };
 
 type WsSink = futures_util::stream::SplitSink<
@@ -55,9 +55,9 @@ impl OpenClawConnection {
         auth: Option<AuthConfig>,
         identity: &DeviceIdentity,
     ) -> Result<(Arc<Self>, HelloOk), AppError> {
-        let (ws_stream, _) = tokio_tungstenite::connect_async(url).await.map_err(|e| {
-            AppError::Internal(format!("OpenClaw WebSocket connection failed: {e}"))
-        })?;
+        let (ws_stream, _) = tokio_tungstenite::connect_async(url)
+            .await
+            .map_err(|e| AppError::Internal(format!("OpenClaw WebSocket connection failed: {e}")))?;
 
         let (sink, stream) = ws_stream.split();
         let (event_tx, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
@@ -146,11 +146,7 @@ impl OpenClawConnection {
             _ => None,
         };
 
-        let device_params = build_device_auth_params(
-            identity,
-            nonce,
-            auth.as_ref().and_then(|a| a.token.as_deref()),
-        );
+        let device_params = build_device_auth_params(identity, nonce, auth.as_ref().and_then(|a| a.token.as_deref()));
 
         let params = ConnectParams {
             min_protocol: OPENCLAW_PROTOCOL_VERSION,
@@ -173,11 +169,7 @@ impl OpenClawConnection {
             .await
     }
 
-    pub async fn request<T: DeserializeOwned>(
-        &self,
-        method: &str,
-        params: Value,
-    ) -> Result<T, AppError> {
+    pub async fn request<T: DeserializeOwned>(&self, method: &str, params: Value) -> Result<T, AppError> {
         let id = uuid::Uuid::new_v4().to_string();
         let (tx, rx) = oneshot::channel();
 
@@ -199,11 +191,8 @@ impl OpenClawConnection {
             .map_err(|_| AppError::Internal(format!("OpenClaw request '{method}' timed out")))?
             .map_err(|_| AppError::Internal(format!("OpenClaw request '{method}' cancelled")))??;
 
-        serde_json::from_value(result).map_err(|e| {
-            AppError::Internal(format!(
-                "Failed to parse OpenClaw response for '{method}': {e}"
-            ))
-        })
+        serde_json::from_value(result)
+            .map_err(|e| AppError::Internal(format!("Failed to parse OpenClaw response for '{method}': {e}")))
     }
 
     pub fn subscribe_events(&self) -> broadcast::Receiver<EventFrame> {
@@ -294,8 +283,7 @@ impl OpenClawConnection {
                 }
 
                 if evt.event == "tick" {
-                    self.last_tick
-                        .store(aionui_common::now_ms(), Ordering::Relaxed);
+                    self.last_tick.store(aionui_common::now_ms(), Ordering::Relaxed);
                     return;
                 }
 
@@ -327,9 +315,7 @@ mod tests {
     use serde_json::json;
     use tokio::net::TcpListener;
 
-    async fn spawn_mock_gateway(
-        challenge_nonce: Option<&str>,
-    ) -> (String, tokio::task::JoinHandle<()>) {
+    async fn spawn_mock_gateway(challenge_nonce: Option<&str>) -> (String, tokio::task::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let url = format!("ws://{addr}");
@@ -347,9 +333,7 @@ mod tests {
                     "payload": { "nonce": nonce }
                 });
                 let _ = sink
-                    .send(Message::Text(
-                        serde_json::to_string(&challenge).unwrap().into(),
-                    ))
+                    .send(Message::Text(serde_json::to_string(&challenge).unwrap().into()))
                     .await;
 
                 // Wait for connect request
@@ -438,10 +422,7 @@ mod tests {
             .0;
 
         let result: super::super::protocol::SessionsResetResponse = conn
-            .request(
-                "sessions.reset",
-                json!({ "key": "conv-1", "reason": "new" }),
-            )
+            .request("sessions.reset", json!({ "key": "conv-1", "reason": "new" }))
             .await
             .unwrap();
 
@@ -468,9 +449,7 @@ mod tests {
                     "payload": {}
                 });
                 let _ = sink
-                    .send(Message::Text(
-                        serde_json::to_string(&challenge).unwrap().into(),
-                    ))
+                    .send(Message::Text(serde_json::to_string(&challenge).unwrap().into()))
                     .await;
 
                 // Wait for connect, respond
@@ -497,9 +476,7 @@ mod tests {
                     "payload": { "state": "delta", "message": { "content": "hello" } }
                 });
                 let _ = sink
-                    .send(Message::Text(
-                        serde_json::to_string(&chat_event).unwrap().into(),
-                    ))
+                    .send(Message::Text(serde_json::to_string(&chat_event).unwrap().into()))
                     .await;
 
                 // Keep alive briefly
@@ -519,10 +496,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(event.event, "chat");
-        assert_eq!(
-            event.payload.as_ref().unwrap()["state"].as_str(),
-            Some("delta")
-        );
+        assert_eq!(event.payload.as_ref().unwrap()["state"].as_str(), Some("delta"));
 
         conn.close().await;
         server.abort();

@@ -20,11 +20,7 @@ pub fn resolve_skill(skill: &ExtSkill, extension_name: &str, ext_dir: &Path) -> 
 }
 
 /// Resolve all skill contributions from an extension.
-pub fn resolve_skills(
-    skills: &[ExtSkill],
-    extension_name: &str,
-    ext_dir: &Path,
-) -> Vec<ResolvedSkill> {
+pub fn resolve_skills(skills: &[ExtSkill], extension_name: &str, ext_dir: &Path) -> Vec<ResolvedSkill> {
     skills
         .iter()
         .map(|s| resolve_skill(s, extension_name, ext_dir))

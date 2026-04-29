@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
 use aionui_api_types::{
-    CloneConversationRequest, CreateConversationRequest, ListMessagesQuery, SearchMessagesQuery,
-    WebSocketMessage,
+    CloneConversationRequest, CreateConversationRequest, ListMessagesQuery, SearchMessagesQuery, WebSocketMessage,
 };
 use aionui_common::{ConversationStatus, generate_prefixed_id, now_ms};
 use aionui_conversation::ConversationService;
@@ -63,12 +62,10 @@ async fn setup() -> (
     let db = init_database_memory().await.unwrap();
     let repo = Arc::new(SqliteConversationRepository::new(db.pool().clone()));
     let broadcaster = Arc::new(TestBroadcaster::new());
-    let agent_metadata_repo: Arc<dyn aionui_db::IAgentMetadataRepository> = Arc::new(
-        aionui_db::SqliteAgentMetadataRepository::new(db.pool().clone()),
-    );
-    let acp_session_repo: Arc<dyn aionui_db::IAcpSessionRepository> = Arc::new(
-        aionui_db::SqliteAcpSessionRepository::new(db.pool().clone()),
-    );
+    let agent_metadata_repo: Arc<dyn aionui_db::IAgentMetadataRepository> =
+        Arc::new(aionui_db::SqliteAgentMetadataRepository::new(db.pool().clone()));
+    let acp_session_repo: Arc<dyn aionui_db::IAcpSessionRepository> =
+        Arc::new(aionui_db::SqliteAcpSessionRepository::new(db.pool().clone()));
     let svc = ConversationService::new_with_workspace_root(
         repo.clone(),
         broadcaster.clone(),
@@ -375,13 +372,9 @@ async fn t9_3_search_pagination() {
     let conv = svc.create(USER_ID, make_create_req()).await.unwrap();
 
     for i in 0..5 {
-        repo.insert_message(&make_message(
-            &conv.id,
-            &format!("match keyword item {i}"),
-            i * 100,
-        ))
-        .await
-        .unwrap();
+        repo.insert_message(&make_message(&conv.id, &format!("match keyword item {i}"), i * 100))
+            .await
+            .unwrap();
     }
 
     let query = SearchMessagesQuery {
@@ -466,10 +459,7 @@ async fn t10_2_no_associated() {
 #[tokio::test]
 async fn t10_3_associated_not_found() {
     let (svc, _repo, _b) = setup().await;
-    let err = svc
-        .list_associated(USER_ID, "nonexistent")
-        .await
-        .unwrap_err();
+    let err = svc.list_associated(USER_ID, "nonexistent").await.unwrap_err();
     assert!(matches!(err, aionui_common::AppError::NotFound(_)));
 }
 
@@ -499,9 +489,7 @@ async fn t12_4_search_sql_injection() {
 async fn messages_wrong_user_returns_not_found() {
     let (svc, repo, _b) = setup().await;
     let conv = svc.create(USER_ID, make_create_req()).await.unwrap();
-    repo.insert_message(&make_message(&conv.id, "hello", 0))
-        .await
-        .unwrap();
+    repo.insert_message(&make_message(&conv.id, "hello", 0)).await.unwrap();
 
     let err = svc
         .list_messages("other_user", &conv.id, ListMessagesQuery::default())

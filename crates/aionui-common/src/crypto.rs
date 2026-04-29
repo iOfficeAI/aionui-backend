@@ -14,12 +14,11 @@ const KEY_SIZE: usize = 32;
 pub fn encrypt_string(plaintext: &str, key: &[u8]) -> Result<String, AppError> {
     validate_key_size(key)?;
 
-    let cipher = Aes256Gcm::new_from_slice(key)
-        .map_err(|e| AppError::Internal(format!("Failed to create cipher: {e}")))?;
+    let cipher =
+        Aes256Gcm::new_from_slice(key).map_err(|e| AppError::Internal(format!("Failed to create cipher: {e}")))?;
 
     let mut nonce_bytes = [0u8; NONCE_SIZE];
-    getrandom::getrandom(&mut nonce_bytes)
-        .map_err(|e| AppError::Internal(format!("RNG failure: {e}")))?;
+    getrandom::getrandom(&mut nonce_bytes).map_err(|e| AppError::Internal(format!("RNG failure: {e}")))?;
     let nonce = Nonce::from_slice(&nonce_bytes);
 
     let ciphertext = cipher
@@ -39,8 +38,8 @@ pub fn encrypt_string(plaintext: &str, key: &[u8]) -> Result<String, AppError> {
 pub fn decrypt_string(ciphertext: &str, key: &[u8]) -> Result<String, AppError> {
     validate_key_size(key)?;
 
-    let cipher = Aes256Gcm::new_from_slice(key)
-        .map_err(|e| AppError::Internal(format!("Failed to create cipher: {e}")))?;
+    let cipher =
+        Aes256Gcm::new_from_slice(key).map_err(|e| AppError::Internal(format!("Failed to create cipher: {e}")))?;
 
     let combined = BASE64
         .decode(ciphertext)
@@ -53,12 +52,11 @@ pub fn decrypt_string(ciphertext: &str, key: &[u8]) -> Result<String, AppError> 
     let (nonce_bytes, encrypted) = combined.split_at(NONCE_SIZE);
     let nonce = Nonce::from_slice(nonce_bytes);
 
-    let plaintext = cipher.decrypt(nonce, encrypted).map_err(|_| {
-        AppError::BadRequest("Decryption failed: invalid key or corrupted data".into())
-    })?;
+    let plaintext = cipher
+        .decrypt(nonce, encrypted)
+        .map_err(|_| AppError::BadRequest("Decryption failed: invalid key or corrupted data".into()))?;
 
-    String::from_utf8(plaintext)
-        .map_err(|e| AppError::Internal(format!("Invalid UTF-8 in decrypted data: {e}")))
+    String::from_utf8(plaintext).map_err(|e| AppError::Internal(format!("Invalid UTF-8 in decrypted data: {e}")))
 }
 
 fn validate_key_size(key: &[u8]) -> Result<(), AppError> {

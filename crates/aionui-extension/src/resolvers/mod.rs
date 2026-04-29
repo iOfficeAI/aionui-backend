@@ -35,27 +35,16 @@ pub fn resolve_extension_contributions(ext: &LoadedExtension) -> ResolvedContrib
     };
 
     ResolvedContributions {
-        acp_adapters: acp_adapter::resolve_acp_adapters(
-            &contributes.acp_adapters,
-            ext_name,
-            ext_dir,
-        ),
+        acp_adapters: acp_adapter::resolve_acp_adapters(&contributes.acp_adapters, ext_name, ext_dir),
         mcp_servers: mcp_server::resolve_mcp_servers(&contributes.mcp_servers, ext_name),
         assistants: assistant::resolve_assistants(&contributes.assistants, ext_name, ext_dir),
         agents: agent::resolve_agents(&contributes.agents, ext_name, ext_dir),
         skills: skill::resolve_skills(&contributes.skills, ext_name, ext_dir),
         themes: theme::resolve_themes(&contributes.themes, ext_name, ext_dir),
-        channel_plugins: channel_plugin::resolve_channel_plugins(
-            &contributes.channel_plugins,
-            ext_name,
-            ext_dir,
-        ),
+        channel_plugins: channel_plugin::resolve_channel_plugins(&contributes.channel_plugins, ext_name, ext_dir),
         webui: webui::resolve_webui_contributions(&contributes.webui, ext_name, ext_dir),
         settings_tabs: settings_tab::resolve_settings_tabs(&contributes.settings_tabs, ext_name),
-        model_providers: model_provider::resolve_model_providers(
-            &contributes.model_providers,
-            ext_name,
-        ),
+        model_providers: model_provider::resolve_model_providers(&contributes.model_providers, ext_name),
         // i18n is resolved separately via resolve_i18n_for_locale()
         // because it requires a locale parameter at query time.
         i18n: std::collections::HashMap::new(),
@@ -82,11 +71,7 @@ pub fn resolve_all_contributions(extensions: &[LoadedExtension]) -> ResolvedCont
 }
 
 /// Merge `source` contributions into `target`.
-fn merge_contributions(
-    target: &mut ResolvedContributions,
-    source: ResolvedContributions,
-    extension_name: &str,
-) {
+fn merge_contributions(target: &mut ResolvedContributions, source: ResolvedContributions, extension_name: &str) {
     if !source.acp_adapters.is_empty() {
         tracing::debug!(
             extension = extension_name,
@@ -134,11 +119,7 @@ mod tests {
     use crate::types::*;
     use std::collections::HashMap;
 
-    fn make_extension(
-        name: &str,
-        enabled: bool,
-        contributes: Option<ExtContributes>,
-    ) -> LoadedExtension {
+    fn make_extension(name: &str, enabled: bool, contributes: Option<ExtContributes>) -> LoadedExtension {
         LoadedExtension {
             manifest: ExtensionManifest {
                 name: name.to_owned(),

@@ -106,8 +106,8 @@ impl ChannelManager {
         config_value: &serde_json::Value,
         factory: &PluginFactory,
     ) -> Result<(), ChannelError> {
-        let plugin_type = PluginType::from_str_opt(plugin_id)
-            .ok_or_else(|| ChannelError::InvalidPluginType(plugin_id.to_owned()))?;
+        let plugin_type =
+            PluginType::from_str_opt(plugin_id).ok_or_else(|| ChannelError::InvalidPluginType(plugin_id.to_owned()))?;
 
         // Parse and validate config structure
         let config: PluginConfig = serde_json::from_value(config_value.clone())
@@ -139,9 +139,8 @@ impl ChannelManager {
         self.repo.upsert_plugin(&row).await?;
 
         // Create and start plugin instance
-        let mut plugin = factory(plugin_type).ok_or_else(|| {
-            ChannelError::InvalidPluginType(format!("No implementation for {plugin_type}"))
-        })?;
+        let mut plugin = factory(plugin_type)
+            .ok_or_else(|| ChannelError::InvalidPluginType(format!("No implementation for {plugin_type}")))?;
 
         let callbacks = PluginCallbacks {
             message_tx: self.message_tx.clone(),
@@ -208,12 +207,11 @@ impl ChannelManager {
         config: PluginConfig,
         factory: &PluginFactory,
     ) -> Result<Option<String>, ChannelError> {
-        let plugin_type = PluginType::from_str_opt(plugin_id)
-            .ok_or_else(|| ChannelError::InvalidPluginType(plugin_id.to_owned()))?;
+        let plugin_type =
+            PluginType::from_str_opt(plugin_id).ok_or_else(|| ChannelError::InvalidPluginType(plugin_id.to_owned()))?;
 
-        let mut plugin = factory(plugin_type).ok_or_else(|| {
-            ChannelError::InvalidPluginType(format!("No implementation for {plugin_type}"))
-        })?;
+        let mut plugin = factory(plugin_type)
+            .ok_or_else(|| ChannelError::InvalidPluginType(format!("No implementation for {plugin_type}")))?;
 
         // Create throwaway channels for the test
         let (msg_tx, _msg_rx) = mpsc::channel(1);
@@ -267,11 +265,7 @@ impl ChannelManager {
     ///
     /// Called during application shutdown.
     pub async fn shutdown(&self) {
-        let keys: Vec<String> = self
-            .plugins
-            .iter()
-            .map(|entry| entry.key().clone())
-            .collect();
+        let keys: Vec<String> = self.plugins.iter().map(|entry| entry.key().clone()).collect();
 
         for key in keys {
             self.stop_plugin(&key).await;
@@ -341,22 +335,17 @@ impl ChannelManager {
     }
 
     /// Restores a single plugin from its DB row.
-    async fn restore_single_plugin(
-        &self,
-        row: &ChannelPluginRow,
-        factory: &PluginFactory,
-    ) -> Result<(), ChannelError> {
-        let plugin_type = PluginType::from_str_opt(&row.r#type)
-            .ok_or_else(|| ChannelError::InvalidPluginType(row.r#type.clone()))?;
+    async fn restore_single_plugin(&self, row: &ChannelPluginRow, factory: &PluginFactory) -> Result<(), ChannelError> {
+        let plugin_type =
+            PluginType::from_str_opt(&row.r#type).ok_or_else(|| ChannelError::InvalidPluginType(row.r#type.clone()))?;
 
         // Decrypt config
         let config_json = decrypt_string(&row.config, &self.encryption_key)
             .map_err(|e| ChannelError::DecryptionFailed(e.to_string()))?;
         let config: PluginConfig = serde_json::from_str(&config_json)?;
 
-        let mut plugin = factory(plugin_type).ok_or_else(|| {
-            ChannelError::InvalidPluginType(format!("No implementation for {plugin_type}"))
-        })?;
+        let mut plugin = factory(plugin_type)
+            .ok_or_else(|| ChannelError::InvalidPluginType(format!("No implementation for {plugin_type}")))?;
 
         let callbacks = PluginCallbacks {
             message_tx: self.message_tx.clone(),
@@ -429,18 +418,12 @@ impl ChannelManager {
                 return;
             }
         };
-        self.broadcaster.broadcast(WebSocketMessage::new(
-            "channel.plugin-status-changed",
-            value,
-        ));
+        self.broadcaster
+            .broadcast(WebSocketMessage::new("channel.plugin-status-changed", value));
     }
 
     /// Converts a DB row + optional live status to a `PluginStatusResponse`.
-    fn row_to_status_response(
-        &self,
-        row: &ChannelPluginRow,
-        live_status: Option<String>,
-    ) -> PluginStatusResponse {
+    fn row_to_status_response(&self, row: &ChannelPluginRow, live_status: Option<String>) -> PluginStatusResponse {
         let is_running = self.plugins.contains_key(&row.id);
         let has_token = !row.config.is_empty();
         PluginStatusResponse {
@@ -490,8 +473,7 @@ impl crate::stream_relay::ChannelSender for ChannelManager {
         message_id: &str,
         message: crate::types::UnifiedOutgoingMessage,
     ) -> Result<(), crate::error::ChannelError> {
-        self.edit_message(plugin_id, chat_id, message_id, message)
-            .await
+        self.edit_message(plugin_id, chat_id, message_id, message).await
     }
 }
 
@@ -499,13 +481,10 @@ impl crate::stream_relay::ChannelSender for ChannelManager {
 mod tests {
     use super::*;
     use crate::types::{
-        BotInfo, OutgoingMessageType, PluginCredentials, PluginStatus, PluginType,
-        UnifiedOutgoingMessage,
+        BotInfo, OutgoingMessageType, PluginCredentials, PluginStatus, PluginType, UnifiedOutgoingMessage,
     };
     use aionui_common::TimestampMs;
-    use aionui_db::models::{
-        AssistantSessionRow, AssistantUserRow, ChannelPluginRow, PairingCodeRow,
-    };
+    use aionui_db::models::{AssistantSessionRow, AssistantUserRow, ChannelPluginRow, PairingCodeRow};
     use aionui_db::{DbError, IChannelRepository, UpdatePluginStatusParams};
     use std::collections::HashMap;
     use std::sync::Mutex;
@@ -574,11 +553,7 @@ mod tests {
             Ok(())
         }
 
-        async fn update_plugin_status(
-            &self,
-            id: &str,
-            params: &UpdatePluginStatusParams,
-        ) -> Result<(), DbError> {
+        async fn update_plugin_status(&self, id: &str, params: &UpdatePluginStatusParams) -> Result<(), DbError> {
             let mut plugins = self.plugins.lock().unwrap();
             if let Some(p) = plugins.iter_mut().find(|p| p.id == id) {
                 if let Some(ref s) = params.status {
@@ -612,21 +587,13 @@ mod tests {
         async fn get_all_users(&self) -> Result<Vec<AssistantUserRow>, DbError> {
             Ok(vec![])
         }
-        async fn get_user_by_platform(
-            &self,
-            _pid: &str,
-            _pt: &str,
-        ) -> Result<Option<AssistantUserRow>, DbError> {
+        async fn get_user_by_platform(&self, _pid: &str, _pt: &str) -> Result<Option<AssistantUserRow>, DbError> {
             Ok(None)
         }
         async fn create_user(&self, _row: &AssistantUserRow) -> Result<(), DbError> {
             Ok(())
         }
-        async fn update_user_last_active(
-            &self,
-            _id: &str,
-            _la: TimestampMs,
-        ) -> Result<(), DbError> {
+        async fn update_user_last_active(&self, _id: &str, _la: TimestampMs) -> Result<(), DbError> {
             Ok(())
         }
         async fn delete_user(&self, _id: &str) -> Result<(), DbError> {
@@ -648,11 +615,7 @@ mod tests {
         ) -> Result<AssistantSessionRow, DbError> {
             Ok(new_row.clone())
         }
-        async fn update_session_activity(
-            &self,
-            _id: &str,
-            _la: TimestampMs,
-        ) -> Result<(), DbError> {
+        async fn update_session_activity(&self, _id: &str, _la: TimestampMs) -> Result<(), DbError> {
             Ok(())
         }
         async fn update_session_conversation(&self, _id: &str, _cid: &str) -> Result<(), DbError> {
@@ -675,10 +638,7 @@ mod tests {
         async fn get_pending_pairings(&self) -> Result<Vec<PairingCodeRow>, DbError> {
             Ok(vec![])
         }
-        async fn get_pairing_by_code(
-            &self,
-            _code: &str,
-        ) -> Result<Option<PairingCodeRow>, DbError> {
+        async fn get_pairing_by_code(&self, _code: &str) -> Result<Option<PairingCodeRow>, DbError> {
             Ok(None)
         }
         async fn update_pairing_status(&self, _code: &str, _status: &str) -> Result<(), DbError> {
@@ -729,11 +689,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl ChannelPlugin for MockPlugin {
-        async fn initialize(
-            &mut self,
-            _config: PluginConfig,
-            _callbacks: PluginCallbacks,
-        ) -> Result<(), ChannelError> {
+        async fn initialize(&mut self, _config: PluginConfig, _callbacks: PluginCallbacks) -> Result<(), ChannelError> {
             if self.should_fail_init {
                 self.status = PluginStatus::Error;
                 self.last_error = Some("Init failed".into());
@@ -766,11 +722,7 @@ mod tests {
             Ok(())
         }
 
-        async fn send_message(
-            &self,
-            _chat_id: &str,
-            _message: UnifiedOutgoingMessage,
-        ) -> Result<String, ChannelError> {
+        async fn send_message(&self, _chat_id: &str, _message: UnifiedOutgoingMessage) -> Result<String, ChannelError> {
             Ok("mock_msg_id".into())
         }
 
@@ -815,13 +767,7 @@ mod tests {
         let broadcaster = Arc::new(MockBroadcaster::new());
         let (msg_tx, _msg_rx) = mpsc::channel(16);
         let (confirm_tx, _confirm_rx) = mpsc::channel(16);
-        let mgr = ChannelManager::new(
-            repo.clone(),
-            broadcaster.clone(),
-            test_key(),
-            msg_tx,
-            confirm_tx,
-        );
+        let mgr = ChannelManager::new(repo.clone(), broadcaster.clone(), test_key(), msg_tx, confirm_tx);
         (mgr, repo, broadcaster)
     }
 
@@ -955,10 +901,7 @@ mod tests {
         assert_eq!(plugins[0].id, "telegram");
         assert!(plugins[0].enabled);
         // Config should be encrypted (base64), not plaintext
-        assert_ne!(
-            plugins[0].config,
-            serde_json::to_string(&make_test_config()).unwrap()
-        );
+        assert_ne!(plugins[0].config, serde_json::to_string(&make_test_config()).unwrap());
         // Verify it can be decrypted back
         let decrypted = decrypt_string(&plugins[0].config, &test_key()).unwrap();
         let parsed: PluginConfig = serde_json::from_str(&decrypted).unwrap();
@@ -1029,10 +972,7 @@ mod tests {
         let factory = make_factory();
 
         let bad_config = serde_json::json!({ "wrong": "shape" });
-        let err = mgr
-            .enable_plugin("telegram", &bad_config, &factory)
-            .await
-            .unwrap_err();
+        let err = mgr.enable_plugin("telegram", &bad_config, &factory).await.unwrap_err();
         assert!(matches!(err, ChannelError::InvalidConfig(_)));
     }
 
@@ -1053,9 +993,7 @@ mod tests {
         let (mgr, repo, _bc) = make_manager();
         let factory = make_failing_init_factory();
 
-        let err = mgr
-            .enable_plugin("telegram", &make_test_config(), &factory)
-            .await;
+        let err = mgr.enable_plugin("telegram", &make_test_config(), &factory).await;
         assert!(err.is_err());
 
         // Plugin should not be in active map
@@ -1071,9 +1009,7 @@ mod tests {
         let (mgr, repo, _bc) = make_manager();
         let factory = make_failing_start_factory();
 
-        let err = mgr
-            .enable_plugin("telegram", &make_test_config(), &factory)
-            .await;
+        let err = mgr.enable_plugin("telegram", &make_test_config(), &factory).await;
         assert!(err.is_err());
 
         assert_eq!(mgr.active_plugin_count(), 0);
@@ -1184,9 +1120,7 @@ mod tests {
         let (mgr, _repo, _bc) = make_manager();
         let factory = make_failing_init_factory();
 
-        let err = mgr
-            .test_plugin("telegram", make_plugin_config(), &factory)
-            .await;
+        let err = mgr.test_plugin("telegram", make_plugin_config(), &factory).await;
         assert!(err.is_err());
     }
 
@@ -1314,9 +1248,7 @@ mod tests {
                 "appSecret": "secret"
             }
         });
-        mgr.enable_plugin("lark", &lark_config, &factory)
-            .await
-            .unwrap();
+        mgr.enable_plugin("lark", &lark_config, &factory).await.unwrap();
 
         assert_eq!(mgr.active_plugin_count(), 2);
 
@@ -1403,15 +1335,9 @@ mod tests {
     #[test]
     fn default_plugin_names() {
         let (mgr, _repo, _bc) = make_manager();
-        assert_eq!(
-            mgr.default_plugin_name(PluginType::Telegram),
-            "Telegram Bot"
-        );
+        assert_eq!(mgr.default_plugin_name(PluginType::Telegram), "Telegram Bot");
         assert_eq!(mgr.default_plugin_name(PluginType::Lark), "Lark Bot");
-        assert_eq!(
-            mgr.default_plugin_name(PluginType::Dingtalk),
-            "DingTalk Bot"
-        );
+        assert_eq!(mgr.default_plugin_name(PluginType::Dingtalk), "DingTalk Bot");
         assert_eq!(mgr.default_plugin_name(PluginType::Weixin), "WeChat Bot");
         assert_eq!(mgr.default_plugin_name(PluginType::Slack), "Slack Bot");
         assert_eq!(mgr.default_plugin_name(PluginType::Discord), "Discord Bot");

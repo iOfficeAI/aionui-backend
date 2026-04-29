@@ -26,15 +26,9 @@ mod tests {
             }
         });
         let req: TestBedrockConnectionRequest = serde_json::from_value(raw).unwrap();
-        assert_eq!(
-            req.bedrock_config.auth_method,
-            crate::BedrockAuthMethod::AccessKey
-        );
+        assert_eq!(req.bedrock_config.auth_method, crate::BedrockAuthMethod::AccessKey);
         assert_eq!(req.bedrock_config.region, "us-east-1");
-        assert_eq!(
-            req.bedrock_config.access_key_id.as_deref(),
-            Some("AKIAIOSFODNN7")
-        );
+        assert_eq!(req.bedrock_config.access_key_id.as_deref(), Some("AKIAIOSFODNN7"));
     }
 
     #[test]
@@ -47,10 +41,7 @@ mod tests {
             }
         });
         let req: TestBedrockConnectionRequest = serde_json::from_value(raw).unwrap();
-        assert_eq!(
-            req.bedrock_config.auth_method,
-            crate::BedrockAuthMethod::Profile
-        );
+        assert_eq!(req.bedrock_config.auth_method, crate::BedrockAuthMethod::Profile);
         assert_eq!(req.bedrock_config.profile.as_deref(), Some("my-profile"));
     }
 

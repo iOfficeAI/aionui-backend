@@ -4,9 +4,7 @@ use axum::http::StatusCode;
 use serde_json::json;
 use tower::ServiceExt;
 
-use common::{
-    body_json, build_app, delete_with_token, get_with_token, json_with_token, setup_and_login,
-};
+use common::{body_json, build_app, delete_with_token, get_with_token, json_with_token, setup_and_login};
 
 fn two_agent_body() -> serde_json::Value {
     json!({
@@ -97,10 +95,7 @@ async fn tc4_first_agent_is_lead() {
     let resp = app.oneshot(req).await.unwrap();
     let json = body_json(resp).await;
     assert_eq!(json["data"]["agents"][0]["role"], "lead");
-    assert_eq!(
-        json["data"]["lead_agent_id"],
-        json["data"]["agents"][0]["slot_id"]
-    );
+    assert_eq!(json["data"]["lead_agent_id"], json["data"]["agents"][0]["slot_id"]);
 }
 
 // TC-5: Empty agents returns 400
@@ -121,8 +116,7 @@ async fn tc6_missing_name_returns_error() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
-    let body =
-        json!({ "agents": [{ "name": "L", "role": "lead", "backend": "acp", "model": "c" }] });
+    let body = json!({ "agents": [{ "name": "L", "role": "lead", "backend": "acp", "model": "c" }] });
     let req = json_with_token("POST", "/api/teams", body, &token, &csrf);
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
@@ -349,13 +343,7 @@ async fn aa1_add_agent_to_team() {
         "backend": "acp",
         "model": "claude"
     });
-    let req = json_with_token(
-        "POST",
-        &format!("/api/teams/{team_id}/agents"),
-        body,
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("POST", &format!("/api/teams/{team_id}/agents"), body, &token, &csrf);
     let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
     let json = body_json(resp).await;
@@ -373,13 +361,7 @@ async fn aa2_add_agent_increases_count() {
     let team_id = data["id"].as_str().unwrap();
 
     let body = json!({ "name": "X", "role": "teammate", "backend": "acp", "model": "claude" });
-    let req = json_with_token(
-        "POST",
-        &format!("/api/teams/{team_id}/agents"),
-        body,
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("POST", &format!("/api/teams/{team_id}/agents"), body, &token, &csrf);
     app.clone().oneshot(req).await.unwrap();
 
     let req = get_with_token(&format!("/api/teams/{team_id}"), &token);
@@ -410,13 +392,7 @@ async fn aa5_add_agent_missing_fields() {
     let team_id = data["id"].as_str().unwrap();
 
     let body = json!({ "role": "teammate", "backend": "acp" });
-    let req = json_with_token(
-        "POST",
-        &format!("/api/teams/{team_id}/agents"),
-        body,
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("POST", &format!("/api/teams/{team_id}/agents"), body, &token, &csrf);
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
@@ -431,11 +407,7 @@ async fn ar1_remove_agent_from_team() {
     let team_id = data["id"].as_str().unwrap();
     let slot_id = data["agents"][1]["slot_id"].as_str().unwrap();
 
-    let req = delete_with_token(
-        &format!("/api/teams/{team_id}/agents/{slot_id}"),
-        &token,
-        &csrf,
-    );
+    let req = delete_with_token(&format!("/api/teams/{team_id}/agents/{slot_id}"), &token, &csrf);
     let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 }
@@ -450,11 +422,7 @@ async fn ar2_after_removal_agent_gone() {
     let team_id = data["id"].as_str().unwrap();
     let slot_id = data["agents"][1]["slot_id"].as_str().unwrap();
 
-    let req = delete_with_token(
-        &format!("/api/teams/{team_id}/agents/{slot_id}"),
-        &token,
-        &csrf,
-    );
+    let req = delete_with_token(&format!("/api/teams/{team_id}/agents/{slot_id}"), &token, &csrf);
     app.clone().oneshot(req).await.unwrap();
 
     let req = get_with_token(&format!("/api/teams/{team_id}"), &token);
@@ -474,11 +442,7 @@ async fn ar4_remove_nonexistent_agent() {
     let data = create_team(&mut app, &token, &csrf).await;
     let team_id = data["id"].as_str().unwrap();
 
-    let req = delete_with_token(
-        &format!("/api/teams/{team_id}/agents/nonexistent"),
-        &token,
-        &csrf,
-    );
+    let req = delete_with_token(&format!("/api/teams/{team_id}/agents/nonexistent"), &token, &csrf);
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
@@ -611,13 +575,7 @@ async fn es3_ensure_session_nonexistent() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
-    let req = json_with_token(
-        "POST",
-        "/api/teams/nonexistent/session",
-        json!({}),
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("POST", "/api/teams/nonexistent/session", json!({}), &token, &csrf);
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
@@ -778,13 +736,7 @@ async fn full_team_lifecycle() {
 
     // Add agent
     let body = json!({ "name": "Helper", "role": "teammate", "backend": "acp", "model": "claude" });
-    let req = json_with_token(
-        "POST",
-        &format!("/api/teams/{team_id}/agents"),
-        body,
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("POST", &format!("/api/teams/{team_id}/agents"), body, &token, &csrf);
     let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
     let added = body_json(resp).await;
@@ -841,11 +793,7 @@ async fn full_team_lifecycle() {
     app.clone().oneshot(req).await.unwrap();
 
     // Remove added agent
-    let req = delete_with_token(
-        &format!("/api/teams/{team_id}/agents/{new_slot}"),
-        &token,
-        &csrf,
-    );
+    let req = delete_with_token(&format!("/api/teams/{team_id}/agents/{new_slot}"), &token, &csrf);
     app.clone().oneshot(req).await.unwrap();
 
     // Verify 2 agents remain

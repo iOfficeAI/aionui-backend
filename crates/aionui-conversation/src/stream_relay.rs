@@ -114,16 +114,10 @@ impl StreamRelay {
                         if has_thinking {
                             self.send_thinking_done();
                         }
-                        self.persist_thinking(&thinking_buffer, thinking_started_at)
-                            .await;
+                        self.persist_thinking(&thinking_buffer, thinking_started_at).await;
                         let outcome = self.finalize(&text_buffer, &record_created, &event).await;
                         if self.complete_turn {
-                            Self::complete_conversation(
-                                &self.repo,
-                                &self.broadcaster,
-                                &self.conversation_id,
-                            )
-                            .await;
+                            Self::complete_conversation(&self.repo, &self.broadcaster, &self.conversation_id).await;
                         }
                         break outcome;
                     }
@@ -139,25 +133,17 @@ impl StreamRelay {
                     if has_thinking {
                         self.send_thinking_done();
                     }
-                    self.persist_thinking(&thinking_buffer, thinking_started_at)
-                        .await;
+                    self.persist_thinking(&thinking_buffer, thinking_started_at).await;
                     // Channel closed without finish/error — still finalize
                     let outcome = self
                         .finalize(
                             &text_buffer,
                             &record_created,
-                            &AgentStreamEvent::Finish(
-                                aionui_ai_agent::stream_event::FinishEventData::default(),
-                            ),
+                            &AgentStreamEvent::Finish(aionui_ai_agent::stream_event::FinishEventData::default()),
                         )
                         .await;
                     if self.complete_turn {
-                        Self::complete_conversation(
-                            &self.repo,
-                            &self.broadcaster,
-                            &self.conversation_id,
-                        )
-                        .await;
+                        Self::complete_conversation(&self.repo, &self.broadcaster, &self.conversation_id).await;
                     }
                     break outcome;
                 }
@@ -211,11 +197,7 @@ impl StreamRelay {
                 status: Some(Some("work".into())),
                 hidden: None,
             };
-            if let Err(e) = self
-                .repo
-                .update_message(&self.assistant_msg_id, &update)
-                .await
-            {
+            if let Err(e) = self.repo.update_message(&self.assistant_msg_id, &update).await {
                 error!(error = %e, "Failed to update streaming message");
             }
         } else {
@@ -238,12 +220,7 @@ impl StreamRelay {
     }
 
     /// Finalize the assistant message on stream end.
-    async fn finalize(
-        &self,
-        text: &str,
-        record_created: &bool,
-        event: &AgentStreamEvent,
-    ) -> RelayOutcome {
+    async fn finalize(&self, text: &str, record_created: &bool, event: &AgentStreamEvent) -> RelayOutcome {
         let mut outcome = RelayOutcome::default();
         let status = match event {
             AgentStreamEvent::Error(_) => "error",
@@ -263,11 +240,7 @@ impl StreamRelay {
                         status: Some(Some(status.to_owned())),
                         hidden: Some(hidden),
                     };
-                    if let Err(e) = self
-                        .repo
-                        .update_message(&self.assistant_msg_id, &update)
-                        .await
-                    {
+                    if let Err(e) = self.repo.update_message(&self.assistant_msg_id, &update).await {
                         error!(error = %e, "Failed to finalize streaming message");
                     }
                 } else {
@@ -345,24 +318,23 @@ impl StreamRelay {
 
     /// Send a `thinking` event with `status: "done"` to close the thinking UI.
     fn send_thinking_done(&self) {
-        let thinking_done =
-            AgentStreamEvent::Thinking(aionui_ai_agent::stream_event::ThinkingEventData {
-                content: String::new(),
-                subject: None,
-                duration: None,
-                status: Some("done".into()),
-            });
+        let thinking_done = AgentStreamEvent::Thinking(aionui_ai_agent::stream_event::ThinkingEventData {
+            content: String::new(),
+            subject: None,
+            duration: None,
+            status: Some("done".into()),
+        });
         self.forward_to_websocket(&thinking_done);
     }
 
     async fn process_final_text(&self, text: &str) -> MiddlewareResult {
-        let middleware = MessageMiddleware::new(self.cron_service.as_ref().map(|service| {
-            Box::new(SharedCronService(Arc::clone(service))) as Box<dyn ICronService>
-        }));
+        let middleware = MessageMiddleware::new(
+            self.cron_service
+                .as_ref()
+                .map(|service| Box::new(SharedCronService(Arc::clone(service))) as Box<dyn ICronService>),
+        );
 
-        middleware
-            .process(text, &self.user_id, &self.conversation_id)
-            .await
+        middleware.process(text, &self.user_id, &self.conversation_id).await
     }
 
     fn send_final_text_override(&self, text: &str, hidden: bool) {
@@ -420,10 +392,7 @@ impl StreamRelay {
     }
 
     fn is_terminal(&self, event: &AgentStreamEvent) -> bool {
-        matches!(
-            event,
-            AgentStreamEvent::Finish(_) | AgentStreamEvent::Error(_)
-        )
+        matches!(event, AgentStreamEvent::Finish(_) | AgentStreamEvent::Error(_))
     }
 }
 
@@ -449,11 +418,7 @@ impl ICronService for SharedCronService {
         self.0.update_job(user_id, conversation_id, params).await
     }
 
-    async fn list_jobs(
-        &self,
-        user_id: &str,
-        conversation_id: &str,
-    ) -> aionui_ai_agent::CronCommandResult {
+    async fn list_jobs(&self, user_id: &str, conversation_id: &str) -> aionui_ai_agent::CronCommandResult {
         self.0.list_jobs(user_id, conversation_id).await
     }
 
@@ -465,9 +430,7 @@ impl ICronService for SharedCronService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aionui_ai_agent::stream_event::{
-        ErrorEventData, FinishEventData, StartEventData, TextEventData,
-    };
+    use aionui_ai_agent::stream_event::{ErrorEventData, FinishEventData, StartEventData, TextEventData};
     use aionui_db::DbError;
     use std::sync::Mutex;
 
@@ -493,9 +456,7 @@ mod tests {
     #[test]
     fn is_terminal_text() {
         let relay = make_relay();
-        let event = AgentStreamEvent::Text(TextEventData {
-            content: "hi".into(),
-        });
+        let event = AgentStreamEvent::Text(TextEventData { content: "hi".into() });
         assert!(!relay.is_terminal(&event));
     }
 
@@ -534,8 +495,7 @@ mod tests {
             content: "World".into(),
         }))
         .unwrap();
-        tx.send(AgentStreamEvent::Finish(FinishEventData::default()))
-            .unwrap();
+        tx.send(AgentStreamEvent::Finish(FinishEventData::default())).unwrap();
 
         let outcome = relay.run(rx).await;
         assert!(outcome.system_responses.is_empty());
@@ -643,8 +603,7 @@ mod tests {
         let mut ws_rx = bus.subscribe();
         let rx = tx.subscribe();
 
-        tx.send(AgentStreamEvent::Finish(FinishEventData::default()))
-            .unwrap();
+        tx.send(AgentStreamEvent::Finish(FinishEventData::default())).unwrap();
 
         let outcome = relay.run(rx).await;
         assert!(outcome.system_responses.is_empty());
@@ -685,14 +644,10 @@ mod tests {
             content: "Hello [CRON_LIST]".into(),
         }))
         .unwrap();
-        tx.send(AgentStreamEvent::Finish(FinishEventData::default()))
-            .unwrap();
+        tx.send(AgentStreamEvent::Finish(FinishEventData::default())).unwrap();
 
         let outcome = relay.run(rx).await;
-        assert_eq!(
-            outcome.system_responses,
-            vec!["[System: listed]".to_string()]
-        );
+        assert_eq!(outcome.system_responses, vec!["[System: listed]".to_string()]);
 
         let inserts = repo.take_inserts();
         assert_eq!(inserts.len(), 1);
@@ -704,16 +659,12 @@ mod tests {
             ws_events.push(evt);
         }
 
-        let replacement = ws_events.iter().find(|evt| {
-            evt.name == "message.stream"
-                && evt.data["type"] == "content"
-                && evt.data["replace"] == true
-        });
+        let replacement = ws_events
+            .iter()
+            .find(|evt| evt.name == "message.stream" && evt.data["type"] == "content" && evt.data["replace"] == true);
         assert!(replacement.is_some());
         assert_eq!(
-            replacement.unwrap().data["data"]["content"]
-                .as_str()
-                .map(str::trim),
+            replacement.unwrap().data["data"]["content"].as_str().map(str::trim),
             Some("Hello")
         );
     }
@@ -760,22 +711,14 @@ mod tests {
             }
         }
 
-        async fn list_jobs(
-            &self,
-            _user_id: &str,
-            _conversation_id: &str,
-        ) -> aionui_ai_agent::CronCommandResult {
+        async fn list_jobs(&self, _user_id: &str, _conversation_id: &str) -> aionui_ai_agent::CronCommandResult {
             aionui_ai_agent::CronCommandResult {
                 success: true,
                 message: "listed".into(),
             }
         }
 
-        async fn delete_job(
-            &self,
-            _user_id: &str,
-            _job_id: &str,
-        ) -> aionui_ai_agent::CronCommandResult {
+        async fn delete_job(&self, _user_id: &str, _job_id: &str) -> aionui_ai_agent::CronCommandResult {
             aionui_ai_agent::CronCommandResult {
                 success: true,
                 message: "deleted".into(),
@@ -788,20 +731,13 @@ mod tests {
 
     #[async_trait::async_trait]
     impl IConversationRepository for NoopRepo {
-        async fn get(
-            &self,
-            _id: &str,
-        ) -> Result<Option<aionui_db::models::ConversationRow>, DbError> {
+        async fn get(&self, _id: &str) -> Result<Option<aionui_db::models::ConversationRow>, DbError> {
             Ok(None)
         }
         async fn create(&self, _row: &aionui_db::models::ConversationRow) -> Result<(), DbError> {
             Ok(())
         }
-        async fn update(
-            &self,
-            _id: &str,
-            _updates: &aionui_db::ConversationRowUpdate,
-        ) -> Result<(), DbError> {
+        async fn update(&self, _id: &str, _updates: &aionui_db::ConversationRowUpdate) -> Result<(), DbError> {
             Ok(())
         }
         async fn delete(&self, _id: &str) -> Result<(), DbError> {
@@ -811,8 +747,7 @@ mod tests {
             &self,
             _user_id: &str,
             _filters: &aionui_db::ConversationFilters,
-        ) -> Result<aionui_common::PaginatedResult<aionui_db::models::ConversationRow>, DbError>
-        {
+        ) -> Result<aionui_common::PaginatedResult<aionui_db::models::ConversationRow>, DbError> {
             Ok(aionui_common::PaginatedResult {
                 items: vec![],
                 total: 0,
@@ -858,11 +793,7 @@ mod tests {
         async fn insert_message(&self, _row: &MessageRow) -> Result<(), DbError> {
             Ok(())
         }
-        async fn update_message(
-            &self,
-            _id: &str,
-            _updates: &aionui_db::MessageRowUpdate,
-        ) -> Result<(), DbError> {
+        async fn update_message(&self, _id: &str, _updates: &aionui_db::MessageRowUpdate) -> Result<(), DbError> {
             Ok(())
         }
         async fn delete_messages_by_conversation(&self, _conv_id: &str) -> Result<(), DbError> {
@@ -917,20 +848,13 @@ mod tests {
 
     #[async_trait::async_trait]
     impl IConversationRepository for RecordingRepo {
-        async fn get(
-            &self,
-            _id: &str,
-        ) -> Result<Option<aionui_db::models::ConversationRow>, DbError> {
+        async fn get(&self, _id: &str) -> Result<Option<aionui_db::models::ConversationRow>, DbError> {
             Ok(None)
         }
         async fn create(&self, _row: &aionui_db::models::ConversationRow) -> Result<(), DbError> {
             Ok(())
         }
-        async fn update(
-            &self,
-            _id: &str,
-            _updates: &aionui_db::ConversationRowUpdate,
-        ) -> Result<(), DbError> {
+        async fn update(&self, _id: &str, _updates: &aionui_db::ConversationRowUpdate) -> Result<(), DbError> {
             Ok(())
         }
         async fn delete(&self, _id: &str) -> Result<(), DbError> {
@@ -940,8 +864,7 @@ mod tests {
             &self,
             _user_id: &str,
             _filters: &aionui_db::ConversationFilters,
-        ) -> Result<aionui_common::PaginatedResult<aionui_db::models::ConversationRow>, DbError>
-        {
+        ) -> Result<aionui_common::PaginatedResult<aionui_db::models::ConversationRow>, DbError> {
             Ok(aionui_common::PaginatedResult {
                 items: vec![],
                 total: 0,
@@ -988,15 +911,8 @@ mod tests {
             self.inserts.lock().unwrap().push(row.clone());
             Ok(())
         }
-        async fn update_message(
-            &self,
-            id: &str,
-            updates: &aionui_db::MessageRowUpdate,
-        ) -> Result<(), DbError> {
-            self.updates
-                .lock()
-                .unwrap()
-                .push((id.to_owned(), updates.clone()));
+        async fn update_message(&self, id: &str, updates: &aionui_db::MessageRowUpdate) -> Result<(), DbError> {
+            self.updates.lock().unwrap().push((id.to_owned(), updates.clone()));
             Ok(())
         }
         async fn delete_messages_by_conversation(&self, _conv_id: &str) -> Result<(), DbError> {

@@ -45,11 +45,7 @@ impl McpAgentAdapter for ClaudeAdapter {
         Ok(parse_claude_list_output(&stdout))
     }
 
-    async fn install_server(
-        &self,
-        name: &str,
-        transport: &McpServerTransport,
-    ) -> Result<(), McpError> {
+    async fn install_server(&self, name: &str, transport: &McpServerTransport) -> Result<(), McpError> {
         if !self.is_installed().await? {
             return Err(McpError::AgentNotInstalled(CLI_NAME.into()));
         }
@@ -57,8 +53,8 @@ impl McpAgentAdapter for ClaudeAdapter {
         match transport {
             McpServerTransport::Stdio { command, args, env } => {
                 let config = build_stdio_json(command, args, env);
-                let config_str = serde_json::to_string(&config)
-                    .map_err(|e| McpError::AgentOperationFailed(e.to_string()))?;
+                let config_str =
+                    serde_json::to_string(&config).map_err(|e| McpError::AgentOperationFailed(e.to_string()))?;
                 run_cli(
                     CLI_NAME,
                     &["mcp", "add-json", "-s", "user", name, &config_str],
@@ -84,12 +80,7 @@ impl McpAgentAdapter for ClaudeAdapter {
 
         // Try each scope; stop on first success or "not found".
         for scope in REMOVE_SCOPES {
-            let (stdout, _stderr) = run_cli(
-                CLI_NAME,
-                &["mcp", "remove", "-s", scope, name],
-                MUTATE_TIMEOUT,
-            )
-            .await?;
+            let (stdout, _stderr) = run_cli(CLI_NAME, &["mcp", "remove", "-s", scope, name], MUTATE_TIMEOUT).await?;
             let lower = stdout.to_lowercase();
             if lower.contains("removed") || lower.contains("not found") {
                 return Ok(());
@@ -131,11 +122,7 @@ async fn install_http_like(
 }
 
 /// Build the JSON config for `claude mcp add-json`.
-fn build_stdio_json(
-    command: &str,
-    args: &[String],
-    env: &HashMap<String, String>,
-) -> serde_json::Value {
+fn build_stdio_json(command: &str, args: &[String], env: &HashMap<String, String>) -> serde_json::Value {
     let mut config = serde_json::json!({
         "command": command,
         "args": args,
@@ -176,10 +163,8 @@ fn parse_claude_list_output(output: &str) -> Vec<DetectedServer> {
 /// Pattern: `<name>: <command_or_url> - [✓|✗] <status>`
 fn parse_claude_list_line(line: &str) -> Option<DetectedServer> {
     // Must contain a status marker
-    let has_status = line.contains('\u{2713}')
-        || line.contains('\u{2717}')
-        || line.contains("Connected")
-        || line.contains("Failed");
+    let has_status =
+        line.contains('\u{2713}') || line.contains('\u{2717}') || line.contains("Connected") || line.contains("Failed");
 
     if !has_status {
         return None;
@@ -202,27 +187,26 @@ fn parse_claude_list_line(line: &str) -> Option<DetectedServer> {
     }
 
     // Heuristic: if it looks like a URL, treat as HTTP; otherwise stdio.
-    let transport =
-        if command_or_url.starts_with("http://") || command_or_url.starts_with("https://") {
-            // SSE heuristic: URL ending with /sse
-            if command_or_url.ends_with("/sse") {
-                McpServerTransport::Sse {
-                    url: command_or_url.to_owned(),
-                    headers: HashMap::new(),
-                }
-            } else {
-                McpServerTransport::Http {
-                    url: command_or_url.to_owned(),
-                    headers: HashMap::new(),
-                }
+    let transport = if command_or_url.starts_with("http://") || command_or_url.starts_with("https://") {
+        // SSE heuristic: URL ending with /sse
+        if command_or_url.ends_with("/sse") {
+            McpServerTransport::Sse {
+                url: command_or_url.to_owned(),
+                headers: HashMap::new(),
             }
         } else {
-            McpServerTransport::Stdio {
-                command: command_or_url.to_owned(),
-                args: Vec::new(),
-                env: HashMap::new(),
+            McpServerTransport::Http {
+                url: command_or_url.to_owned(),
+                headers: HashMap::new(),
             }
-        };
+        }
+    } else {
+        McpServerTransport::Stdio {
+            command: command_or_url.to_owned(),
+            args: Vec::new(),
+            env: HashMap::new(),
+        }
+    };
 
     Some(DetectedServer {
         name: name.to_owned(),

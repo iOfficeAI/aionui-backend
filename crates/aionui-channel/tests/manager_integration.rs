@@ -12,8 +12,7 @@ use aionui_channel::error::ChannelError;
 use aionui_channel::manager::{ChannelManager, PluginFactory};
 use aionui_channel::plugin::{ChannelPlugin, PluginCallbacks};
 use aionui_channel::types::{
-    BotInfo, OutgoingMessageType, PluginConfig, PluginCredentials, PluginStatus, PluginType,
-    UnifiedOutgoingMessage,
+    BotInfo, OutgoingMessageType, PluginConfig, PluginCredentials, PluginStatus, PluginType, UnifiedOutgoingMessage,
 };
 use aionui_common::decrypt_string;
 use aionui_db::{IChannelRepository, SqliteChannelRepository, init_database_memory};
@@ -75,11 +74,7 @@ impl MockPlugin {
 
 #[async_trait::async_trait]
 impl ChannelPlugin for MockPlugin {
-    async fn initialize(
-        &mut self,
-        _config: PluginConfig,
-        _callbacks: PluginCallbacks,
-    ) -> Result<(), ChannelError> {
+    async fn initialize(&mut self, _config: PluginConfig, _callbacks: PluginCallbacks) -> Result<(), ChannelError> {
         if self.should_fail_init {
             self.status = PluginStatus::Error;
             self.last_error = Some("Mock init failure".into());
@@ -107,11 +102,7 @@ impl ChannelPlugin for MockPlugin {
         Ok(())
     }
 
-    async fn send_message(
-        &self,
-        _chat_id: &str,
-        _message: UnifiedOutgoingMessage,
-    ) -> Result<String, ChannelError> {
+    async fn send_message(&self, _chat_id: &str, _message: UnifiedOutgoingMessage) -> Result<String, ChannelError> {
         Ok("mock_msg_id".into())
     }
 
@@ -149,14 +140,9 @@ fn test_key() -> [u8; 32] {
     [0x42; 32]
 }
 
-async fn setup() -> (
-    ChannelManager,
-    Arc<dyn IChannelRepository>,
-    Arc<MockBroadcaster>,
-) {
+async fn setup() -> (ChannelManager, Arc<dyn IChannelRepository>, Arc<MockBroadcaster>) {
     let db = init_database_memory().await.unwrap();
-    let repo: Arc<dyn IChannelRepository> =
-        Arc::new(SqliteChannelRepository::new(db.pool().clone()));
+    let repo: Arc<dyn IChannelRepository> = Arc::new(SqliteChannelRepository::new(db.pool().clone()));
     let bc = Arc::new(MockBroadcaster::new());
     let (msg_tx, _msg_rx) = mpsc::channel(16);
     let (confirm_tx, _confirm_rx) = mpsc::channel(16);
@@ -296,9 +282,7 @@ async fn ep2_re_enable_updates_config() {
         "credentials": { "token": "bot:new_token_456" },
         "config": { "mode": "webhook", "webhook_url": "https://example.com" }
     });
-    mgr.enable_plugin("telegram", &new_config, &factory)
-        .await
-        .unwrap();
+    mgr.enable_plugin("telegram", &new_config, &factory).await.unwrap();
 
     // Still only one plugin
     assert_eq!(mgr.active_plugin_count(), 1);
@@ -307,10 +291,7 @@ async fn ep2_re_enable_updates_config() {
     let row = repo.get_plugin("telegram").await.unwrap().unwrap();
     let decrypted = decrypt_string(&row.config, &test_key()).unwrap();
     let config: PluginConfig = serde_json::from_str(&decrypted).unwrap();
-    assert_eq!(
-        config.credentials.token.as_deref(),
-        Some("bot:new_token_456")
-    );
+    assert_eq!(config.credentials.token.as_deref(), Some("bot:new_token_456"));
 }
 
 // ── EP-5: Invalid plugin ID ──────────────────────────────────────
@@ -336,10 +317,7 @@ async fn ep3_ep4_invalid_config_structure() {
 
     // Missing credentials entirely
     let bad = serde_json::json!({ "wrong_key": "value" });
-    let err = mgr
-        .enable_plugin("telegram", &bad, &factory)
-        .await
-        .unwrap_err();
+    let err = mgr.enable_plugin("telegram", &bad, &factory).await.unwrap_err();
     assert!(matches!(err, ChannelError::InvalidConfig(_)));
 }
 
@@ -401,9 +379,7 @@ async fn tp2_test_invalid_credentials() {
     let (mgr, _repo, _bc) = setup().await;
     let factory = make_failing_factory();
 
-    let err = mgr
-        .test_plugin("telegram", make_plugin_config(), &factory)
-        .await;
+    let err = mgr.test_plugin("telegram", make_plugin_config(), &factory).await;
     assert!(err.is_err());
 }
 
@@ -574,9 +550,7 @@ async fn enable_multiple_plugins() {
     mgr.enable_plugin("telegram", &make_telegram_config(), &factory)
         .await
         .unwrap();
-    mgr.enable_plugin("lark", &make_lark_config(), &factory)
-        .await
-        .unwrap();
+    mgr.enable_plugin("lark", &make_lark_config(), &factory).await.unwrap();
 
     assert_eq!(mgr.active_plugin_count(), 2);
     assert!(mgr.is_plugin_running("telegram"));
@@ -596,9 +570,7 @@ async fn shutdown_stops_all() {
     mgr.enable_plugin("telegram", &make_telegram_config(), &factory)
         .await
         .unwrap();
-    mgr.enable_plugin("lark", &make_lark_config(), &factory)
-        .await
-        .unwrap();
+    mgr.enable_plugin("lark", &make_lark_config(), &factory).await.unwrap();
 
     mgr.shutdown().await;
     assert_eq!(mgr.active_plugin_count(), 0);
@@ -654,9 +626,7 @@ async fn enable_failure_sets_error_in_db() {
     let (mgr, repo, _bc) = setup().await;
     let factory = make_failing_factory();
 
-    let err = mgr
-        .enable_plugin("telegram", &make_telegram_config(), &factory)
-        .await;
+    let err = mgr.enable_plugin("telegram", &make_telegram_config(), &factory).await;
     assert!(err.is_err());
 
     // Plugin should exist in DB with error status

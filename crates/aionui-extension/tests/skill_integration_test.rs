@@ -9,10 +9,9 @@ use std::path::Path;
 use aionui_extension::external_paths::ExternalPathsManager;
 use aionui_extension::skill_service::{
     NamedPath, SkillPaths, delete_assistant_rule, delete_assistant_skill, delete_skill,
-    detect_and_count_external_skills, export_skill_with_symlink, import_skill,
-    import_skill_with_symlink, list_available_skills, read_assistant_rule, read_assistant_skill,
-    read_builtin_rule, read_builtin_skill, read_skill_info, resolve_skill_paths, scan_for_skills,
-    write_assistant_rule, write_assistant_skill,
+    detect_and_count_external_skills, export_skill_with_symlink, import_skill, import_skill_with_symlink,
+    list_available_skills, read_assistant_rule, read_assistant_skill, read_builtin_rule, read_builtin_skill,
+    read_skill_info, resolve_skill_paths, scan_for_skills, write_assistant_rule, write_assistant_skill,
 };
 use tempfile::TempDir;
 
@@ -180,9 +179,7 @@ async fn sm5_export_skill_symlink() {
     .unwrap();
 
     let export_dir = tmp.path().join("exports");
-    export_skill_with_symlink(&source, &export_dir)
-        .await
-        .unwrap();
+    export_skill_with_symlink(&source, &export_dir).await.unwrap();
 
     let link = export_dir.join("source-skill");
     assert!(link.is_symlink());
@@ -314,15 +311,11 @@ async fn rm2_assistant_rule_locale_fallback() {
         .unwrap();
 
     // 1. Matching locale → locale-specific content
-    let content = read_assistant_rule(&paths, "abc123", Some("zh-CN"))
-        .await
-        .unwrap();
+    let content = read_assistant_rule(&paths, "abc123", Some("zh-CN")).await.unwrap();
     assert_eq!(content, "中文规则");
 
     // 2. Non-matching locale → fallback to default
-    let content = read_assistant_rule(&paths, "abc123", Some("ja-JP"))
-        .await
-        .unwrap();
+    let content = read_assistant_rule(&paths, "abc123", Some("ja-JP")).await.unwrap();
     assert_eq!(content, "Default rule");
 
     // 3. No locale → default
@@ -358,9 +351,7 @@ async fn rm4_delete_assistant_rule_all_locales() {
     let tmp = TempDir::new().unwrap();
     let paths = make_paths(tmp.path());
 
-    write_assistant_rule(&paths, "abc123", "Default", None)
-        .await
-        .unwrap();
+    write_assistant_rule(&paths, "abc123", "Default", None).await.unwrap();
     write_assistant_rule(&paths, "abc123", "Chinese", Some("zh-CN"))
         .await
         .unwrap();
@@ -374,13 +365,9 @@ async fn rm4_delete_assistant_rule_all_locales() {
     // Verify all versions removed
     let content = read_assistant_rule(&paths, "abc123", None).await.unwrap();
     assert!(content.is_empty());
-    let content = read_assistant_rule(&paths, "abc123", Some("zh-CN"))
-        .await
-        .unwrap();
+    let content = read_assistant_rule(&paths, "abc123", Some("zh-CN")).await.unwrap();
     assert!(content.is_empty());
-    let content = read_assistant_rule(&paths, "abc123", Some("en-US"))
-        .await
-        .unwrap();
+    let content = read_assistant_rule(&paths, "abc123", Some("en-US")).await.unwrap();
     assert!(content.is_empty());
 }
 
@@ -397,14 +384,10 @@ async fn rm5_assistant_skill_locale_fallback() {
         .await
         .unwrap();
 
-    let content = read_assistant_skill(&paths, "abc123", Some("en-US"))
-        .await
-        .unwrap();
+    let content = read_assistant_skill(&paths, "abc123", Some("en-US")).await.unwrap();
     assert_eq!(content, "English skill");
 
-    let content = read_assistant_skill(&paths, "abc123", Some("fr-FR"))
-        .await
-        .unwrap();
+    let content = read_assistant_skill(&paths, "abc123", Some("fr-FR")).await.unwrap();
     assert_eq!(content, "Default skill");
 }
 
@@ -414,9 +397,7 @@ async fn rm6_write_and_delete_assistant_skill() {
     let tmp = TempDir::new().unwrap();
     let paths = make_paths(tmp.path());
 
-    write_assistant_skill(&paths, "abc123", "Content", None)
-        .await
-        .unwrap();
+    write_assistant_skill(&paths, "abc123", "Content", None).await.unwrap();
     write_assistant_skill(&paths, "abc123", "Locale", Some("zh-CN"))
         .await
         .unwrap();
@@ -536,10 +517,7 @@ async fn detect_external_skills_from_custom_paths() {
     // `source` for custom paths is `custom-<abs-path>` — used by the renderer
     // as a React key / testid suffix, and asserted by e2e spec
     // `edge-cases.e2e.ts` (prefix `external-source-tab-custom-`).
-    assert_eq!(
-        external.source,
-        format!("custom-{}", ext_dir.to_string_lossy())
-    );
+    assert_eq!(external.source, format!("custom-{}", ext_dir.to_string_lossy()));
     assert!(external.source.starts_with("custom-"));
 }
 
@@ -593,11 +571,7 @@ async fn security_builtin_read_path_traversal() {
     let paths = make_paths(tmp.path());
 
     assert!(read_builtin_rule(&paths, "../secret.md").await.is_err());
-    assert!(
-        read_builtin_skill(&paths, "../../etc/passwd")
-            .await
-            .is_err()
-    );
+    assert!(read_builtin_skill(&paths, "../../etc/passwd").await.is_err());
     assert!(read_builtin_rule(&paths, "").await.is_err());
 }
 
@@ -608,24 +582,12 @@ async fn security_assistant_crud_path_traversal_id() {
     let paths = make_paths(tmp.path());
 
     // read
-    assert!(
-        read_assistant_rule(&paths, "../escape", None)
-            .await
-            .is_err()
-    );
+    assert!(read_assistant_rule(&paths, "../escape", None).await.is_err());
     assert!(read_assistant_skill(&paths, "foo/bar", None).await.is_err());
 
     // write
-    assert!(
-        write_assistant_rule(&paths, "../escape", "x", None)
-            .await
-            .is_err()
-    );
-    assert!(
-        write_assistant_skill(&paths, "foo\\bar", "x", None)
-            .await
-            .is_err()
-    );
+    assert!(write_assistant_rule(&paths, "../escape", "x", None).await.is_err());
+    assert!(write_assistant_skill(&paths, "foo\\bar", "x", None).await.is_err());
 
     // delete
     assert!(delete_assistant_rule(&paths, "../escape").await.is_err());
@@ -638,24 +600,12 @@ async fn security_assistant_crud_path_traversal_locale() {
     let tmp = TempDir::new().unwrap();
     let paths = make_paths(tmp.path());
 
-    assert!(
-        read_assistant_rule(&paths, "valid", Some("../bad"))
-            .await
-            .is_err()
-    );
+    assert!(read_assistant_rule(&paths, "valid", Some("../bad")).await.is_err());
     assert!(
         write_assistant_rule(&paths, "valid", "x", Some("../../evil"))
             .await
             .is_err()
     );
-    assert!(
-        read_assistant_skill(&paths, "valid", Some("a/b"))
-            .await
-            .is_err()
-    );
-    assert!(
-        write_assistant_skill(&paths, "valid", "x", Some("a\\b"))
-            .await
-            .is_err()
-    );
+    assert!(read_assistant_skill(&paths, "valid", Some("a/b")).await.is_err());
+    assert!(write_assistant_skill(&paths, "valid", "x", Some("a\\b")).await.is_err());
 }

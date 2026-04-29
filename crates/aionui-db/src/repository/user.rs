@@ -25,11 +25,7 @@ pub trait IUserRepository: Send + Sync {
     /// Updates the system default user's username and password hash.
     ///
     /// Used during the initial bootstrap flow.
-    async fn set_system_user_credentials(
-        &self,
-        username: &str,
-        password_hash: &str,
-    ) -> Result<(), DbError>;
+    async fn set_system_user_credentials(&self, username: &str, password_hash: &str) -> Result<(), DbError>;
 
     /// Creates a new user and returns the inserted row.
     ///

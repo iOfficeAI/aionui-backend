@@ -3,9 +3,7 @@ use tracing::{debug, warn};
 
 use crate::error::ChannelError;
 
-use super::types::{
-    ILinkResponse, QrCodeData, QrCodeStatusData, SendMessageData, SendMessageRequest, WxUpdate,
-};
+use super::types::{ILinkResponse, QrCodeData, QrCodeStatusData, SendMessageData, SendMessageRequest, WxUpdate};
 
 /// HTTP client for the WeChat iLink Bot API.
 ///
@@ -80,14 +78,10 @@ impl WeixinApi {
             .query(&[("qrcode", qrcode)])
             .send()
             .await
-            .map_err(|e| {
-                ChannelError::PlatformApi(format!("get_qrcode_status request failed: {e}"))
-            })?
+            .map_err(|e| ChannelError::PlatformApi(format!("get_qrcode_status request failed: {e}")))?
             .json()
             .await
-            .map_err(|e| {
-                ChannelError::PlatformApi(format!("get_qrcode_status parse failed: {e}"))
-            })?;
+            .map_err(|e| ChannelError::PlatformApi(format!("get_qrcode_status parse failed: {e}")))?;
 
         if !resp.is_ok() {
             return Err(ChannelError::PlatformApi(format!(
@@ -110,11 +104,7 @@ impl WeixinApi {
     ///
     /// - `offset`: return updates with update_id >= offset
     /// - `timeout`: long-polling timeout in seconds
-    pub async fn get_updates(
-        &self,
-        offset: Option<i64>,
-        timeout: u32,
-    ) -> Result<Vec<WxUpdate>, ChannelError> {
+    pub async fn get_updates(&self, offset: Option<i64>, timeout: u32) -> Result<Vec<WxUpdate>, ChannelError> {
         let url = format!("{}/ilink/bot/getupdates", self.base_url);
 
         let mut body = serde_json::json!({
@@ -140,9 +130,7 @@ impl WeixinApi {
         if !resp.is_ok() {
             let msg = resp.error_message();
             warn!("WeChat getupdates error: {msg}");
-            return Err(ChannelError::PlatformApi(format!(
-                "getupdates failed: {msg}"
-            )));
+            return Err(ChannelError::PlatformApi(format!("getupdates failed: {msg}")));
         }
 
         Ok(resp.data.unwrap_or_default())
@@ -155,10 +143,7 @@ impl WeixinApi {
     /// Send a text message.
     ///
     /// `POST /ilink/bot/sendmessage`
-    pub async fn send_message(
-        &self,
-        req: &SendMessageRequest,
-    ) -> Result<SendMessageData, ChannelError> {
+    pub async fn send_message(&self, req: &SendMessageRequest) -> Result<SendMessageData, ChannelError> {
         let url = format!("{}/ilink/bot/sendmessage", self.base_url);
         debug!(chat_id = %req.chat_id, "Sending WeChat message");
 
@@ -172,14 +157,10 @@ impl WeixinApi {
             .json(&body)
             .send()
             .await
-            .map_err(|e| {
-                ChannelError::MessageSendFailed(format!("sendmessage request failed: {e}"))
-            })?
+            .map_err(|e| ChannelError::MessageSendFailed(format!("sendmessage request failed: {e}")))?
             .json()
             .await
-            .map_err(|e| {
-                ChannelError::MessageSendFailed(format!("sendmessage parse failed: {e}"))
-            })?;
+            .map_err(|e| ChannelError::MessageSendFailed(format!("sendmessage parse failed: {e}")))?;
 
         if !resp.is_ok() {
             return Err(ChannelError::MessageSendFailed(format!(

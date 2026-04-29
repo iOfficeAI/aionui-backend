@@ -300,11 +300,7 @@ impl TeamTask {
         let status = TaskStatus::parse(&row.status).unwrap_or(TaskStatus::Pending);
         let blocked_by: Vec<String> = serde_json::from_str(&row.blocked_by)?;
         let blocks: Vec<String> = serde_json::from_str(&row.blocks)?;
-        let metadata: Option<serde_json::Value> = row
-            .metadata
-            .as_deref()
-            .map(serde_json::from_str)
-            .transpose()?;
+        let metadata: Option<serde_json::Value> = row.metadata.as_deref().map(serde_json::from_str).transpose()?;
         Ok(Self {
             id: row.id.clone(),
             team_id: row.team_id.clone(),
@@ -340,10 +336,7 @@ mod tests {
     #[test]
     fn teammate_role_parse() {
         assert_eq!(TeammateRole::parse("lead"), Some(TeammateRole::Lead));
-        assert_eq!(
-            TeammateRole::parse("teammate"),
-            Some(TeammateRole::Teammate)
-        );
+        assert_eq!(TeammateRole::parse("teammate"), Some(TeammateRole::Teammate));
         assert_eq!(TeammateRole::parse("unknown"), None);
     }
 
@@ -371,22 +364,10 @@ mod tests {
     #[test]
     fn teammate_status_parse_all_variants() {
         assert_eq!(TeammateStatus::parse("idle"), Some(TeammateStatus::Idle));
-        assert_eq!(
-            TeammateStatus::parse("working"),
-            Some(TeammateStatus::Working)
-        );
-        assert_eq!(
-            TeammateStatus::parse("thinking"),
-            Some(TeammateStatus::Thinking)
-        );
-        assert_eq!(
-            TeammateStatus::parse("tool_use"),
-            Some(TeammateStatus::ToolUse)
-        );
-        assert_eq!(
-            TeammateStatus::parse("completed"),
-            Some(TeammateStatus::Completed)
-        );
+        assert_eq!(TeammateStatus::parse("working"), Some(TeammateStatus::Working));
+        assert_eq!(TeammateStatus::parse("thinking"), Some(TeammateStatus::Thinking));
+        assert_eq!(TeammateStatus::parse("tool_use"), Some(TeammateStatus::ToolUse));
+        assert_eq!(TeammateStatus::parse("completed"), Some(TeammateStatus::Completed));
         assert_eq!(TeammateStatus::parse("error"), Some(TeammateStatus::Error));
         assert_eq!(TeammateStatus::parse("bad"), None);
     }
@@ -394,10 +375,7 @@ mod tests {
     #[test]
     fn teammate_status_parse_aionui_aliases() {
         assert_eq!(TeammateStatus::parse("pending"), Some(TeammateStatus::Idle));
-        assert_eq!(
-            TeammateStatus::parse("active"),
-            Some(TeammateStatus::Working)
-        );
+        assert_eq!(TeammateStatus::parse("active"), Some(TeammateStatus::Working));
         assert_eq!(TeammateStatus::parse("failed"), Some(TeammateStatus::Error));
     }
 
@@ -440,22 +418,13 @@ mod tests {
     #[test]
     fn mailbox_message_type_display() {
         assert_eq!(MailboxMessageType::Message.to_string(), "message");
-        assert_eq!(
-            MailboxMessageType::IdleNotification.to_string(),
-            "idle_notification"
-        );
-        assert_eq!(
-            MailboxMessageType::ShutdownRequest.to_string(),
-            "shutdown_request"
-        );
+        assert_eq!(MailboxMessageType::IdleNotification.to_string(), "idle_notification");
+        assert_eq!(MailboxMessageType::ShutdownRequest.to_string(), "shutdown_request");
     }
 
     #[test]
     fn mailbox_message_type_parse() {
-        assert_eq!(
-            MailboxMessageType::parse("message"),
-            Some(MailboxMessageType::Message)
-        );
+        assert_eq!(MailboxMessageType::parse("message"), Some(MailboxMessageType::Message));
         assert_eq!(
             MailboxMessageType::parse("idle_notification"),
             Some(MailboxMessageType::IdleNotification)
@@ -493,10 +462,7 @@ mod tests {
     #[test]
     fn task_status_parse_all_variants() {
         assert_eq!(TaskStatus::parse("pending"), Some(TaskStatus::Pending));
-        assert_eq!(
-            TaskStatus::parse("in_progress"),
-            Some(TaskStatus::InProgress)
-        );
+        assert_eq!(TaskStatus::parse("in_progress"), Some(TaskStatus::InProgress));
         assert_eq!(TaskStatus::parse("completed"), Some(TaskStatus::Completed));
         assert_eq!(TaskStatus::parse("deleted"), Some(TaskStatus::Deleted));
         assert_eq!(TaskStatus::parse("bad"), None);
@@ -754,10 +720,7 @@ mod tests {
         };
         let json = serde_json::to_value(&msg).unwrap();
         assert!(json.get("type").is_some(), "field must serialize as 'type'");
-        assert!(
-            json.get("msgType").is_none(),
-            "must not serialize as 'msgType'"
-        );
+        assert!(json.get("msgType").is_none(), "must not serialize as 'msgType'");
         assert_eq!(json["type"], "message");
     }
 

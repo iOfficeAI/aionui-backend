@@ -6,9 +6,7 @@ use axum::http::StatusCode;
 use serde_json::json;
 use tower::ServiceExt;
 
-use common::{
-    body_json, build_app, delete_with_token, get_with_token, json_with_token, setup_and_login,
-};
+use common::{body_json, build_app, delete_with_token, get_with_token, json_with_token, setup_and_login};
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
@@ -32,12 +30,7 @@ fn openclaw_agent_body() -> serde_json::Value {
     })
 }
 
-async fn create_agent(
-    app: &mut axum::Router,
-    token: &str,
-    csrf: &str,
-    body: serde_json::Value,
-) -> serde_json::Value {
+async fn create_agent(app: &mut axum::Router, token: &str, csrf: &str, body: serde_json::Value) -> serde_json::Value {
     let req = json_with_token("POST", "/api/remote-agents", body, token, csrf);
     let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
@@ -189,13 +182,7 @@ async fn t4_1_update_name_only() {
     let id = created["data"]["id"].as_str().unwrap();
 
     let body = json!({ "name": "Updated Name" });
-    let req = json_with_token(
-        "PUT",
-        &format!("/api/remote-agents/{id}"),
-        body,
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("PUT", &format!("/api/remote-agents/{id}"), body, &token, &csrf);
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
@@ -219,13 +206,7 @@ async fn t4_2_update_multiple_fields() {
         "url": "wss://new-url.example.com",
         "auth_token": "new-super-secret-token"
     });
-    let req = json_with_token(
-        "PUT",
-        &format!("/api/remote-agents/{id}"),
-        body,
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("PUT", &format!("/api/remote-agents/{id}"), body, &token, &csrf);
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
@@ -241,13 +222,7 @@ async fn t4_3_update_nonexistent_agent() {
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
     let body = json!({ "name": "Doesn't Matter" });
-    let req = json_with_token(
-        "PUT",
-        "/api/remote-agents/nonexistent-uuid",
-        body,
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("PUT", "/api/remote-agents/nonexistent-uuid", body, &token, &csrf);
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
@@ -293,13 +268,7 @@ async fn t6_1_test_connection_invalid_protocol() {
         "url": "http://example.com",
         "auth_type": "bearer"
     });
-    let req = json_with_token(
-        "POST",
-        "/api/remote-agents/test-connection",
-        body,
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("POST", "/api/remote-agents/test-connection", body, &token, &csrf);
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 
@@ -385,13 +354,7 @@ async fn t8_full_crud_lifecycle() {
 
     // Update
     let body = json!({ "name": "Renamed Server", "description": "Updated desc" });
-    let req = json_with_token(
-        "PUT",
-        &format!("/api/remote-agents/{id}"),
-        body,
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("PUT", &format!("/api/remote-agents/{id}"), body, &token, &csrf);
     let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let json = body_json(resp).await;

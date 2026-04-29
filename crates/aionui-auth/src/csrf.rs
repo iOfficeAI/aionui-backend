@@ -32,10 +32,7 @@ pub async fn csrf_middleware(
     let csrf_cookie = extract_cookie_value(request.headers(), CSRF_COOKIE_NAME);
 
     // Validate CSRF for state-changing requests
-    let needs_validation = matches!(
-        method,
-        Method::POST | Method::PUT | Method::DELETE | Method::PATCH
-    );
+    let needs_validation = matches!(method, Method::POST | Method::PUT | Method::DELETE | Method::PATCH);
     let is_exempt = path == "/login" || path == "/api/auth/qr-login";
 
     if needs_validation && !is_exempt {

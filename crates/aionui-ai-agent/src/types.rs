@@ -392,9 +392,7 @@ mod tests {
     #[test]
     fn agent_stream_chunk_all_variants_serde_roundtrip() {
         let cases = vec![
-            AgentStreamChunk::Text {
-                text: "hello".into(),
-            },
+            AgentStreamChunk::Text { text: "hello".into() },
             AgentStreamChunk::ToolUse {
                 tool_name: "read_file".into(),
                 input: json!({ "path": "/tmp/a.txt" }),
@@ -430,10 +428,7 @@ mod tests {
                     assert_eq!(a1, b1);
                     assert_eq!(a2, b2);
                 }
-                (
-                    AgentStreamChunk::Thought { content: a },
-                    AgentStreamChunk::Thought { content: b },
-                ) => {
+                (AgentStreamChunk::Thought { content: a }, AgentStreamChunk::Thought { content: b }) => {
                     assert_eq!(a, b);
                 }
                 (
@@ -449,10 +444,7 @@ mod tests {
                     assert_eq!(a1, b1);
                     assert_eq!(a2, b2);
                 }
-                (
-                    AgentStreamChunk::Error { message: a },
-                    AgentStreamChunk::Error { message: b },
-                ) => {
+                (AgentStreamChunk::Error { message: a }, AgentStreamChunk::Error { message: b }) => {
                     assert_eq!(a, b);
                 }
                 _ => panic!("variant mismatch after roundtrip"),

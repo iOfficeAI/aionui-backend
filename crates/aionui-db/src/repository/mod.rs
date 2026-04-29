@@ -27,9 +27,7 @@ mod sqlite_user;
 pub mod team;
 mod user;
 
-pub use acp_session::{
-    CreateAcpSessionParams, IAcpSessionRepository, PersistedSessionState, SaveRuntimeStateParams,
-};
+pub use acp_session::{CreateAcpSessionParams, IAcpSessionRepository, PersistedSessionState, SaveRuntimeStateParams};
 pub use agent_metadata::IAgentMetadataRepository;
 pub use assistant::{IAssistantOverrideRepository, IAssistantRepository};
 pub use channel::IChannelRepository;

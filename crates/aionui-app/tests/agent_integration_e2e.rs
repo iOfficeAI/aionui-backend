@@ -18,9 +18,7 @@ use aionui_ai_agent::agent_manager::{AgentManagerHandle, IAgentManager};
 use aionui_ai_agent::stream_event::TextEventData;
 use aionui_ai_agent::types::{BuildTaskOptions, SendMessageData};
 use aionui_ai_agent::{AgentStreamEvent, IWorkerTaskManager};
-use aionui_common::{
-    AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, TimestampMs, now_ms,
-};
+use aionui_common::{AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, TimestampMs, now_ms};
 use async_trait::async_trait;
 
 use common::{body_json, get_with_token, json_with_token, setup_and_login};
@@ -92,20 +90,11 @@ impl IAgentManager for MockAgent {
         Ok(())
     }
 
-    fn confirm(
-        &self,
-        _msg_id: &str,
-        call_id: &str,
-        _data: Value,
-        always_allow: bool,
-    ) -> Result<(), AppError> {
+    fn confirm(&self, _msg_id: &str, call_id: &str, _data: Value, always_allow: bool) -> Result<(), AppError> {
         let mut confs = self.confirmations.lock().unwrap();
         confs.retain(|c| c.call_id != call_id);
         if always_allow {
-            self.approvals
-                .lock()
-                .unwrap()
-                .insert("test_action".to_owned(), true);
+            self.approvals.lock().unwrap().insert("test_action".to_owned(), true);
         }
         Ok(())
     }
@@ -115,12 +104,7 @@ impl IAgentManager for MockAgent {
     }
 
     fn check_approval(&self, action: &str, _command_type: Option<&str>) -> bool {
-        self.approvals
-            .lock()
-            .unwrap()
-            .get(action)
-            .copied()
-            .unwrap_or(false)
+        self.approvals.lock().unwrap().get(action).copied().unwrap_or(false)
     }
 
     fn kill(&self, _reason: Option<AgentKillReason>) -> Result<(), AppError> {
@@ -147,10 +131,7 @@ impl MockTaskManager {
 
     fn insert(&self, conv_id: &str, workspace: &str) -> Arc<MockAgent> {
         let agent = Arc::new(MockAgent::new(conv_id, workspace));
-        self.agents
-            .lock()
-            .unwrap()
-            .insert(conv_id.to_owned(), agent.clone());
+        self.agents.lock().unwrap().insert(conv_id.to_owned(), agent.clone());
         agent
     }
 }
@@ -169,17 +150,12 @@ impl IWorkerTaskManager for MockTaskManager {
         if let Some(existing) = agents.get(conversation_id) {
             return Ok(existing.clone());
         }
-        let agent: AgentManagerHandle =
-            Arc::new(MockAgent::new(conversation_id, "/mock-workspace"));
+        let agent: AgentManagerHandle = Arc::new(MockAgent::new(conversation_id, "/mock-workspace"));
         agents.insert(conversation_id.to_owned(), agent.clone());
         Ok(agent)
     }
 
-    fn kill(
-        &self,
-        conversation_id: &str,
-        _reason: Option<AgentKillReason>,
-    ) -> Result<(), AppError> {
+    fn kill(&self, conversation_id: &str, _reason: Option<AgentKillReason>) -> Result<(), AppError> {
         self.agents.lock().unwrap().remove(conversation_id);
         Ok(())
     }
@@ -199,8 +175,7 @@ impl IWorkerTaskManager for MockTaskManager {
 
 // ── Test App builder with mock agents ───────────────────────────
 
-async fn build_app_with_mock_tasks() -> (axum::Router, aionui_app::AppServices, Arc<MockTaskManager>)
-{
+async fn build_app_with_mock_tasks() -> (axum::Router, aionui_app::AppServices, Arc<MockTaskManager>) {
     let db = aionui_db::init_database_memory().await.unwrap();
     let services = aionui_app::AppServices::from_database(db).await.unwrap();
 
@@ -211,12 +186,7 @@ async fn build_app_with_mock_tasks() -> (axum::Router, aionui_app::AppServices, 
     (router, services, mock_tm)
 }
 
-async fn create_conversation(
-    app: &mut axum::Router,
-    token: &str,
-    csrf: &str,
-    name: &str,
-) -> String {
+async fn create_conversation(app: &mut axum::Router, token: &str, csrf: &str, name: &str) -> String {
     let body = json!({
         "type": "acp",
         "name": name,
@@ -298,10 +268,7 @@ async fn list_confirmations_empty() {
     let conv_id = create_conversation(&mut app, &token, &csrf, "Confirm Test").await;
     mock_tm.insert(&conv_id, "/mock-workspace");
 
-    let req = get_with_token(
-        &format!("/api/conversations/{conv_id}/confirmations"),
-        &token,
-    );
+    let req = get_with_token(&format!("/api/conversations/{conv_id}/confirmations"), &token);
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
@@ -379,10 +346,7 @@ async fn slash_commands_with_mock_returns_empty() {
     let conv_id = create_conversation(&mut app, &token, &csrf, "Slash Mock Test").await;
     mock_tm.insert(&conv_id, "/mock-workspace");
 
-    let req = get_with_token(
-        &format!("/api/conversations/{conv_id}/slash-commands"),
-        &token,
-    );
+    let req = get_with_token(&format!("/api/conversations/{conv_id}/slash-commands"), &token);
     let resp = app.oneshot(req).await.unwrap();
     // Mock agent is not a real AcpAgentManager, so downcast fails → 500
     // OR if agent_type check prevents downcast, returns empty array
@@ -421,10 +385,7 @@ async fn openclaw_runtime_wrong_agent_type() {
     let conv_id = create_conversation(&mut app, &token, &csrf, "OpenClaw Wrong Type").await;
     mock_tm.insert(&conv_id, "/mock-workspace");
 
-    let req = get_with_token(
-        &format!("/api/conversations/{conv_id}/openclaw/runtime"),
-        &token,
-    );
+    let req = get_with_token(&format!("/api/conversations/{conv_id}/openclaw/runtime"), &token);
     let resp = app.oneshot(req).await.unwrap();
     // Mock agent is type Acp, not OpenclawGateway → 400
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);

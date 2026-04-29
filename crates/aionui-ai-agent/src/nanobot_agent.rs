@@ -2,9 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
-use aionui_common::{
-    AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, TimestampMs, now_ms,
-};
+use aionui_common::{AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, TimestampMs, now_ms};
 use serde_json::{Value, json};
 use tokio::sync::{Mutex, RwLock, broadcast};
 use tracing::{debug, error, info, warn};
@@ -45,11 +43,7 @@ pub struct NanobotAgentManager {
 
 impl NanobotAgentManager {
     /// Create a new Nanobot agent by spawning the CLI subprocess.
-    pub async fn new(
-        conversation_id: String,
-        workspace: String,
-        cli_path: PathBuf,
-    ) -> Result<Self, AppError> {
+    pub async fn new(conversation_id: String, workspace: String, cli_path: PathBuf) -> Result<Self, AppError> {
         let spawn_config = Self::build_spawn_config(cli_path, &workspace);
         let process = CliAgentProcess::spawn(spawn_config).await?;
 
@@ -217,16 +211,8 @@ impl IAgentManager for NanobotAgentManager {
     }
 
     /// Nanobot does not support confirmations.
-    fn confirm(
-        &self,
-        _msg_id: &str,
-        _call_id: &str,
-        _data: Value,
-        _always_allow: bool,
-    ) -> Result<(), AppError> {
-        Err(AppError::BadRequest(
-            "Nanobot does not support confirmations".into(),
-        ))
+    fn confirm(&self, _msg_id: &str, _call_id: &str, _data: Value, _always_allow: bool) -> Result<(), AppError> {
+        Err(AppError::BadRequest("Nanobot does not support confirmations".into()))
     }
 
     /// Nanobot has no pending confirmations.
@@ -268,8 +254,7 @@ mod tests {
 
     #[test]
     fn build_spawn_config_basic() {
-        let config =
-            NanobotAgentManager::build_spawn_config(PathBuf::from("/usr/bin/nanobot"), "/project");
+        let config = NanobotAgentManager::build_spawn_config(PathBuf::from("/usr/bin/nanobot"), "/project");
         assert_eq!(config.command.to_str().unwrap(), "/usr/bin/nanobot");
         assert_eq!(config.cwd, Some("/project".into()));
         assert!(config.args.is_empty());

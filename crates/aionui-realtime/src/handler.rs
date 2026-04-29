@@ -102,10 +102,7 @@ async fn send_close_no_token(mut socket: WebSocket) {
 
 /// Send `auth-expired` event then close with 1008.
 async fn send_auth_expired_and_close(mut socket: WebSocket) {
-    let auth_expired = WebSocketMessage::new(
-        "auth-expired",
-        json!({"message": "Token expired or invalid"}),
-    );
+    let auth_expired = WebSocketMessage::new("auth-expired", json!({"message": "Token expired or invalid"}));
     if let Ok(text) = serde_json::to_string(&auth_expired) {
         let _ = socket.send(Message::Text(text.into())).await;
     }
@@ -225,9 +222,7 @@ fn handle_subscribe_show_open(state: &WsHandlerState, conn_id: ConnectionId, dat
         .unwrap_or_default();
 
     let has_open_file = properties.iter().any(|v| v.as_str() == Some("openFile"));
-    let has_open_directory = properties
-        .iter()
-        .any(|v| v.as_str() == Some("openDirectory"));
+    let has_open_directory = properties.iter().any(|v| v.as_str() == Some("openDirectory"));
 
     let is_file_mode = has_open_file && !has_open_directory;
 

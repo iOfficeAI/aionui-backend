@@ -5,8 +5,8 @@
 use std::sync::Arc;
 
 use aionui_db::{
-    CreateProviderParams, DbError, IProviderRepository, SqliteProviderRepository,
-    UpdateProviderParams, init_database_memory,
+    CreateProviderParams, DbError, IProviderRepository, SqliteProviderRepository, UpdateProviderParams,
+    init_database_memory,
 };
 
 async fn repo() -> Arc<dyn IProviderRepository> {
@@ -208,10 +208,7 @@ async fn update_nonexistent_returns_not_found() {
         .update("nonexistent", UpdateProviderParams::default())
         .await
         .unwrap_err();
-    assert!(
-        matches!(err, DbError::NotFound(_)),
-        "expected NotFound, got: {err:?}"
-    );
+    assert!(matches!(err, DbError::NotFound(_)), "expected NotFound, got: {err:?}");
 }
 
 #[tokio::test]
@@ -249,10 +246,7 @@ async fn delete_removes_provider() {
 async fn delete_nonexistent_returns_not_found() {
     let r = repo().await;
     let err = r.delete("nonexistent").await.unwrap_err();
-    assert!(
-        matches!(err, DbError::NotFound(_)),
-        "expected NotFound, got: {err:?}"
-    );
+    assert!(matches!(err, DbError::NotFound(_)), "expected NotFound, got: {err:?}");
 }
 
 #[tokio::test]

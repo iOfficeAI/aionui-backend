@@ -10,8 +10,8 @@ use crate::constants::{WEIXIN_MAX_RETRIES, WEIXIN_RETRY_DELAY};
 use crate::error::ChannelError;
 use crate::plugin::{ChannelPlugin, PluginCallbacks};
 use crate::types::{
-    BotInfo, MessageContentType, PluginConfig, PluginStatus, PluginType, UnifiedAttachment,
-    UnifiedIncomingMessage, UnifiedMessageContent, UnifiedOutgoingMessage, UnifiedUser,
+    BotInfo, MessageContentType, PluginConfig, PluginStatus, PluginType, UnifiedAttachment, UnifiedIncomingMessage,
+    UnifiedMessageContent, UnifiedOutgoingMessage, UnifiedUser,
 };
 
 use super::api::WeixinApi;
@@ -58,11 +58,7 @@ impl WeixinPlugin {
 
 #[async_trait::async_trait]
 impl ChannelPlugin for WeixinPlugin {
-    async fn initialize(
-        &mut self,
-        config: PluginConfig,
-        callbacks: PluginCallbacks,
-    ) -> Result<(), ChannelError> {
+    async fn initialize(&mut self, config: PluginConfig, callbacks: PluginCallbacks) -> Result<(), ChannelError> {
         self.status = PluginStatus::Initializing;
 
         let bot_token = config
@@ -157,11 +153,7 @@ impl ChannelPlugin for WeixinPlugin {
         Ok(())
     }
 
-    async fn send_message(
-        &self,
-        chat_id: &str,
-        message: UnifiedOutgoingMessage,
-    ) -> Result<String, ChannelError> {
+    async fn send_message(&self, chat_id: &str, message: UnifiedOutgoingMessage) -> Result<String, ChannelError> {
         let api = self
             .api
             .as_ref()
@@ -280,10 +272,7 @@ async fn poll_loop(
 // ---------------------------------------------------------------------------
 
 /// Convert a WeChat message into a `UnifiedIncomingMessage` and forward it.
-async fn handle_message(
-    msg: &WxMessage,
-    message_tx: &tokio::sync::mpsc::Sender<UnifiedIncomingMessage>,
-) {
+async fn handle_message(msg: &WxMessage, message_tx: &tokio::sync::mpsc::Sender<UnifiedIncomingMessage>) {
     let from = match &msg.from {
         Some(u) => u,
         None => return, // system messages without a sender
@@ -318,9 +307,7 @@ async fn handle_message(
 }
 
 /// Extract content type, text, and attachments from a WeChat message.
-fn extract_content(
-    msg: &WxMessage,
-) -> (MessageContentType, String, Option<Vec<UnifiedAttachment>>) {
+fn extract_content(msg: &WxMessage) -> (MessageContentType, String, Option<Vec<UnifiedAttachment>>) {
     let msg_type = msg.msg_type.as_deref().unwrap_or("text");
 
     match msg_type {
@@ -598,9 +585,6 @@ mod tests {
     fn make_callbacks() -> PluginCallbacks {
         let (message_tx, _) = tokio::sync::mpsc::channel(16);
         let (confirm_tx, _) = tokio::sync::mpsc::channel(16);
-        PluginCallbacks {
-            message_tx,
-            confirm_tx,
-        }
+        PluginCallbacks { message_tx, confirm_tx }
     }
 }

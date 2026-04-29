@@ -4,9 +4,7 @@ pub mod team_guide;
 pub use team_guide::{TEAM_GUIDE_PROMPT_TEMPLATE, build_team_guide_prompt};
 pub mod teammate;
 
-use crate::types::{
-    MailboxMessage, MailboxMessageType, TaskStatus, TeamAgent, TeamTask, TeammateRole,
-};
+use crate::types::{MailboxMessage, MailboxMessageType, TaskStatus, TeamAgent, TeamTask, TeammateRole};
 
 pub fn build_lead_prompt(team_name: &str, members: &[TeamAgent]) -> String {
     let mut prompt = String::with_capacity(2048);
@@ -94,11 +92,7 @@ pub fn build_teammate_prompt(agent: &TeamAgent, team_name: &str) -> String {
     prompt
 }
 
-pub fn build_wake_payload(
-    agent: &TeamAgent,
-    tasks: &[TeamTask],
-    unread_messages: &[MailboxMessage],
-) -> String {
+pub fn build_wake_payload(agent: &TeamAgent, tasks: &[TeamTask], unread_messages: &[MailboxMessage]) -> String {
     let mut payload = String::with_capacity(2048);
 
     if !unread_messages.is_empty() {
@@ -139,11 +133,7 @@ pub fn build_wake_payload(
             } else {
                 task.blocked_by.join(", ")
             };
-            let short_id = if task.id.len() > 8 {
-                &task.id[..8]
-            } else {
-                &task.id
-            };
+            let short_id = if task.id.len() > 8 { &task.id[..8] } else { &task.id };
             payload.push_str(&format!(
                 "| {short_id}… | {} | {status} | {owner} | {blocked} |\n",
                 task.subject,
@@ -310,11 +300,7 @@ mod tests {
     #[test]
     fn wake_payload_with_messages() {
         let agent = make_lead();
-        let msgs = vec![make_message(
-            "w1",
-            "Task A done",
-            MailboxMessageType::Message,
-        )];
+        let msgs = vec![make_message("w1", "Task A done", MailboxMessageType::Message)];
         let payload = build_wake_payload(&agent, &[], &msgs);
 
         assert!(payload.contains("New Messages"));
@@ -337,11 +323,7 @@ mod tests {
     #[test]
     fn wake_payload_with_shutdown_request() {
         let agent = make_teammate("w1", "W");
-        let msg = make_message(
-            "lead-1",
-            "No longer needed",
-            MailboxMessageType::ShutdownRequest,
-        );
+        let msg = make_message("lead-1", "No longer needed", MailboxMessageType::ShutdownRequest);
         let payload = build_wake_payload(&agent, &[], &[msg]);
 
         assert!(payload.contains("[shutdown_request]"));
@@ -357,11 +339,7 @@ mod tests {
                 "Implement X",
                 TaskStatus::InProgress,
             ),
-            make_task(
-                "bbbbbbbb-1234-5678-9abc-def012345678",
-                "Test Y",
-                TaskStatus::Pending,
-            ),
+            make_task("bbbbbbbb-1234-5678-9abc-def012345678", "Test Y", TaskStatus::Pending),
         ];
         let payload = build_wake_payload(&agent, &tasks, &[]);
 
@@ -376,11 +354,7 @@ mod tests {
     #[test]
     fn wake_payload_with_task_dependencies() {
         let agent = make_lead();
-        let mut task = make_task(
-            "cccccccc-1234-5678-9abc-def012345678",
-            "Deploy",
-            TaskStatus::Pending,
-        );
+        let mut task = make_task("cccccccc-1234-5678-9abc-def012345678", "Deploy", TaskStatus::Pending);
         task.blocked_by = vec!["task-a".into(), "task-b".into()];
         let payload = build_wake_payload(&agent, &[task], &[]);
 

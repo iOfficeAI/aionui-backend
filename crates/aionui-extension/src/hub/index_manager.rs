@@ -71,10 +71,7 @@ impl HubIndexManager {
     /// - `index_dir`: directory containing the Hub `index.json`.
     /// - `registry`: live extension registry used to determine install status.
     pub fn new(index_dir: PathBuf, registry: ExtensionRegistry) -> Self {
-        Self {
-            index_dir,
-            registry,
-        }
+        Self { index_dir, registry }
     }
 
     /// Load the Hub index and merge install status from the registry.
@@ -123,13 +120,9 @@ impl HubIndexManager {
     }
 
     /// Merge index entries with live registry status.
-    async fn merge_with_registry_status(
-        &self,
-        entries: Vec<HubIndexEntry>,
-    ) -> Vec<HubExtensionWithStatus> {
+    async fn merge_with_registry_status(&self, entries: Vec<HubIndexEntry>) -> Vec<HubExtensionWithStatus> {
         let loaded = self.registry.get_loaded_extensions().await;
-        let installed: HashMap<String, String> =
-            loaded.into_iter().map(|s| (s.name, s.version)).collect();
+        let installed: HashMap<String, String> = loaded.into_iter().map(|s| (s.name, s.version)).collect();
 
         entries
             .into_iter()
@@ -177,10 +170,7 @@ fn load_index_from_file(path: &Path) -> Result<Vec<HubIndexEntry>, ExtensionErro
 
 /// Determine the runtime status of a Hub entry by checking whether
 /// it is loaded in the registry.
-fn resolve_status(
-    entry: &HubIndexEntry,
-    installed: &HashMap<String, String>,
-) -> HubExtensionStatus {
+fn resolve_status(entry: &HubIndexEntry, installed: &HashMap<String, String>) -> HubExtensionStatus {
     if entry.bundled {
         return HubExtensionStatus::Installed;
     }
@@ -230,10 +220,7 @@ mod tests {
             download_url: None,
         };
         let installed = HashMap::new();
-        assert_eq!(
-            resolve_status(&entry, &installed),
-            HubExtensionStatus::Installed
-        );
+        assert_eq!(resolve_status(&entry, &installed), HubExtensionStatus::Installed);
     }
 
     #[test]
@@ -250,10 +237,7 @@ mod tests {
             download_url: None,
         };
         let installed = HashMap::new();
-        assert_eq!(
-            resolve_status(&entry, &installed),
-            HubExtensionStatus::NotInstalled
-        );
+        assert_eq!(resolve_status(&entry, &installed), HubExtensionStatus::NotInstalled);
     }
 
     #[test]
@@ -270,10 +254,7 @@ mod tests {
             download_url: None,
         };
         let installed = HashMap::from([("my-ext".into(), "1.0.0".into())]);
-        assert_eq!(
-            resolve_status(&entry, &installed),
-            HubExtensionStatus::Installed
-        );
+        assert_eq!(resolve_status(&entry, &installed), HubExtensionStatus::Installed);
     }
 
     #[test]
@@ -290,10 +271,7 @@ mod tests {
             download_url: None,
         };
         let installed = HashMap::from([("my-ext".into(), "1.0.0".into())]);
-        assert_eq!(
-            resolve_status(&entry, &installed),
-            HubExtensionStatus::UpdateAvailable
-        );
+        assert_eq!(resolve_status(&entry, &installed), HubExtensionStatus::UpdateAvailable);
     }
 
     #[test]
@@ -311,10 +289,7 @@ mod tests {
         };
         let installed = HashMap::from([("my-ext".into(), "2.0.0".into())]);
         // Installed version is newer — still "installed", not "update_available".
-        assert_eq!(
-            resolve_status(&entry, &installed),
-            HubExtensionStatus::Installed
-        );
+        assert_eq!(resolve_status(&entry, &installed), HubExtensionStatus::Installed);
     }
 
     #[test]

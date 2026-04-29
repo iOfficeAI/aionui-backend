@@ -62,11 +62,7 @@ pub trait McpAgentAdapter: Send + Sync {
     /// The `name` and `transport` fields from `server` are used to configure
     /// the Agent CLI. If a server with the same name already exists in the
     /// CLI, it should be replaced.
-    async fn install_server(
-        &self,
-        name: &str,
-        transport: &McpServerTransport,
-    ) -> Result<(), McpError>;
+    async fn install_server(&self, name: &str, transport: &McpServerTransport) -> Result<(), McpError>;
 
     /// Removes an MCP server configuration from this Agent CLI by name.
     ///
@@ -115,11 +111,7 @@ mod tests {
             Ok(servers.clone())
         }
 
-        async fn install_server(
-            &self,
-            name: &str,
-            transport: &McpServerTransport,
-        ) -> Result<(), McpError> {
+        async fn install_server(&self, name: &str, transport: &McpServerTransport) -> Result<(), McpError> {
             if !self.installed {
                 return Err(McpError::AgentNotInstalled(format!("{:?}", self.source)));
             }
@@ -166,10 +158,7 @@ mod tests {
             env: HashMap::new(),
         };
 
-        adapter
-            .install_server("test-mcp", &transport)
-            .await
-            .unwrap();
+        adapter.install_server("test-mcp", &transport).await.unwrap();
 
         let detected = adapter.detect_existing().await.unwrap();
         assert_eq!(detected.len(), 1);

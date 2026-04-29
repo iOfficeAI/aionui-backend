@@ -17,9 +17,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use aionui_api_types::{
-    AgentEnvEntry, AgentHandshake, AgentMetadata, AgentSource, AgentSourceInfo, BehaviorPolicy,
-};
+use aionui_api_types::{AgentEnvEntry, AgentHandshake, AgentMetadata, AgentSource, AgentSourceInfo, BehaviorPolicy};
 use aionui_common::{AgentType, AppError};
 use aionui_db::{AgentMetadataRow, IAgentMetadataRepository, UpdateAgentHandshakeParams};
 use serde_json::Value;
@@ -67,10 +65,7 @@ impl AgentRegistry {
     fn spawn_catalog_consumer(self: Arc<Self>, mut rx: mpsc::Receiver<CatalogSyncMessage>) {
         tokio::spawn(async move {
             while let Some(msg) = rx.recv().await {
-                if let Err(err) = self
-                    .apply_handshake_inner(&msg.agent_metadata_id, &msg.handshake)
-                    .await
-                {
+                if let Err(err) = self.apply_handshake_inner(&msg.agent_metadata_id, &msg.handshake).await {
                     warn!(
                         agent_metadata_id = %msg.agent_metadata_id,
                         error = %err,
@@ -89,19 +84,13 @@ impl AgentRegistry {
     /// tests and the consumer itself.
     ///
     /// `None` fields are left untouched (partial update).
-    async fn apply_handshake_inner(
-        &self,
-        id: &str,
-        snapshot: &AgentHandshake,
-    ) -> Result<(), AppError> {
-        let agent_capabilities =
-            encode_optional(&snapshot.agent_capabilities, "agent_capabilities")?;
+    async fn apply_handshake_inner(&self, id: &str, snapshot: &AgentHandshake) -> Result<(), AppError> {
+        let agent_capabilities = encode_optional(&snapshot.agent_capabilities, "agent_capabilities")?;
         let auth_methods = encode_optional(&snapshot.auth_methods, "auth_methods")?;
         let config_options = encode_optional(&snapshot.config_options, "config_options")?;
         let available_modes = encode_optional(&snapshot.available_modes, "available_modes")?;
         let available_models = encode_optional(&snapshot.available_models, "available_models")?;
-        let available_commands =
-            encode_optional(&snapshot.available_commands, "available_commands")?;
+        let available_commands = encode_optional(&snapshot.available_commands, "available_commands")?;
 
         let params = UpdateAgentHandshakeParams {
             agent_capabilities: agent_capabilities.as_deref().map(Some),
@@ -153,10 +142,7 @@ impl AgentRegistry {
             map.insert(meta.id.clone(), meta);
         }
         *self.by_id.write().await = map;
-        debug!(
-            rows = self.by_id.read().await.len(),
-            "AgentRegistry hydrated"
-        );
+        debug!(rows = self.by_id.read().await.len(), "AgentRegistry hydrated");
         Ok(())
     }
 
@@ -167,9 +153,7 @@ impl AgentRegistry {
         for meta in guard.values_mut() {
             meta.resolved_command = probe_resolved_command(meta);
             meta.available = meta.resolved_command.is_some()
-                || (meta.enabled
-                    && meta.command.is_none()
-                    && meta.agent_source == AgentSource::Internal);
+                || (meta.enabled && meta.command.is_none() && meta.agent_source == AgentSource::Internal);
         }
     }
 
@@ -183,9 +167,7 @@ impl AgentRegistry {
             .read()
             .await
             .values()
-            .find(|m| {
-                m.backend.as_deref() == Some(vendor) && m.agent_source == AgentSource::Builtin
-            })
+            .find(|m| m.backend.as_deref() == Some(vendor) && m.agent_source == AgentSource::Builtin)
             .cloned()
     }
 
@@ -240,16 +222,13 @@ fn is_visible(meta: &AgentMetadata) -> bool {
 fn decode_row(row: AgentMetadataRow) -> Option<AgentMetadata> {
     let agent_type = parse_agent_type(&row.agent_type)?;
     let agent_source = parse_agent_source(&row.agent_source)?;
-    let agent_source_info =
-        decode_json_field(row.agent_source_info.as_deref(), "agent_source_info")
-            .unwrap_or_else(AgentSourceInfo::default);
+    let agent_source_info = decode_json_field(row.agent_source_info.as_deref(), "agent_source_info")
+        .unwrap_or_else(AgentSourceInfo::default);
     let args = decode_json_field::<Vec<String>>(row.args.as_deref(), "args").unwrap_or_default();
-    let env =
-        decode_json_field::<Vec<AgentEnvEntry>>(row.env.as_deref(), "env").unwrap_or_default();
-    let native_skills_dirs =
-        decode_json_field::<Vec<String>>(row.native_skills_dirs.as_deref(), "native_skills_dirs");
-    let behavior_policy = decode_json_field(row.behavior_policy.as_deref(), "behavior_policy")
-        .unwrap_or_else(BehaviorPolicy::default);
+    let env = decode_json_field::<Vec<AgentEnvEntry>>(row.env.as_deref(), "env").unwrap_or_default();
+    let native_skills_dirs = decode_json_field::<Vec<String>>(row.native_skills_dirs.as_deref(), "native_skills_dirs");
+    let behavior_policy =
+        decode_json_field(row.behavior_policy.as_deref(), "behavior_policy").unwrap_or_else(BehaviorPolicy::default);
 
     let handshake = AgentHandshake {
         agent_capabilities: parse_json(row.agent_capabilities.as_deref(), "agent_capabilities"),
@@ -505,9 +484,7 @@ mod tests {
             ])),
             ..Default::default()
         };
-        reg.apply_handshake_inner(&claude.id, &snapshot)
-            .await
-            .unwrap();
+        reg.apply_handshake_inner(&claude.id, &snapshot).await.unwrap();
 
         let refreshed = reg.get(&claude.id).await.unwrap();
         let methods = refreshed.handshake.auth_methods.unwrap();

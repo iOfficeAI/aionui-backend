@@ -23,9 +23,7 @@ async fn st1_openai_transcribe_success() {
     Mock::given(method("POST"))
         .and(path("/v1/audio/transcriptions"))
         .and(header("Authorization", "Bearer sk-test-key"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!({ "text": "hello world" })),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "text": "hello world" })))
         .mount(&mock_server)
         .await;
 
@@ -282,10 +280,7 @@ async fn st7b_deepgram_upstream_failure() {
 
     Mock::given(method("POST"))
         .and(path("/v1/listen"))
-        .respond_with(
-            ResponseTemplate::new(403)
-                .set_body_json(serde_json::json!({ "err_msg": "Invalid credentials" })),
-        )
+        .respond_with(ResponseTemplate::new(403).set_body_json(serde_json::json!({ "err_msg": "Invalid credentials" })))
         .mount(&mock_server)
         .await;
 
@@ -326,9 +321,7 @@ async fn st10_openai_language_hint_passed() {
 
     Mock::given(method("POST"))
         .and(path("/v1/audio/transcriptions"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!({ "text": "你好世界" })),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "text": "你好世界" })))
         .mount(&mock_server)
         .await;
 
@@ -411,10 +404,7 @@ async fn openai_with_all_optional_params() {
 
     Mock::given(method("POST"))
         .and(path("/v1/audio/transcriptions"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_json(serde_json::json!({ "text": "technical terms test" })),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "text": "technical terms test" })))
         .mount(&mock_server)
         .await;
 

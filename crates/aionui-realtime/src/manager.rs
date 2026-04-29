@@ -10,9 +10,7 @@ use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 
 use crate::broadcaster::EventBroadcaster;
-use crate::types::{
-    ClientInfo, ConnectionId, HEARTBEAT_INTERVAL, HEARTBEAT_TIMEOUT, WebSocketCloseCode, WsOutbound,
-};
+use crate::types::{ClientInfo, ConnectionId, HEARTBEAT_INTERVAL, HEARTBEAT_TIMEOUT, WebSocketCloseCode, WsOutbound};
 
 /// Validates whether a JWT token is still valid.
 /// Returns `true` if the token is valid, `false` if expired or revoked.
@@ -164,10 +162,7 @@ impl EventBroadcaster for WebSocketManager {
 }
 
 /// Single heartbeat tick: check timeouts, token validity, send pings.
-fn heartbeat_tick(
-    connections: &DashMap<ConnectionId, ClientInfo>,
-    token_validator: &TokenValidator,
-) {
+fn heartbeat_tick(connections: &DashMap<ConnectionId, ClientInfo>, token_validator: &TokenValidator) {
     let now = Instant::now();
     let mut to_remove = Vec::new();
 
@@ -189,8 +184,7 @@ fn heartbeat_tick(
         // 2. Token expiry
         if !token_validator(&client.token) {
             info!(%conn_id, "token expired, closing connection");
-            let auth_expired =
-                WebSocketMessage::new("auth-expired", json!({"message": "Token expired"}));
+            let auth_expired = WebSocketMessage::new("auth-expired", json!({"message": "Token expired"}));
             if let Ok(text) = serde_json::to_string(&auth_expired) {
                 let _ = client.tx.try_send(WsOutbound::Text(text));
             }
@@ -203,9 +197,7 @@ fn heartbeat_tick(
         }
 
         // 3. Send ping
-        let duration = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default();
+        let duration = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
         let timestamp = duration.as_secs() * 1000 + u64::from(duration.subsec_millis());
 
         let ping = WebSocketMessage::new("ping", json!({"timestamp": timestamp}));
@@ -450,10 +442,7 @@ mod tests {
         let msg = rx.try_recv().unwrap();
         assert_eq!(
             msg,
-            WsOutbound::Close(
-                WebSocketCloseCode::PolicyViolation,
-                "heartbeat timeout".into()
-            )
+            WsOutbound::Close(WebSocketCloseCode::PolicyViolation, "heartbeat timeout".into())
         );
     }
 
@@ -517,10 +506,7 @@ mod tests {
         let msg = rx.try_recv().unwrap();
         assert_eq!(
             msg,
-            WsOutbound::Close(
-                WebSocketCloseCode::PolicyViolation,
-                "heartbeat timeout".into()
-            )
+            WsOutbound::Close(WebSocketCloseCode::PolicyViolation, "heartbeat timeout".into())
         );
         // No more messages
         assert!(rx.try_recv().is_err());

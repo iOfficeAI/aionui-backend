@@ -13,9 +13,7 @@ use std::sync::Arc;
 
 use aionui_common::now_ms;
 use aionui_db::models::CronJobRow;
-use aionui_db::{
-    DbError, ICronRepository, SqliteCronRepository, UpdateCronJobParams, init_database_memory,
-};
+use aionui_db::{DbError, ICronRepository, SqliteCronRepository, UpdateCronJobParams, init_database_memory};
 
 async fn repo() -> (Arc<dyn ICronRepository>, aionui_db::Database) {
     let db = init_database_memory().await.unwrap();
@@ -382,9 +380,7 @@ async fn update_error_state() {
 async fn insert_and_retrieve_agent_config() {
     let (r, _db) = repo().await;
     let mut job = make_job("cron_ag1");
-    job.agent_config = Some(
-        r#"{"backend":"openai","name":"GPT-4","modelId":"gpt-4","workspace":"/home/user"}"#.into(),
-    );
+    job.agent_config = Some(r#"{"backend":"openai","name":"GPT-4","modelId":"gpt-4","workspace":"/home/user"}"#.into());
     r.insert(&job).await.unwrap();
 
     let found = r.get_by_id("cron_ag1").await.unwrap().unwrap();

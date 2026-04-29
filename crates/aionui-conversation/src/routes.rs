@@ -5,12 +5,11 @@ use axum::http::StatusCode;
 use axum::routing::{get, patch, post};
 
 use aionui_api_types::{
-    ApiResponse, ApprovalCheckQuery, ApprovalCheckResponse, CloneConversationRequest,
-    ConfirmRequest, ConfirmationListResponse, ConversationArtifactListResponse,
-    ConversationArtifactResponse, ConversationListResponse, ConversationResponse,
-    CreateConversationRequest, ListConversationsQuery, ListMessagesQuery, MessageListResponse,
-    MessageSearchResponse, SearchMessagesQuery, SendMessageRequest,
-    UpdateConversationArtifactRequest, UpdateConversationRequest,
+    ApiResponse, ApprovalCheckQuery, ApprovalCheckResponse, CloneConversationRequest, ConfirmRequest,
+    ConfirmationListResponse, ConversationArtifactListResponse, ConversationArtifactResponse, ConversationListResponse,
+    ConversationResponse, CreateConversationRequest, ListConversationsQuery, ListMessagesQuery, MessageListResponse,
+    MessageSearchResponse, SearchMessagesQuery, SendMessageRequest, UpdateConversationArtifactRequest,
+    UpdateConversationRequest,
 };
 use aionui_auth::CurrentUser;
 use aionui_common::AppError;
@@ -25,10 +24,7 @@ pub fn conversation_routes(state: ConversationRouterState) -> Router {
         .route("/api/conversations", post(create).get(list))
         // Static path must come before `{id}` wildcard
         .route("/api/conversations/clone", post(clone))
-        .route(
-            "/api/conversations/{id}",
-            get(get_one).patch(update).delete(delete_one),
-        )
+        .route("/api/conversations/{id}", get(get_one).patch(update).delete(delete_one))
         .route("/api/conversations/{id}/reset", post(reset))
         .route("/api/conversations/{id}/associated", get(associated))
         .route(
@@ -36,25 +32,13 @@ pub fn conversation_routes(state: ConversationRouterState) -> Router {
             get(list_messages).post(send_message),
         )
         .route("/api/conversations/{id}/artifacts", get(list_artifacts))
-        .route(
-            "/api/conversations/{id}/artifacts/{artifactId}",
-            patch(update_artifact),
-        )
+        .route("/api/conversations/{id}/artifacts/{artifactId}", patch(update_artifact))
         .route("/api/conversations/{id}/stop", post(stop_stream))
         .route("/api/conversations/{id}/warmup", post(warmup))
         // Confirmation system
-        .route(
-            "/api/conversations/{id}/confirmations",
-            get(list_confirmations),
-        )
-        .route(
-            "/api/conversations/{id}/confirmations/{callId}/confirm",
-            post(confirm),
-        )
-        .route(
-            "/api/conversations/{id}/approvals/check",
-            get(check_approval),
-        )
+        .route("/api/conversations/{id}/confirmations", get(list_confirmations))
+        .route("/api/conversations/{id}/confirmations/{callId}/confirm", post(confirm))
+        .route("/api/conversations/{id}/approvals/check", get(check_approval))
         .route("/api/messages/search", get(search_messages))
         .with_state(state)
 }
@@ -86,10 +70,7 @@ async fn clone(
     body: Result<Json<CloneConversationRequest>, JsonRejection>,
 ) -> Result<(StatusCode, Json<ApiResponse<ConversationResponse>>), AppError> {
     let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
-    let conversation = state
-        .conversation_service
-        .clone_create(&user.id, req)
-        .await?;
+    let conversation = state.conversation_service.clone_create(&user.id, req).await?;
     Ok((StatusCode::CREATED, Json(ApiResponse::ok(conversation))))
 }
 
@@ -139,10 +120,7 @@ async fn associated(
     Extension(user): Extension<CurrentUser>,
     Path(id): Path<String>,
 ) -> Result<Json<ApiResponse<Vec<ConversationResponse>>>, AppError> {
-    let items = state
-        .conversation_service
-        .list_associated(&user.id, &id)
-        .await?;
+    let items = state.conversation_service.list_associated(&user.id, &id).await?;
     Ok(Json(ApiResponse::ok(items)))
 }
 
@@ -152,10 +130,7 @@ async fn list_messages(
     Path(id): Path<String>,
     Query(query): Query<ListMessagesQuery>,
 ) -> Result<Json<ApiResponse<MessageListResponse>>, AppError> {
-    let result = state
-        .conversation_service
-        .list_messages(&user.id, &id, query)
-        .await?;
+    let result = state.conversation_service.list_messages(&user.id, &id, query).await?;
     Ok(Json(ApiResponse::ok(result)))
 }
 
@@ -178,10 +153,7 @@ async fn list_artifacts(
     Extension(user): Extension<CurrentUser>,
     Path(id): Path<String>,
 ) -> Result<Json<ApiResponse<ConversationArtifactListResponse>>, AppError> {
-    let result = state
-        .conversation_service
-        .list_artifacts(&user.id, &id)
-        .await?;
+    let result = state.conversation_service.list_artifacts(&user.id, &id).await?;
     Ok(Json(ApiResponse::ok(result)))
 }
 
@@ -235,10 +207,7 @@ async fn search_messages(
     Extension(user): Extension<CurrentUser>,
     Query(query): Query<SearchMessagesQuery>,
 ) -> Result<Json<ApiResponse<MessageSearchResponse>>, AppError> {
-    let result = state
-        .conversation_service
-        .search_messages(&user.id, query)
-        .await?;
+    let result = state.conversation_service.search_messages(&user.id, query).await?;
     Ok(Json(ApiResponse::ok(result)))
 }
 
@@ -272,13 +241,7 @@ async fn confirm(
     let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
     state
         .conversation_service
-        .confirm(
-            &user.id,
-            &params.id,
-            &params.call_id,
-            req,
-            &state.worker_task_manager,
-        )
+        .confirm(&user.id, &params.id, &params.call_id, req, &state.worker_task_manager)
         .await?;
     Ok(Json(ApiResponse::success()))
 }

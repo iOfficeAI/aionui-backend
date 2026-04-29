@@ -115,14 +115,8 @@ mod tests {
     #[test]
     fn tool_type_serializes_lowercase() {
         assert_eq!(serde_json::to_value(ToolType::Vscode).unwrap(), "vscode");
-        assert_eq!(
-            serde_json::to_value(ToolType::Terminal).unwrap(),
-            "terminal"
-        );
-        assert_eq!(
-            serde_json::to_value(ToolType::Explorer).unwrap(),
-            "explorer"
-        );
+        assert_eq!(serde_json::to_value(ToolType::Terminal).unwrap(), "terminal");
+        assert_eq!(serde_json::to_value(ToolType::Explorer).unwrap(), "explorer");
     }
 
     #[test]
@@ -196,10 +190,7 @@ mod tests {
 
     #[test]
     fn stt_provider_serializes_lowercase() {
-        assert_eq!(
-            serde_json::to_value(SpeechToTextProvider::Openai).unwrap(),
-            "openai"
-        );
+        assert_eq!(serde_json::to_value(SpeechToTextProvider::Openai).unwrap(), "openai");
         assert_eq!(
             serde_json::to_value(SpeechToTextProvider::Deepgram).unwrap(),
             "deepgram"

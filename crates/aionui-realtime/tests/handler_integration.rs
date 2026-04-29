@@ -4,8 +4,7 @@ use std::time::Duration;
 
 use aionui_api_types::WebSocketMessage;
 use aionui_realtime::{
-    ConnectionId, MessageRouter, NoopMessageRouter, WebSocketManager, WsHandlerState,
-    ws_upgrade_handler,
+    ConnectionId, MessageRouter, NoopMessageRouter, WebSocketManager, WsHandlerState, ws_upgrade_handler,
 };
 use axum::Router;
 use axum::routing::get;
@@ -20,9 +19,7 @@ use tokio_tungstenite::tungstenite;
 
 /// Start an axum server with the WebSocket handler and return its address.
 async fn start_server(state: WsHandlerState) -> SocketAddr {
-    let app = Router::new()
-        .route("/ws", get(ws_upgrade_handler))
-        .with_state(state);
+    let app = Router::new().route("/ws", get(ws_upgrade_handler)).with_state(state);
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -57,15 +54,11 @@ async fn connect_with_token(
     token: &str,
 ) -> (
     futures_util::stream::SplitSink<
-        tokio_tungstenite::WebSocketStream<
-            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-        >,
+        tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
         tungstenite::Message,
     >,
     futures_util::stream::SplitStream<
-        tokio_tungstenite::WebSocketStream<
-            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-        >,
+        tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
     >,
 ) {
     let url = format!("ws://{addr}/ws");
@@ -75,10 +68,7 @@ async fn connect_with_token(
         .header("Connection", "Upgrade")
         .header("Upgrade", "websocket")
         .header("Sec-WebSocket-Version", "13")
-        .header(
-            "Sec-WebSocket-Key",
-            tungstenite::handshake::client::generate_key(),
-        )
+        .header("Sec-WebSocket-Key", tungstenite::handshake::client::generate_key())
         .header("Authorization", format!("Bearer {token}"))
         .body(())
         .unwrap();
@@ -301,10 +291,7 @@ async fn unicast_reaches_only_target() {
 
     // rx2 should not have received anything — check with short timeout
     let timeout_result = tokio::time::timeout(Duration::from_millis(200), rx2.next()).await;
-    assert!(
-        timeout_result.is_err(),
-        "rx2 should not receive the unicast"
-    );
+    assert!(timeout_result.is_err(), "rx2 should not receive the unicast");
 }
 
 #[tokio::test]
@@ -336,10 +323,7 @@ async fn pong_message_does_not_generate_response() {
 
     // pong should not generate any response
     let timeout_result = tokio::time::timeout(Duration::from_millis(200), rx.next()).await;
-    assert!(
-        timeout_result.is_err(),
-        "pong should not generate a response"
-    );
+    assert!(timeout_result.is_err(), "pong should not generate a response");
 }
 
 #[tokio::test]
@@ -391,9 +375,9 @@ async fn multiple_concurrent_connections() {
     let mut handles = Vec::new();
     for _ in 0..10 {
         let addr = addr;
-        handles.push(tokio::spawn(async move {
-            connect_with_token(addr, "valid-token").await
-        }));
+        handles.push(tokio::spawn(
+            async move { connect_with_token(addr, "valid-token").await },
+        ));
     }
 
     let mut connections = Vec::new();

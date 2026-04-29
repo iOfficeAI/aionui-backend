@@ -30,10 +30,9 @@ async fn materialize_returns_only_listed_skill_source_paths() {
     }
     let paths = resolve_skill_paths(tmp.path(), tmp.path());
 
-    let resolved =
-        skill_service::materialize_skills_for_agent(&paths, "conv-1", &["cron".to_owned()])
-            .await
-            .unwrap();
+    let resolved = skill_service::materialize_skills_for_agent(&paths, "conv-1", &["cron".to_owned()])
+        .await
+        .unwrap();
 
     assert_eq!(resolved.len(), 1);
     assert_eq!(resolved[0].name, "cron");

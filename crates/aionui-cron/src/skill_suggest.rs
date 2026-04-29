@@ -42,19 +42,14 @@ impl SkillSuggestDetector {
     pub fn schedule_check(&self, conversation_id: String, job_id: String, workspace: String) {
         let detector = self.clone();
         tokio::spawn(async move {
-            detector
-                .check_with_retry(&conversation_id, &job_id, &workspace)
-                .await;
+            detector.check_with_retry(&conversation_id, &job_id, &workspace).await;
         });
     }
 
     async fn check_with_retry(&self, conversation_id: &str, job_id: &str, workspace: &str) {
         for delay_ms in RETRY_DELAYS_MS {
             sleep(Duration::from_millis(delay_ms)).await;
-            match self
-                .check_and_emit(conversation_id, job_id, workspace)
-                .await
-            {
+            match self.check_and_emit(conversation_id, job_id, workspace).await {
                 Ok(true) => return,
                 Ok(false) => continue,
                 Err(err) => {
@@ -69,12 +64,7 @@ impl SkillSuggestDetector {
         }
     }
 
-    async fn check_and_emit(
-        &self,
-        conversation_id: &str,
-        job_id: &str,
-        workspace: &str,
-    ) -> Result<bool, CronError> {
+    async fn check_and_emit(&self, conversation_id: &str, job_id: &str, workspace: &str) -> Result<bool, CronError> {
         if workspace.trim().is_empty() {
             return Ok(false);
         }
@@ -119,14 +109,7 @@ impl SkillSuggestDetector {
         Ok(true)
     }
 
-    async fn emit(
-        &self,
-        conversation_id: &str,
-        job_id: &str,
-        name: &str,
-        description: &str,
-        skill_content: &str,
-    ) {
+    async fn emit(&self, conversation_id: &str, job_id: &str, name: &str, description: &str, skill_content: &str) {
         self.persist_and_broadcast(conversation_id, job_id, name, description, skill_content)
             .await;
     }
@@ -139,14 +122,7 @@ impl SkillSuggestDetector {
         description: &str,
         skill_content: &str,
     ) {
-        let row = build_skill_suggest_artifact(
-            conversation_id,
-            job_id,
-            name,
-            description,
-            skill_content,
-            now_ms(),
-        );
+        let row = build_skill_suggest_artifact(conversation_id, job_id, name, description, skill_content, now_ms());
 
         let row = match self.conversation_repo.upsert_artifact(&row).await {
             Ok(row) => row,
@@ -170,10 +146,7 @@ impl SkillSuggestDetector {
             );
             return;
         }
-        debug!(
-            conversation_id,
-            job_id, "Broadcasted cron skill suggestion artifact"
-        );
+        debug!(conversation_id, job_id, "Broadcasted cron skill suggestion artifact");
     }
 
     fn last_hash(&self, job_id: &str) -> Option<String> {
@@ -235,13 +208,11 @@ mod tests {
         .unwrap();
 
         let db = init_database_memory().await.unwrap();
-        let repo: Arc<dyn IConversationRepository> =
-            Arc::new(SqliteConversationRepository::new(db.pool().clone()));
+        let repo: Arc<dyn IConversationRepository> = Arc::new(SqliteConversationRepository::new(db.pool().clone()));
         repo.create(&make_conversation("conv-1")).await.unwrap();
 
         let bus = Arc::new(BroadcastEventBus::new(16));
-        let detector =
-            SkillSuggestDetector::new(bus.clone(), repo.clone(), temp.path().to_path_buf());
+        let detector = SkillSuggestDetector::new(bus.clone(), repo.clone(), temp.path().to_path_buf());
         let mut rx = bus.subscribe();
 
         let emitted = detector
@@ -277,8 +248,7 @@ mod tests {
         .unwrap();
 
         let db = init_database_memory().await.unwrap();
-        let repo: Arc<dyn IConversationRepository> =
-            Arc::new(SqliteConversationRepository::new(db.pool().clone()));
+        let repo: Arc<dyn IConversationRepository> = Arc::new(SqliteConversationRepository::new(db.pool().clone()));
         repo.create(&make_conversation("conv-1")).await.unwrap();
         repo.create(&make_conversation("conv-2")).await.unwrap();
 
@@ -324,8 +294,7 @@ mod tests {
         .unwrap();
 
         let db = init_database_memory().await.unwrap();
-        let repo: Arc<dyn IConversationRepository> =
-            Arc::new(SqliteConversationRepository::new(db.pool().clone()));
+        let repo: Arc<dyn IConversationRepository> = Arc::new(SqliteConversationRepository::new(db.pool().clone()));
         repo.create(&make_conversation("conv-1")).await.unwrap();
 
         let bus = Arc::new(BroadcastEventBus::new(16));

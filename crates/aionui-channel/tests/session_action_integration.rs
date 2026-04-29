@@ -47,20 +47,15 @@ async fn setup() -> (
     Arc<dyn IChannelRepository>,
 ) {
     let db = init_database_memory().await.unwrap();
-    let repo: Arc<dyn IChannelRepository> =
-        Arc::new(SqliteChannelRepository::new(db.pool().clone()));
+    let repo: Arc<dyn IChannelRepository> = Arc::new(SqliteChannelRepository::new(db.pool().clone()));
     let bc: Arc<dyn EventBroadcaster> = Arc::new(MockBroadcaster::new());
 
     let session_mgr = SessionManager::new(repo.clone());
     let pairing = PairingService::new(repo.clone(), bc);
-    let pairing_arc = Arc::new(PairingService::new(
-        repo.clone(),
-        Arc::new(MockBroadcaster::new()),
-    ));
+    let pairing_arc = Arc::new(PairingService::new(repo.clone(), Arc::new(MockBroadcaster::new())));
     let session_mgr_arc = Arc::new(SessionManager::new(repo.clone()));
-    let pref_repo: Arc<dyn aionui_db::IClientPreferenceRepository> = Arc::new(
-        aionui_db::SqliteClientPreferenceRepository::new(db.pool().clone()),
-    );
+    let pref_repo: Arc<dyn aionui_db::IClientPreferenceRepository> =
+        Arc::new(aionui_db::SqliteClientPreferenceRepository::new(db.pool().clone()));
     let settings = Arc::new(ChannelSettingsService::new(pref_repo));
     let executor = ActionExecutor::new(pairing_arc, session_mgr_arc, settings, "gemini");
 
@@ -70,11 +65,7 @@ async fn setup() -> (
 }
 
 /// Create an assistant_users record (required for FK on sessions).
-async fn create_user(
-    repo: &Arc<dyn IChannelRepository>,
-    platform_user_id: &str,
-    platform_type: &str,
-) -> String {
+async fn create_user(repo: &Arc<dyn IChannelRepository>, platform_user_id: &str, platform_type: &str) -> String {
     let user_id = generate_id();
     let row = AssistantUserRow {
         id: user_id.clone(),
@@ -419,10 +410,7 @@ async fn action_session_new_resets_existing() {
 
     // Only 1 session should exist for this user+chat in the DB
     let all = repo.get_all_sessions().await.unwrap();
-    let user_sessions: Vec<_> = all
-        .iter()
-        .filter(|s| s.chat_id.as_deref() == Some("chat1"))
-        .collect();
+    let user_sessions: Vec<_> = all.iter().filter(|s| s.chat_id.as_deref() == Some("chat1")).collect();
     assert_eq!(user_sessions.len(), 1);
 }
 
@@ -459,10 +447,7 @@ async fn action_agent_select_persists() {
         action: Some(UnifiedAction {
             action: "agent.select".into(),
             category: ActionCategory::System,
-            params: Some(std::collections::HashMap::from([(
-                "agentType".into(),
-                "acp".into(),
-            )])),
+            params: Some(std::collections::HashMap::from([("agentType".into(), "acp".into())])),
             context: ActionContext {
                 platform: PluginType::Telegram,
                 user_id: "tg_42".into(),

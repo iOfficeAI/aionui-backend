@@ -72,11 +72,7 @@ impl McpServerTransport {
                     .to_owned();
                 let args = value["args"]
                     .as_array()
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|v| v.as_str().map(String::from))
-                            .collect()
-                    })
+                    .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
                     .unwrap_or_default();
                 let env = value["env"]
                     .as_object()
@@ -104,9 +100,7 @@ impl McpServerTransport {
                 let headers = parse_headers_object(&value["headers"]);
                 Ok(Self::Http { url, headers })
             }
-            other => Err(McpError::InvalidTransport(format!(
-                "unknown transport type: {other}"
-            ))),
+            other => Err(McpError::InvalidTransport(format!("unknown transport type: {other}"))),
         }
     }
 }
@@ -138,9 +132,7 @@ impl From<McpTransport> for McpServerTransport {
 impl From<McpServerTransport> for McpTransport {
     fn from(t: McpServerTransport) -> Self {
         match t {
-            McpServerTransport::Stdio { command, args, env } => {
-                McpTransport::Stdio { command, args, env }
-            }
+            McpServerTransport::Stdio { command, args, env } => McpTransport::Stdio { command, args, env },
             McpServerTransport::Sse { url, headers } => McpTransport::Sse { url, headers },
             McpServerTransport::Http { url, headers } => McpTransport::Http { url, headers },
         }
@@ -212,8 +204,7 @@ impl McpServer {
 
         let tools = match row.tools.as_deref() {
             Some(json_str) if !json_str.is_empty() => {
-                let tool_responses: Vec<McpToolResponse> =
-                    serde_json::from_str(json_str).map_err(McpError::from)?;
+                let tool_responses: Vec<McpToolResponse> = serde_json::from_str(json_str).map_err(McpError::from)?;
                 tool_responses.into_iter().map(McpTool::from).collect()
             }
             _ => Vec::new(),
@@ -448,12 +439,7 @@ mod tests {
 
     // -- McpServer::from_row --------------------------------------------------
 
-    fn make_test_row(
-        transport_type: &str,
-        transport_config: &str,
-        tools: Option<&str>,
-        status: &str,
-    ) -> McpServerRow {
+    fn make_test_row(transport_type: &str, transport_config: &str, tools: Option<&str>, status: &str) -> McpServerRow {
         McpServerRow {
             id: "mcp_123".into(),
             name: "test-server".into(),
@@ -542,12 +528,7 @@ mod tests {
 
     #[test]
     fn from_row_invalid_tools_json_fails() {
-        let row = make_test_row(
-            "stdio",
-            r#"{"command":"node"}"#,
-            Some("not json"),
-            "disconnected",
-        );
+        let row = make_test_row("stdio", r#"{"command":"node"}"#, Some("not json"), "disconnected");
         let result = McpServer::from_row(row);
         assert!(result.is_err());
     }
@@ -613,15 +594,9 @@ mod tests {
     #[test]
     fn parse_all_statuses() {
         assert_eq!(parse_server_status("connected"), McpServerStatus::Connected);
-        assert_eq!(
-            parse_server_status("disconnected"),
-            McpServerStatus::Disconnected
-        );
+        assert_eq!(parse_server_status("disconnected"), McpServerStatus::Disconnected);
         assert_eq!(parse_server_status("error"), McpServerStatus::Error);
         assert_eq!(parse_server_status("testing"), McpServerStatus::Testing);
-        assert_eq!(
-            parse_server_status("garbage"),
-            McpServerStatus::Disconnected
-        );
+        assert_eq!(parse_server_status("garbage"), McpServerStatus::Disconnected);
     }
 }

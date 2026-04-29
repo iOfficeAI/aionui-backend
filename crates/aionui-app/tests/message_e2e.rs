@@ -20,19 +20,8 @@ fn create_conv_body(name: &str) -> serde_json::Value {
     })
 }
 
-async fn create_conversation(
-    app: &mut axum::Router,
-    token: &str,
-    csrf: &str,
-    name: &str,
-) -> String {
-    let req = common::json_with_token(
-        "POST",
-        "/api/conversations",
-        create_conv_body(name),
-        token,
-        csrf,
-    );
+async fn create_conversation(app: &mut axum::Router, token: &str, csrf: &str, name: &str) -> String {
+    let req = common::json_with_token("POST", "/api/conversations", create_conv_body(name), token, csrf);
     let resp = app.clone().oneshot(req).await.unwrap();
     let json = common::body_json(resp).await;
     json["data"]["id"].as_str().unwrap().to_owned()
@@ -62,10 +51,7 @@ async fn insert_message(
         .unwrap();
 }
 
-async fn upsert_artifact(
-    services: &aionui_app::AppServices,
-    artifact: aionui_db::ConversationArtifactRow,
-) {
+async fn upsert_artifact(services: &aionui_app::AppServices, artifact: aionui_db::ConversationArtifactRow) {
     let repo = aionui_db::SqliteConversationRepository::new(services.database.pool().clone());
     aionui_db::IConversationRepository::upsert_artifact(&repo, &artifact)
         .await
@@ -192,10 +178,7 @@ async fn t8_5_messages_conversation_not_found() {
     let (token, _csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
     let resp = app
-        .oneshot(get_with_token(
-            "/api/conversations/non-existent/messages",
-            &token,
-        ))
+        .oneshot(get_with_token("/api/conversations/non-existent/messages", &token))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
@@ -362,10 +345,7 @@ async fn t9_2_search_no_match() {
     insert_message(&services, &conv_id, "msg-1", "Hello world", 1000).await;
 
     let resp = app
-        .oneshot(get_with_token(
-            "/api/messages/search?keyword=xxxxnotexist",
-            &token,
-        ))
+        .oneshot(get_with_token("/api/messages/search?keyword=xxxxnotexist", &token))
         .await
         .unwrap();
     let json = body_json(resp).await;
@@ -588,13 +568,7 @@ async fn t2_1_send_message_conversation_not_found() {
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
     let body = json!({ "content": "Hello", "msg_id": "msg-1" });
-    let req = common::json_with_token(
-        "POST",
-        "/api/conversations/non-existent/messages",
-        body,
-        &token,
-        &csrf,
-    );
+    let req = common::json_with_token("POST", "/api/conversations/non-existent/messages", body, &token, &csrf);
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
@@ -621,13 +595,7 @@ async fn t2_2_stop_stream_conversation_not_found() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
-    let req = common::json_with_token(
-        "POST",
-        "/api/conversations/non-existent/stop",
-        json!({}),
-        &token,
-        &csrf,
-    );
+    let req = common::json_with_token("POST", "/api/conversations/non-existent/stop", json!({}), &token, &csrf);
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }

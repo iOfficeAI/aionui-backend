@@ -8,10 +8,10 @@ use tracing::{debug, warn};
 use crate::error::ChannelError;
 
 use super::types::{
-    AccessTokenRequest, AccessTokenResponse, CreateCardInstanceRequest, CreateCardInstanceResponse,
-    DeliverCardRequest, DeliverCardResponse, RegisterStreamRequest, RegisterStreamResponse,
-    RobotInfoResponse, SendRobotMessageRequest, SendRobotMessageResponse, StreamSubscription,
-    StreamingWriteRequest, StreamingWriteResponse, UpdateCardRequest, UpdateCardResponse,
+    AccessTokenRequest, AccessTokenResponse, CreateCardInstanceRequest, CreateCardInstanceResponse, DeliverCardRequest,
+    DeliverCardResponse, RegisterStreamRequest, RegisterStreamResponse, RobotInfoResponse, SendRobotMessageRequest,
+    SendRobotMessageResponse, StreamSubscription, StreamingWriteRequest, StreamingWriteResponse, UpdateCardRequest,
+    UpdateCardResponse,
 };
 
 const DINGTALK_API_BASE: &str = "https://api.dingtalk.com";
@@ -85,14 +85,10 @@ impl DingtalkApi {
             .json(&body)
             .send()
             .await
-            .map_err(|e| {
-                ChannelError::ConnectionFailed(format!("DingTalk token request failed: {e}"))
-            })?
+            .map_err(|e| ChannelError::ConnectionFailed(format!("DingTalk token request failed: {e}")))?
             .json()
             .await
-            .map_err(|e| {
-                ChannelError::ConnectionFailed(format!("DingTalk token parse failed: {e}"))
-            })?;
+            .map_err(|e| ChannelError::ConnectionFailed(format!("DingTalk token parse failed: {e}")))?;
 
         if let Some(code) = resp.errcode
             && code != 0
@@ -104,16 +100,13 @@ impl DingtalkApi {
             )));
         }
 
-        let token = resp.access_token.ok_or_else(|| {
-            ChannelError::ConnectionFailed("DingTalk token response missing token".into())
-        })?;
+        let token = resp
+            .access_token
+            .ok_or_else(|| ChannelError::ConnectionFailed("DingTalk token response missing token".into()))?;
 
         let expires_in = Duration::from_secs(resp.expire_in.unwrap_or(7200) as u64);
 
-        debug!(
-            expires_in_secs = expires_in.as_secs(),
-            "DingTalk token refreshed"
-        );
+        debug!(expires_in_secs = expires_in.as_secs(), "DingTalk token refreshed");
 
         let mut cache = self.token_cache.write().await;
         *cache = Some(TokenCache {
@@ -137,14 +130,10 @@ impl DingtalkApi {
             .json(&serde_json::json!({}))
             .send()
             .await
-            .map_err(|e| {
-                ChannelError::PlatformApi(format!("DingTalk bot info request failed: {e}"))
-            })?
+            .map_err(|e| ChannelError::PlatformApi(format!("DingTalk bot info request failed: {e}")))?
             .json()
             .await
-            .map_err(|e| {
-                ChannelError::PlatformApi(format!("DingTalk bot info parse failed: {e}"))
-            })?;
+            .map_err(|e| ChannelError::PlatformApi(format!("DingTalk bot info parse failed: {e}")))?;
 
         Ok(resp)
     }
@@ -174,16 +163,10 @@ impl DingtalkApi {
             .json(&body)
             .send()
             .await
-            .map_err(|e| {
-                ChannelError::ConnectionFailed(format!("DingTalk stream registration failed: {e}"))
-            })?
+            .map_err(|e| ChannelError::ConnectionFailed(format!("DingTalk stream registration failed: {e}")))?
             .json()
             .await
-            .map_err(|e| {
-                ChannelError::ConnectionFailed(format!(
-                    "DingTalk stream registration parse failed: {e}"
-                ))
-            })?;
+            .map_err(|e| ChannelError::ConnectionFailed(format!("DingTalk stream registration parse failed: {e}")))?;
 
         Ok(resp)
     }
@@ -203,14 +186,10 @@ impl DingtalkApi {
             .json(request)
             .send()
             .await
-            .map_err(|e| {
-                ChannelError::MessageSendFailed(format!("DingTalk create card failed: {e}"))
-            })?
+            .map_err(|e| ChannelError::MessageSendFailed(format!("DingTalk create card failed: {e}")))?
             .json()
             .await
-            .map_err(|e| {
-                ChannelError::MessageSendFailed(format!("DingTalk create card parse failed: {e}"))
-            })?;
+            .map_err(|e| ChannelError::MessageSendFailed(format!("DingTalk create card parse failed: {e}")))?;
 
         if resp.success != Some(true) {
             return Err(ChannelError::MessageSendFailed(
@@ -222,10 +201,7 @@ impl DingtalkApi {
     }
 
     /// Deliver a card instance to a chat.
-    pub async fn deliver_card(
-        &self,
-        request: &DeliverCardRequest,
-    ) -> Result<DeliverCardResponse, ChannelError> {
+    pub async fn deliver_card(&self, request: &DeliverCardRequest) -> Result<DeliverCardResponse, ChannelError> {
         let token = self.get_token().await?;
         let url = format!("{DINGTALK_API_BASE}/v1.0/card/instances/deliver");
 
@@ -236,14 +212,10 @@ impl DingtalkApi {
             .json(request)
             .send()
             .await
-            .map_err(|e| {
-                ChannelError::MessageSendFailed(format!("DingTalk deliver card failed: {e}"))
-            })?
+            .map_err(|e| ChannelError::MessageSendFailed(format!("DingTalk deliver card failed: {e}")))?
             .json()
             .await
-            .map_err(|e| {
-                ChannelError::MessageSendFailed(format!("DingTalk deliver card parse failed: {e}"))
-            })?;
+            .map_err(|e| ChannelError::MessageSendFailed(format!("DingTalk deliver card parse failed: {e}")))?;
 
         if resp.success != Some(true) {
             warn!("DingTalk deliver card returned success=false");
@@ -267,25 +239,16 @@ impl DingtalkApi {
             .json(request)
             .send()
             .await
-            .map_err(|e| {
-                ChannelError::MessageSendFailed(format!("DingTalk streaming write failed: {e}"))
-            })?
+            .map_err(|e| ChannelError::MessageSendFailed(format!("DingTalk streaming write failed: {e}")))?
             .json()
             .await
-            .map_err(|e| {
-                ChannelError::MessageSendFailed(format!(
-                    "DingTalk streaming write parse failed: {e}"
-                ))
-            })?;
+            .map_err(|e| ChannelError::MessageSendFailed(format!("DingTalk streaming write parse failed: {e}")))?;
 
         Ok(resp)
     }
 
     /// Update (finalize) an AI Card instance with new data (e.g., buttons).
-    pub async fn update_card(
-        &self,
-        request: &UpdateCardRequest,
-    ) -> Result<UpdateCardResponse, ChannelError> {
+    pub async fn update_card(&self, request: &UpdateCardRequest) -> Result<UpdateCardResponse, ChannelError> {
         let token = self.get_token().await?;
         let url = format!("{DINGTALK_API_BASE}/v1.0/card/instances");
 
@@ -296,14 +259,10 @@ impl DingtalkApi {
             .json(request)
             .send()
             .await
-            .map_err(|e| {
-                ChannelError::MessageSendFailed(format!("DingTalk update card failed: {e}"))
-            })?
+            .map_err(|e| ChannelError::MessageSendFailed(format!("DingTalk update card failed: {e}")))?
             .json()
             .await
-            .map_err(|e| {
-                ChannelError::MessageSendFailed(format!("DingTalk update card parse failed: {e}"))
-            })?;
+            .map_err(|e| ChannelError::MessageSendFailed(format!("DingTalk update card parse failed: {e}")))?;
 
         Ok(resp)
     }
@@ -323,14 +282,10 @@ impl DingtalkApi {
             .json(request)
             .send()
             .await
-            .map_err(|e| {
-                ChannelError::MessageSendFailed(format!("DingTalk robot message send failed: {e}"))
-            })?
+            .map_err(|e| ChannelError::MessageSendFailed(format!("DingTalk robot message send failed: {e}")))?
             .json()
             .await
-            .map_err(|e| {
-                ChannelError::MessageSendFailed(format!("DingTalk robot message parse failed: {e}"))
-            })?;
+            .map_err(|e| ChannelError::MessageSendFailed(format!("DingTalk robot message parse failed: {e}")))?;
 
         Ok(resp)
     }

@@ -64,30 +64,21 @@ impl AssistantRuleDispatcher for FakeDispatcher {
         Ok(self.rule_content.get(id).cloned().unwrap_or_default())
     }
 
-    async fn write_rule(
-        &self,
-        id: &str,
-        locale: Option<&str>,
-        content: &str,
-    ) -> Result<(), AppError> {
+    async fn write_rule(&self, id: &str, locale: Option<&str>, content: &str) -> Result<(), AppError> {
         if self.reject_writes_for.contains(id) {
-            return Err(AppError::BadRequest(
-                "Cannot write rule for built-in assistant".into(),
-            ));
+            return Err(AppError::BadRequest("Cannot write rule for built-in assistant".into()));
         }
-        self.log.lock().unwrap().rule_writes.push((
-            id.to_string(),
-            locale.map(str::to_string),
-            content.to_string(),
-        ));
+        self.log
+            .lock()
+            .unwrap()
+            .rule_writes
+            .push((id.to_string(), locale.map(str::to_string), content.to_string()));
         Ok(())
     }
 
     async fn delete_rule(&self, id: &str) -> Result<bool, AppError> {
         if self.reject_writes_for.contains(id) {
-            return Err(AppError::BadRequest(
-                "Cannot delete rule for built-in assistant".into(),
-            ));
+            return Err(AppError::BadRequest("Cannot delete rule for built-in assistant".into()));
         }
         self.log.lock().unwrap().rule_deletes.push(id.to_string());
         Ok(true)
@@ -102,22 +93,15 @@ impl AssistantRuleDispatcher for FakeDispatcher {
         Ok(self.skill_content.get(id).cloned().unwrap_or_default())
     }
 
-    async fn write_skill(
-        &self,
-        id: &str,
-        locale: Option<&str>,
-        content: &str,
-    ) -> Result<(), AppError> {
+    async fn write_skill(&self, id: &str, locale: Option<&str>, content: &str) -> Result<(), AppError> {
         if self.reject_writes_for.contains(id) {
-            return Err(AppError::BadRequest(
-                "Cannot write skill for built-in assistant".into(),
-            ));
+            return Err(AppError::BadRequest("Cannot write skill for built-in assistant".into()));
         }
-        self.log.lock().unwrap().skill_writes.push((
-            id.to_string(),
-            locale.map(str::to_string),
-            content.to_string(),
-        ));
+        self.log
+            .lock()
+            .unwrap()
+            .skill_writes
+            .push((id.to_string(), locale.map(str::to_string), content.to_string()));
         Ok(())
     }
 
@@ -374,10 +358,7 @@ async fn delete_rule_user_dispatches() {
 async fn read_skill_routes_through_dispatcher_for_builtin() {
     let dispatcher = Arc::new(FakeDispatcher {
         rule_content: Default::default(),
-        skill_content: std::collections::HashMap::from([(
-            "builtin-office".into(),
-            "skill body".into(),
-        )]),
+        skill_content: std::collections::HashMap::from([("builtin-office".into(), "skill body".into())]),
         reject_writes_for: Default::default(),
         log: Mutex::new(CallLog::default()),
     });

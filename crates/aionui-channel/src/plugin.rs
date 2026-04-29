@@ -1,7 +1,5 @@
 use crate::error::ChannelError;
-use crate::types::{
-    BotInfo, PluginConfig, PluginStatus, PluginType, UnifiedIncomingMessage, UnifiedOutgoingMessage,
-};
+use crate::types::{BotInfo, PluginConfig, PluginStatus, PluginType, UnifiedIncomingMessage, UnifiedOutgoingMessage};
 
 /// Callback channels for a channel plugin.
 ///
@@ -38,11 +36,7 @@ pub trait ChannelPlugin: Send + Sync {
     ///
     /// Should validate credentials format (but not test the connection).
     /// Transitions status: `Created → Initializing → Ready` (or `Error`).
-    async fn initialize(
-        &mut self,
-        config: PluginConfig,
-        callbacks: PluginCallbacks,
-    ) -> Result<(), ChannelError>;
+    async fn initialize(&mut self, config: PluginConfig, callbacks: PluginCallbacks) -> Result<(), ChannelError>;
 
     /// Start the platform connection (long-polling, WebSocket, etc.).
     ///
@@ -55,11 +49,7 @@ pub trait ChannelPlugin: Send + Sync {
     async fn stop(&mut self) -> Result<(), ChannelError>;
 
     /// Send a message to a specific chat. Returns the platform message ID.
-    async fn send_message(
-        &self,
-        chat_id: &str,
-        message: UnifiedOutgoingMessage,
-    ) -> Result<String, ChannelError>;
+    async fn send_message(&self, chat_id: &str, message: UnifiedOutgoingMessage) -> Result<String, ChannelError>;
 
     /// Edit an existing message on the platform.
     ///
@@ -116,11 +106,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl ChannelPlugin for MockPlugin {
-        async fn initialize(
-            &mut self,
-            config: PluginConfig,
-            _callbacks: PluginCallbacks,
-        ) -> Result<(), ChannelError> {
+        async fn initialize(&mut self, config: PluginConfig, _callbacks: PluginCallbacks) -> Result<(), ChannelError> {
             self.status = PluginStatus::Initializing;
             if config.credentials.token.is_none() {
                 self.status = PluginStatus::Error;
@@ -148,11 +134,7 @@ mod tests {
             Ok(())
         }
 
-        async fn send_message(
-            &self,
-            _chat_id: &str,
-            _message: UnifiedOutgoingMessage,
-        ) -> Result<String, ChannelError> {
+        async fn send_message(&self, _chat_id: &str, _message: UnifiedOutgoingMessage) -> Result<String, ChannelError> {
             Ok("mock_msg_id".into())
         }
 
@@ -207,10 +189,7 @@ mod tests {
     fn make_test_callbacks() -> PluginCallbacks {
         let (message_tx, _message_rx) = mpsc::channel(16);
         let (confirm_tx, _confirm_rx) = mpsc::channel(16);
-        PluginCallbacks {
-            message_tx,
-            confirm_tx,
-        }
+        PluginCallbacks { message_tx, confirm_tx }
     }
 
     fn make_test_outgoing() -> UnifiedOutgoingMessage {
@@ -236,10 +215,7 @@ mod tests {
         assert!(plugin.bot_info().is_none());
 
         let config = make_test_config(Some("bot:123"));
-        plugin
-            .initialize(config, make_test_callbacks())
-            .await
-            .unwrap();
+        plugin.initialize(config, make_test_callbacks()).await.unwrap();
         assert_eq!(plugin.status(), PluginStatus::Ready);
         assert!(plugin.bot_info().is_some());
 
@@ -264,16 +240,10 @@ mod tests {
     async fn send_message_returns_id() {
         let mut plugin = MockPlugin::new(PluginType::Telegram);
         let config = make_test_config(Some("bot:abc"));
-        plugin
-            .initialize(config, make_test_callbacks())
-            .await
-            .unwrap();
+        plugin.initialize(config, make_test_callbacks()).await.unwrap();
         plugin.start().await.unwrap();
 
-        let msg_id = plugin
-            .send_message("chat_1", make_test_outgoing())
-            .await
-            .unwrap();
+        let msg_id = plugin.send_message("chat_1", make_test_outgoing()).await.unwrap();
         assert_eq!(msg_id, "mock_msg_id");
     }
 
@@ -281,15 +251,10 @@ mod tests {
     async fn edit_message_ok() {
         let mut plugin = MockPlugin::new(PluginType::Lark);
         let config = make_test_config(Some("token:xyz"));
-        plugin
-            .initialize(config, make_test_callbacks())
-            .await
-            .unwrap();
+        plugin.initialize(config, make_test_callbacks()).await.unwrap();
         plugin.start().await.unwrap();
 
-        let result = plugin
-            .edit_message("chat_1", "msg_1", make_test_outgoing())
-            .await;
+        let result = plugin.edit_message("chat_1", "msg_1", make_test_outgoing()).await;
         assert!(result.is_ok());
     }
 
@@ -309,10 +274,7 @@ mod tests {
     async fn trait_object_dispatch() {
         let mut plugin = MockPlugin::new(PluginType::Telegram);
         let config = make_test_config(Some("bot:obj"));
-        plugin
-            .initialize(config, make_test_callbacks())
-            .await
-            .unwrap();
+        plugin.initialize(config, make_test_callbacks()).await.unwrap();
 
         // Verify the plugin can be used as a trait object
         let plugin_ref: &dyn ChannelPlugin = &plugin;

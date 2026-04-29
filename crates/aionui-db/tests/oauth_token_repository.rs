@@ -6,8 +6,7 @@
 use std::sync::Arc;
 
 use aionui_db::{
-    DbError, IOAuthTokenRepository, SqliteOAuthTokenRepository, UpsertOAuthTokenParams,
-    init_database_memory,
+    DbError, IOAuthTokenRepository, SqliteOAuthTokenRepository, UpsertOAuthTokenParams, init_database_memory,
 };
 
 async fn repo() -> (Arc<dyn IOAuthTokenRepository>, aionui_db::Database) {
@@ -43,19 +42,12 @@ async fn upsert_insert_then_get_returns_token() {
 
     assert_eq!(inserted.server_url, "https://mcp.example.com");
     assert_eq!(inserted.access_token, "enc_access_token_123");
-    assert_eq!(
-        inserted.refresh_token.as_deref(),
-        Some("enc_refresh_token_456")
-    );
+    assert_eq!(inserted.refresh_token.as_deref(), Some("enc_refresh_token_456"));
     assert_eq!(inserted.token_type, "bearer");
     assert_eq!(inserted.expires_at, Some(1700000000000));
     assert!(inserted.created_at > 0);
 
-    let found = r
-        .get_by_url("https://mcp.example.com")
-        .await
-        .unwrap()
-        .unwrap();
+    let found = r.get_by_url("https://mcp.example.com").await.unwrap().unwrap();
     assert_eq!(found.access_token, "enc_access_token_123");
 }
 
@@ -113,12 +105,7 @@ async fn delete_existing_token() {
     r.upsert(sample_params()).await.unwrap();
 
     r.delete("https://mcp.example.com").await.unwrap();
-    assert!(
-        r.get_by_url("https://mcp.example.com")
-            .await
-            .unwrap()
-            .is_none()
-    );
+    assert!(r.get_by_url("https://mcp.example.com").await.unwrap().is_none());
 }
 
 // -- OA-7: Delete idempotency (returns NotFound for nonexistent) --
@@ -190,12 +177,7 @@ async fn full_oauth_lifecycle() {
 
     // Initially no tokens
     assert!(r.list_authenticated_urls().await.unwrap().is_empty());
-    assert!(
-        r.get_by_url("https://mcp.example.com")
-            .await
-            .unwrap()
-            .is_none()
-    );
+    assert!(r.get_by_url("https://mcp.example.com").await.unwrap().is_none());
 
     // Store token
     let token = r.upsert(sample_params()).await.unwrap();

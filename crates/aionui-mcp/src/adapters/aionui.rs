@@ -54,11 +54,7 @@ impl McpAgentAdapter for AionuiAdapter {
         Ok(servers)
     }
 
-    async fn install_server(
-        &self,
-        _name: &str,
-        _transport: &McpServerTransport,
-    ) -> Result<(), McpError> {
+    async fn install_server(&self, _name: &str, _transport: &McpServerTransport) -> Result<(), McpError> {
         // No-op: DB writes are handled by McpConfigService.
         // The sync service calls install_server on all adapters, but for
         // Aionui the server is already in the DB.
@@ -105,10 +101,7 @@ mod tests {
             Ok(self.servers.iter().find(|s| s.id == id).cloned())
         }
 
-        async fn find_by_name(
-            &self,
-            name: &str,
-        ) -> Result<Option<McpServerRow>, aionui_db::DbError> {
+        async fn find_by_name(&self, name: &str) -> Result<Option<McpServerRow>, aionui_db::DbError> {
             Ok(self.servers.iter().find(|s| s.name == name).cloned())
         }
 
@@ -147,11 +140,7 @@ mod tests {
             unimplemented!("not needed for adapter tests")
         }
 
-        async fn update_tools(
-            &self,
-            _id: &str,
-            _tools: Option<&str>,
-        ) -> Result<(), aionui_db::DbError> {
+        async fn update_tools(&self, _id: &str, _tools: Option<&str>) -> Result<(), aionui_db::DbError> {
             unimplemented!("not needed for adapter tests")
         }
     }
@@ -192,11 +181,7 @@ mod tests {
     async fn detect_existing_returns_db_servers() {
         let rows = vec![
             make_row("srv-a", "stdio", r#"{"command":"npx","args":[]}"#),
-            make_row(
-                "srv-b",
-                "http",
-                r#"{"url":"https://b.com/mcp","headers":{}}"#,
-            ),
+            make_row("srv-b", "http", r#"{"url":"https://b.com/mcp","headers":{}}"#),
         ];
         let repo = Arc::new(MockRepo::new(rows));
         let adapter = AionuiAdapter::new(repo);
@@ -205,14 +190,8 @@ mod tests {
         assert_eq!(servers.len(), 2);
         assert_eq!(servers[0].name, "srv-a");
         assert_eq!(servers[1].name, "srv-b");
-        assert!(matches!(
-            servers[0].transport,
-            McpServerTransport::Stdio { .. }
-        ));
-        assert!(matches!(
-            servers[1].transport,
-            McpServerTransport::Http { .. }
-        ));
+        assert!(matches!(servers[0].transport, McpServerTransport::Stdio { .. }));
+        assert!(matches!(servers[1].transport, McpServerTransport::Http { .. }));
     }
 
     #[tokio::test]

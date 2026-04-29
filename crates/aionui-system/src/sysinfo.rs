@@ -63,10 +63,7 @@ fn resolve_log_dir() -> String {
     if cfg!(target_os = "macos")
         && let Some(home) = dirs::home_dir()
     {
-        return home
-            .join("Library/Logs/aionui")
-            .to_string_lossy()
-            .into_owned();
+        return home.join("Library/Logs/aionui").to_string_lossy().into_owned();
     }
     // Linux: XDG state dir
     if let Some(state) = dirs::state_dir() {
@@ -97,10 +94,7 @@ mod tests {
     fn test_map_platform_known() {
         let p = map_platform();
         // On CI this will be one of the known values
-        assert!(
-            ["darwin", "win32", "linux"].contains(&p),
-            "unexpected platform: {p}"
-        );
+        assert!(["darwin", "win32", "linux"].contains(&p), "unexpected platform: {p}");
     }
 
     #[test]
@@ -125,27 +119,18 @@ mod tests {
         // We cannot reliably set env in parallel tests, so just verify
         // the default path contains "aionui".
         let dir = resolve_cache_dir();
-        assert!(
-            dir.contains("aionui"),
-            "cache_dir should contain 'aionui': {dir}"
-        );
+        assert!(dir.contains("aionui"), "cache_dir should contain 'aionui': {dir}");
     }
 
     #[test]
     fn test_env_override_work_dir() {
         let dir = resolve_work_dir();
-        assert!(
-            dir.contains("aionui"),
-            "work_dir should contain 'aionui': {dir}"
-        );
+        assert!(dir.contains("aionui"), "work_dir should contain 'aionui': {dir}");
     }
 
     #[test]
     fn test_env_override_log_dir() {
         let dir = resolve_log_dir();
-        assert!(
-            dir.contains("aionui"),
-            "log_dir should contain 'aionui': {dir}"
-        );
+        assert!(dir.contains("aionui"), "log_dir should contain 'aionui': {dir}");
     }
 }

@@ -58,11 +58,7 @@ impl McpAgentAdapter for CodeBuddyAdapter {
         parse_codebuddy_config(&content)
     }
 
-    async fn install_server(
-        &self,
-        name: &str,
-        transport: &McpServerTransport,
-    ) -> Result<(), McpError> {
+    async fn install_server(&self, name: &str, transport: &McpServerTransport) -> Result<(), McpError> {
         if !self.is_installed().await? {
             return Err(McpError::AgentNotInstalled(CLI_NAME.into()));
         }
@@ -112,12 +108,7 @@ impl McpAgentAdapter for CodeBuddyAdapter {
         }
 
         for scope in REMOVE_SCOPES {
-            let (stdout, _stderr) = run_cli(
-                CLI_NAME,
-                &["mcp", "remove", "-s", scope, name],
-                MUTATE_TIMEOUT,
-            )
-            .await?;
+            let (stdout, _stderr) = run_cli(CLI_NAME, &["mcp", "remove", "-s", scope, name], MUTATE_TIMEOUT).await?;
             let lower = stdout.to_lowercase();
             if lower.contains("removed") || lower.contains("not found") {
                 return Ok(());
@@ -130,8 +121,7 @@ impl McpAgentAdapter for CodeBuddyAdapter {
 
 /// Install via `codebuddy mcp add-json -s user <name> <json>`.
 async fn install_via_add_json(name: &str, config: &serde_json::Value) -> Result<(), McpError> {
-    let config_str =
-        serde_json::to_string(config).map_err(|e| McpError::AgentOperationFailed(e.to_string()))?;
+    let config_str = serde_json::to_string(config).map_err(|e| McpError::AgentOperationFailed(e.to_string()))?;
     run_cli(
         CLI_NAME,
         &["mcp", "add-json", "-s", "user", name, &config_str],
@@ -142,11 +132,7 @@ async fn install_via_add_json(name: &str, config: &serde_json::Value) -> Result<
 }
 
 /// Build JSON config for HTTP-like servers.
-fn build_http_json(
-    transport_type: &str,
-    url: &str,
-    headers: &HashMap<String, String>,
-) -> serde_json::Value {
+fn build_http_json(transport_type: &str, url: &str, headers: &HashMap<String, String>) -> serde_json::Value {
     let mut config = serde_json::json!({
         "url": url,
         "transportType": transport_type,
@@ -159,8 +145,8 @@ fn build_http_json(
 
 /// Get the CodeBuddy config file path: `~/.codebuddy/mcp.json`.
 fn config_file_path() -> Result<std::path::PathBuf, McpError> {
-    let home = dirs::home_dir()
-        .ok_or_else(|| McpError::AgentOperationFailed("cannot determine home directory".into()))?;
+    let home =
+        dirs::home_dir().ok_or_else(|| McpError::AgentOperationFailed("cannot determine home directory".into()))?;
     Ok(home.join(".codebuddy").join("mcp.json"))
 }
 
@@ -194,11 +180,7 @@ fn parse_codebuddy_config(content: &str) -> Result<Vec<DetectedServer>, McpError
 
     for (name, entry) in servers_obj {
         // Skip disabled servers
-        if entry
-            .get("disabled")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false)
-        {
+        if entry.get("disabled").and_then(|v| v.as_bool()).unwrap_or(false) {
             continue;
         }
 
@@ -223,11 +205,7 @@ fn parse_codebuddy_entry(entry: &serde_json::Value) -> Option<McpServerTransport
         let args = entry
             .get("args")
             .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect()
-            })
+            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
             .unwrap_or_default();
         let env = parse_string_map(entry.get("env"));
         Some(McpServerTransport::Stdio { command, args, env })
@@ -390,10 +368,7 @@ mod tests {
         }"#;
         let servers = parse_codebuddy_config(config).unwrap();
         assert_eq!(servers.len(), 1);
-        assert!(matches!(
-            servers[0].transport,
-            McpServerTransport::Http { .. }
-        ));
+        assert!(matches!(servers[0].transport, McpServerTransport::Http { .. }));
     }
 
     #[test]

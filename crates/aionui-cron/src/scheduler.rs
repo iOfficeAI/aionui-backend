@@ -30,8 +30,7 @@ pub(crate) fn normalize_cron_expr(expr: &str) -> String {
 
 pub fn validate_cron_expression(expr: &str) -> Result<Schedule, CronError> {
     let normalized = normalize_cron_expr(expr);
-    Schedule::from_str(&normalized)
-        .map_err(|e| CronError::InvalidCronExpression(format!("{expr}: {e}")))
+    Schedule::from_str(&normalized).map_err(|e| CronError::InvalidCronExpression(format!("{expr}: {e}")))
 }
 
 pub fn validate_timezone(tz: &str) -> Result<chrono_tz::Tz, CronError> {
@@ -81,9 +80,7 @@ pub fn validate_schedule(schedule: &CronSchedule) -> Result<(), CronError> {
         CronSchedule::At { .. } => Ok(()),
         CronSchedule::Every { every_ms, .. } => {
             if *every_ms <= 0 {
-                return Err(CronError::InvalidSchedule(
-                    "every_ms must be positive".into(),
-                ));
+                return Err(CronError::InvalidSchedule("every_ms must be positive".into()));
             }
             Ok(())
         }
@@ -136,9 +133,7 @@ impl CronScheduler {
 
         let handle = match &schedule {
             CronSchedule::At { .. } => spawn_at_timer(job_id, next_run_at, callback),
-            CronSchedule::Every { every_ms, .. } => {
-                spawn_every_timer(job_id, next_run_at, *every_ms, callback)
-            }
+            CronSchedule::Every { every_ms, .. } => spawn_every_timer(job_id, next_run_at, *every_ms, callback),
             CronSchedule::Cron { expr, tz, .. } => {
                 spawn_cron_timer(job_id, next_run_at, expr.clone(), tz.clone(), callback)
             }
@@ -475,10 +470,7 @@ mod tests {
     #[test]
     fn normalize_cron_expr_promotes_five_field() {
         assert_eq!(normalize_cron_expr("0 9 * * *"), "0 0 9 * * *");
-        assert_eq!(
-            normalize_cron_expr("  30 14 * * MON-FRI  "),
-            "0 30 14 * * MON-FRI"
-        );
+        assert_eq!(normalize_cron_expr("  30 14 * * MON-FRI  "), "0 30 14 * * MON-FRI");
     }
 
     #[test]

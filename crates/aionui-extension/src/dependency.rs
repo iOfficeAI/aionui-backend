@@ -147,10 +147,7 @@ fn version_matches(requirement: &str, actual: &str) -> bool {
 /// `load_order` in alphabetical order so that the caller can still attempt
 /// loading them (API Spec requirement).
 fn compute_topological_order(extensions: &[LoadedExtension]) -> (Vec<String>, Vec<Vec<String>>) {
-    let known: HashSet<&str> = extensions
-        .iter()
-        .map(|e| e.manifest.name.as_str())
-        .collect();
+    let known: HashSet<&str> = extensions.iter().map(|e| e.manifest.name.as_str()).collect();
 
     // adjacency: dependency → vec of dependents
     let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
@@ -246,14 +243,7 @@ fn find_cycles(extensions: &[LoadedExtension], involved: &HashSet<&str>) -> Vec<
 
     for node in sorted_nodes {
         if !visited.contains(node) {
-            dfs_find_cycles(
-                node,
-                &adj,
-                &mut visited,
-                &mut on_stack,
-                &mut path,
-                &mut cycles,
-            );
+            dfs_find_cycles(node, &adj, &mut visited, &mut on_stack, &mut path, &mut cycles);
         }
     }
 
@@ -279,8 +269,7 @@ fn dfs_find_cycles<'a>(
             } else if on_stack.contains(next) {
                 // Extract cycle from path.
                 if let Some(start) = path.iter().position(|&n| n == next) {
-                    let mut cycle: Vec<String> =
-                        path[start..].iter().map(|s| s.to_string()).collect();
+                    let mut cycle: Vec<String> = path[start..].iter().map(|s| s.to_string()).collect();
                     cycle.push(next.to_string()); // close the cycle
                     cycles.push(cycle);
                 }
@@ -476,11 +465,7 @@ mod tests {
     #[test]
     fn sort_ignores_unknown_deps() {
         // ext-a depends on ext-missing (not in list).
-        let exts = vec![make_extension(
-            "ext-a",
-            "1.0.0",
-            &[("ext-missing", "^1.0.0")],
-        )];
+        let exts = vec![make_extension("ext-a", "1.0.0", &[("ext-missing", "^1.0.0")])];
         let order = topological_sort(&exts);
         assert_eq!(order, vec!["ext-a"]);
     }
@@ -501,11 +486,7 @@ mod tests {
 
     #[test]
     fn detect_missing_dependency() {
-        let exts = vec![make_extension(
-            "ext-a",
-            "1.0.0",
-            &[("ext-missing", "^1.0.0")],
-        )];
+        let exts = vec![make_extension("ext-a", "1.0.0", &[("ext-missing", "^1.0.0")])];
         let result = validate_dependencies(&exts);
         assert!(!result.valid);
         assert_eq!(result.issues.len(), 1);
@@ -582,10 +563,7 @@ mod tests {
 
     #[test]
     fn no_deps_all_valid() {
-        let exts = vec![
-            make_extension("x", "1.0.0", &[]),
-            make_extension("y", "2.0.0", &[]),
-        ];
+        let exts = vec![make_extension("x", "1.0.0", &[]), make_extension("y", "2.0.0", &[])];
         let result = validate_dependencies(&exts);
         assert!(result.valid);
         assert!(result.issues.is_empty());
@@ -596,11 +574,7 @@ mod tests {
     fn mixed_issues() {
         // ext-a → ext-missing (missing), ext-a → ext-b bad version, ext-c → ext-d → ext-c (cycle)
         let exts = vec![
-            make_extension(
-                "ext-a",
-                "1.0.0",
-                &[("ext-missing", "^1.0.0"), ("ext-b", "^2.0.0")],
-            ),
+            make_extension("ext-a", "1.0.0", &[("ext-missing", "^1.0.0"), ("ext-b", "^2.0.0")]),
             make_extension("ext-b", "1.0.0", &[]),
             make_extension("ext-c", "1.0.0", &[("ext-d", "^1.0.0")]),
             make_extension("ext-d", "1.0.0", &[("ext-c", "^1.0.0")]),

@@ -4,9 +4,7 @@ use crate::adapter::{DetectedServer, McpAgentAdapter};
 use crate::error::McpError;
 use crate::types::McpServerTransport;
 
-use super::cli_helpers::{
-    DETECT_TIMEOUT, MUTATE_TIMEOUT, is_cli_installed, parse_standard_list_output, run_cli,
-};
+use super::cli_helpers::{DETECT_TIMEOUT, MUTATE_TIMEOUT, is_cli_installed, parse_standard_list_output, run_cli};
 
 const CLI_NAME: &str = "gemini";
 
@@ -42,23 +40,14 @@ impl McpAgentAdapter for GeminiAdapter {
         Ok(parse_standard_list_output(&stdout))
     }
 
-    async fn install_server(
-        &self,
-        name: &str,
-        transport: &McpServerTransport,
-    ) -> Result<(), McpError> {
+    async fn install_server(&self, name: &str, transport: &McpServerTransport) -> Result<(), McpError> {
         if !self.is_installed().await? {
             return Err(McpError::AgentNotInstalled(CLI_NAME.into()));
         }
 
         match transport {
             McpServerTransport::Stdio { command, args, .. } => {
-                let mut cli_args = vec![
-                    "mcp".to_owned(),
-                    "add".to_owned(),
-                    name.to_owned(),
-                    command.clone(),
-                ];
+                let mut cli_args = vec!["mcp".to_owned(), "add".to_owned(), name.to_owned(), command.clone()];
                 cli_args.extend(args.iter().cloned());
                 cli_args.push("-s".to_owned());
                 cli_args.push("user".to_owned());
@@ -93,12 +82,7 @@ impl McpAgentAdapter for GeminiAdapter {
         }
 
         for scope in REMOVE_SCOPES {
-            let (stdout, _stderr) = run_cli(
-                CLI_NAME,
-                &["mcp", "remove", name, "-s", scope],
-                MUTATE_TIMEOUT,
-            )
-            .await?;
+            let (stdout, _stderr) = run_cli(CLI_NAME, &["mcp", "remove", name, "-s", scope], MUTATE_TIMEOUT).await?;
             let lower = stdout.to_lowercase();
             if lower.contains("removed") || lower.contains("not found") {
                 return Ok(());

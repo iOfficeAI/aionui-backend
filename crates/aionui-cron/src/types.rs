@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use aionui_api_types::{
-    CronAgentConfigDto, CronJobMetadataDto, CronJobPayloadDto, CronJobResponse, CronJobStateDto,
-    CronJobTargetDto, CronScheduleDto,
+    CronAgentConfigDto, CronJobMetadataDto, CronJobPayloadDto, CronJobResponse, CronJobStateDto, CronJobTargetDto,
+    CronScheduleDto,
 };
 use aionui_common::TimestampMs;
 use aionui_db::models::CronJobRow;
@@ -196,11 +196,7 @@ pub fn cron_job_from_row(row: CronJobRow) -> Result<CronJob, CronError> {
         .map(serde_json::from_str::<CronAgentConfig>)
         .transpose()?;
 
-    let last_status = row
-        .last_status
-        .as_deref()
-        .map(JobStatus::from_str)
-        .transpose()?;
+    let last_status = row.last_status.as_deref().map(JobStatus::from_str).transpose()?;
 
     Ok(CronJob {
         id: row.id,
@@ -245,9 +241,9 @@ fn parse_schedule(
             })
         }
         "every" => {
-            let every_ms = value.parse::<i64>().map_err(|e| {
-                CronError::InvalidSchedule(format!("invalid every_ms '{value}': {e}"))
-            })?;
+            let every_ms = value
+                .parse::<i64>()
+                .map_err(|e| CronError::InvalidSchedule(format!("invalid every_ms '{value}': {e}")))?;
             Ok(CronSchedule::Every {
                 every_ms,
                 description: description.map(String::from),
@@ -258,9 +254,7 @@ fn parse_schedule(
             tz: tz.map(String::from),
             description: description.map(String::from),
         }),
-        other => Err(CronError::InvalidSchedule(format!(
-            "unknown schedule kind: {other}"
-        ))),
+        other => Err(CronError::InvalidSchedule(format!("unknown schedule kind: {other}"))),
     }
 }
 
@@ -269,14 +263,9 @@ fn parse_schedule(
 // ---------------------------------------------------------------------------
 
 pub fn cron_job_to_row(job: &CronJob) -> Result<CronJobRow, CronError> {
-    let (schedule_kind, schedule_value, schedule_tz, schedule_description) =
-        schedule_to_row_fields(&job.schedule);
+    let (schedule_kind, schedule_value, schedule_tz, schedule_description) = schedule_to_row_fields(&job.schedule);
 
-    let agent_config_json = job
-        .agent_config
-        .as_ref()
-        .map(serde_json::to_string)
-        .transpose()?;
+    let agent_config_json = job.agent_config.as_ref().map(serde_json::to_string).transpose()?;
 
     Ok(CronJobRow {
         id: job.id.clone(),
@@ -307,35 +296,15 @@ pub fn cron_job_to_row(job: &CronJob) -> Result<CronJobRow, CronError> {
     })
 }
 
-fn schedule_to_row_fields(
-    schedule: &CronSchedule,
-) -> (String, String, Option<String>, Option<String>) {
+fn schedule_to_row_fields(schedule: &CronSchedule) -> (String, String, Option<String>, Option<String>) {
     match schedule {
-        CronSchedule::At { at_ms, description } => (
-            "at".to_owned(),
-            at_ms.to_string(),
-            None,
-            description.clone(),
-        ),
-        CronSchedule::Every {
-            every_ms,
-            description,
-        } => (
-            "every".to_owned(),
-            every_ms.to_string(),
-            None,
-            description.clone(),
-        ),
-        CronSchedule::Cron {
-            expr,
-            tz,
-            description,
-        } => (
-            "cron".to_owned(),
-            expr.clone(),
-            tz.clone(),
-            description.clone(),
-        ),
+        CronSchedule::At { at_ms, description } => ("at".to_owned(), at_ms.to_string(), None, description.clone()),
+        CronSchedule::Every { every_ms, description } => {
+            ("every".to_owned(), every_ms.to_string(), None, description.clone())
+        }
+        CronSchedule::Cron { expr, tz, description } => {
+            ("cron".to_owned(), expr.clone(), tz.clone(), description.clone())
+        }
     }
 }
 
@@ -349,18 +318,11 @@ pub fn cron_job_to_response(job: &CronJob) -> CronJobResponse {
             at_ms: *at_ms,
             description: description.clone(),
         },
-        CronSchedule::Every {
-            every_ms,
-            description,
-        } => CronScheduleDto::Every {
+        CronSchedule::Every { every_ms, description } => CronScheduleDto::Every {
             every_ms: *every_ms,
             description: description.clone(),
         },
-        CronSchedule::Cron {
-            expr,
-            tz,
-            description,
-        } => CronScheduleDto::Cron {
+        CronSchedule::Cron { expr, tz, description } => CronScheduleDto::Cron {
             expr: expr.clone(),
             tz: tz.clone(),
             description: description.clone(),
@@ -423,18 +385,11 @@ pub fn schedule_from_dto(dto: &CronScheduleDto) -> CronSchedule {
             at_ms: *at_ms,
             description: description.clone(),
         },
-        CronScheduleDto::Every {
-            every_ms,
-            description,
-        } => CronSchedule::Every {
+        CronScheduleDto::Every { every_ms, description } => CronSchedule::Every {
             every_ms: *every_ms,
             description: description.clone(),
         },
-        CronScheduleDto::Cron {
-            expr,
-            tz,
-            description,
-        } => CronSchedule::Cron {
+        CronScheduleDto::Cron { expr, tz, description } => CronSchedule::Cron {
             expr: expr.clone(),
             tz: tz.clone(),
             description: description.clone(),
@@ -454,10 +409,7 @@ mod tests {
 
     #[test]
     fn execution_mode_from_str_valid() {
-        assert_eq!(
-            ExecutionMode::from_str("existing").unwrap(),
-            ExecutionMode::Existing
-        );
+        assert_eq!(ExecutionMode::from_str("existing").unwrap(), ExecutionMode::Existing);
         assert_eq!(
             ExecutionMode::from_str("new_conversation").unwrap(),
             ExecutionMode::NewConversation
@@ -512,12 +464,7 @@ mod tests {
 
     #[test]
     fn job_status_as_str_roundtrip() {
-        for s in [
-            JobStatus::Ok,
-            JobStatus::Error,
-            JobStatus::Skipped,
-            JobStatus::Missed,
-        ] {
+        for s in [JobStatus::Ok, JobStatus::Error, JobStatus::Skipped, JobStatus::Missed] {
             assert_eq!(JobStatus::from_str(s.as_str()).unwrap(), s);
         }
     }
@@ -562,13 +509,7 @@ mod tests {
 
     #[test]
     fn parse_schedule_cron() {
-        let s = parse_schedule(
-            "cron",
-            "0 0 9 * * *",
-            Some("Asia/Shanghai"),
-            Some("daily 9am"),
-        )
-        .unwrap();
+        let s = parse_schedule("cron", "0 0 9 * * *", Some("Asia/Shanghai"), Some("daily 9am")).unwrap();
         assert_eq!(
             s,
             CronSchedule::Cron {
@@ -818,13 +759,7 @@ mod tests {
         assert_eq!(resp.id, "cron_test1");
         assert_eq!(resp.name, "Test Job");
         assert!(resp.enabled);
-        assert!(matches!(
-            resp.schedule,
-            CronScheduleDto::Every {
-                every_ms: 60000,
-                ..
-            }
-        ));
+        assert!(matches!(resp.schedule, CronScheduleDto::Every { every_ms: 60000, .. }));
         assert_eq!(resp.target.execution_mode.as_deref(), Some("existing"));
         assert_eq!(resp.metadata.conversation_id, "conv_1");
         assert_eq!(resp.metadata.agent_type, "acp");
@@ -883,10 +818,7 @@ mod tests {
             ..sample_job()
         };
         let resp = cron_job_to_response(&job);
-        assert_eq!(
-            resp.target.execution_mode.as_deref(),
-            Some("new_conversation")
-        );
+        assert_eq!(resp.target.execution_mode.as_deref(), Some("new_conversation"));
     }
 
     // -- DTO → Domain schedule ------------------------------------------------

@@ -1,8 +1,8 @@
 use std::path::Path;
 
 use aionui_api_types::{
-    CellCoord, CellRange, ConversionResultDto, ConversionTarget, DocumentConversionResponse,
-    ExcelSheetData, ExcelWorkbookData,
+    CellCoord, CellRange, ConversionResultDto, ConversionTarget, DocumentConversionResponse, ExcelSheetData,
+    ExcelWorkbookData,
 };
 use calamine::{DataType, Reader, Sheets, open_workbook_auto};
 use serde_json::Value;
@@ -93,9 +93,9 @@ impl ConversionService {
         let mut sheets = Vec::with_capacity(sheet_names.len());
 
         for name in &sheet_names {
-            let range = workbook.worksheet_range(name).map_err(|e| {
-                OfficeError::Conversion(format!("failed to read sheet '{name}': {e}"))
-            })?;
+            let range = workbook
+                .worksheet_range(name)
+                .map_err(|e| OfficeError::Conversion(format!("failed to read sheet '{name}': {e}")))?;
 
             let data = convert_range_to_2d_array(&range);
             let merges = extract_merge_regions(&mut workbook, name);
@@ -121,20 +121,15 @@ impl ConversionService {
             .args(["ppt2json", file_path])
             .output()
             .await
-            .map_err(|e| {
-                OfficeError::Conversion(format!("failed to run officecli ppt2json: {e}"))
-            })?;
+            .map_err(|e| OfficeError::Conversion(format!("failed to run officecli ppt2json: {e}")))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(OfficeError::Conversion(format!(
-                "officecli ppt2json failed: {stderr}"
-            )));
+            return Err(OfficeError::Conversion(format!("officecli ppt2json failed: {stderr}")));
         }
 
-        let json: Value = serde_json::from_slice(&output.stdout).map_err(|e| {
-            OfficeError::Conversion(format!("failed to parse officecli ppt2json output: {e}"))
-        })?;
+        let json: Value = serde_json::from_slice(&output.stdout)
+            .map_err(|e| OfficeError::Conversion(format!("failed to parse officecli ppt2json output: {e}")))?;
 
         Ok(json)
     }
@@ -143,9 +138,7 @@ impl ConversionService {
 fn validate_file_exists(file_path: &str) -> Result<(), OfficeError> {
     let path = Path::new(file_path);
     if !path.exists() {
-        return Err(OfficeError::Conversion(format!(
-            "file not found: {file_path}"
-        )));
+        return Err(OfficeError::Conversion(format!("file not found: {file_path}")));
     }
     if !path.is_file() {
         return Err(OfficeError::Conversion(format!("not a file: {file_path}")));
@@ -321,10 +314,7 @@ mod tests {
         assert!(svc.officecli_path.is_none());
 
         let svc = ConversionService::new(Some("/usr/local/bin/officecli".into()));
-        assert_eq!(
-            svc.officecli_path.as_deref(),
-            Some("/usr/local/bin/officecli")
-        );
+        assert_eq!(svc.officecli_path.as_deref(), Some("/usr/local/bin/officecli"));
     }
 
     #[tokio::test]
@@ -335,13 +325,7 @@ mod tests {
             .await
             .unwrap();
         assert!(!resp.result.success);
-        assert!(
-            resp.result
-                .error
-                .as_ref()
-                .unwrap()
-                .contains("file not found")
-        );
+        assert!(resp.result.error.as_ref().unwrap().contains("file not found"));
         assert_eq!(resp.to, "excel-json");
     }
 
@@ -353,13 +337,7 @@ mod tests {
             .await
             .unwrap();
         assert!(!resp.result.success);
-        assert!(
-            resp.result
-                .error
-                .as_ref()
-                .unwrap()
-                .contains("file not found")
-        );
+        assert!(resp.result.error.as_ref().unwrap().contains("file not found"));
         assert_eq!(resp.to, "markdown");
     }
 
@@ -371,13 +349,7 @@ mod tests {
             .await
             .unwrap();
         assert!(!resp.result.success);
-        assert!(
-            resp.result
-                .error
-                .as_ref()
-                .unwrap()
-                .contains("file not found")
-        );
+        assert!(resp.result.error.as_ref().unwrap().contains("file not found"));
         assert_eq!(resp.to, "ppt-json");
     }
 }

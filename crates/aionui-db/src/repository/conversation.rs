@@ -47,19 +47,11 @@ pub trait IConversationRepository: Send + Sync {
     ) -> Result<Option<ConversationRow>, DbError>;
 
     /// Lists conversations whose `extra.cronJobId` matches.
-    async fn list_by_cron_job(
-        &self,
-        user_id: &str,
-        cron_job_id: &str,
-    ) -> Result<Vec<ConversationRow>, DbError>;
+    async fn list_by_cron_job(&self, user_id: &str, cron_job_id: &str) -> Result<Vec<ConversationRow>, DbError>;
 
     /// Lists conversations sharing the same `extra.workspace` value.
     /// The conversation identified by `conversation_id` is excluded.
-    async fn list_associated(
-        &self,
-        user_id: &str,
-        conversation_id: &str,
-    ) -> Result<Vec<ConversationRow>, DbError>;
+    async fn list_associated(&self, user_id: &str, conversation_id: &str) -> Result<Vec<ConversationRow>, DbError>;
 
     // ── Message operations ──────────────────────────────────────────
 
@@ -99,10 +91,7 @@ pub trait IConversationRepository: Send + Sync {
     ) -> Result<PaginatedResult<MessageSearchRow>, DbError>;
 
     /// Returns persisted conversation artifacts ordered by `created_at`.
-    async fn list_artifacts(
-        &self,
-        _conversation_id: &str,
-    ) -> Result<Vec<ConversationArtifactRow>, DbError> {
+    async fn list_artifacts(&self, _conversation_id: &str) -> Result<Vec<ConversationArtifactRow>, DbError> {
         Ok(Vec::new())
     }
 
@@ -116,10 +105,7 @@ pub trait IConversationRepository: Send + Sync {
     }
 
     /// Inserts or updates a conversation artifact by primary key.
-    async fn upsert_artifact(
-        &self,
-        artifact: &ConversationArtifactRow,
-    ) -> Result<ConversationArtifactRow, DbError> {
+    async fn upsert_artifact(&self, artifact: &ConversationArtifactRow) -> Result<ConversationArtifactRow, DbError> {
         Ok(artifact.clone())
     }
 
@@ -144,19 +130,13 @@ pub trait IConversationRepository: Send + Sync {
     }
 
     /// Deletes all artifacts belonging to a conversation.
-    async fn delete_artifacts_by_conversation(
-        &self,
-        _conversation_id: &str,
-    ) -> Result<(), DbError> {
+    async fn delete_artifacts_by_conversation(&self, _conversation_id: &str) -> Result<(), DbError> {
         Ok(())
     }
 
     /// Returns legacy persisted cron trigger rows so callers can synthesize
     /// artifact cards for historical conversations created before artifact migration.
-    async fn list_legacy_cron_trigger_messages(
-        &self,
-        _conversation_id: &str,
-    ) -> Result<Vec<MessageRow>, DbError> {
+    async fn list_legacy_cron_trigger_messages(&self, _conversation_id: &str) -> Result<Vec<MessageRow>, DbError> {
         Ok(Vec::new())
     }
 }

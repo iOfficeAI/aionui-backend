@@ -25,14 +25,7 @@ async fn setup() -> (Mailbox, aionui_db::Database) {
 async fn mw1_write_text_message() {
     let (mailbox, _db) = setup().await;
     let msg = mailbox
-        .write(
-            "t1",
-            "a1",
-            "user",
-            MailboxMessageType::Message,
-            "hello",
-            None,
-        )
+        .write("t1", "a1", "user", MailboxMessageType::Message, "hello", None)
         .await
         .unwrap();
     assert_eq!(msg.msg_type, MailboxMessageType::Message);
@@ -124,14 +117,7 @@ async fn mh1_get_history_no_limit() {
     let (mailbox, _db) = setup().await;
     for i in 0..5 {
         mailbox
-            .write(
-                "t1",
-                "a1",
-                "user",
-                MailboxMessageType::Message,
-                &format!("m{i}"),
-                None,
-            )
+            .write("t1", "a1", "user", MailboxMessageType::Message, &format!("m{i}"), None)
             .await
             .unwrap();
     }
@@ -145,14 +131,7 @@ async fn mh2_get_history_with_limit() {
     let (mailbox, _db) = setup().await;
     for i in 0..10 {
         mailbox
-            .write(
-                "t1",
-                "a1",
-                "user",
-                MailboxMessageType::Message,
-                &format!("m{i}"),
-                None,
-            )
+            .write("t1", "a1", "user", MailboxMessageType::Message, &format!("m{i}"), None)
             .await
             .unwrap();
     }
@@ -209,25 +188,11 @@ async fn md2_delete_by_team_does_not_affect_other_teams() {
 async fn read_unread_scoped_to_target_agent() {
     let (mailbox, _db) = setup().await;
     mailbox
-        .write(
-            "t1",
-            "a1",
-            "user",
-            MailboxMessageType::Message,
-            "for-a1",
-            None,
-        )
+        .write("t1", "a1", "user", MailboxMessageType::Message, "for-a1", None)
         .await
         .unwrap();
     mailbox
-        .write(
-            "t1",
-            "a2",
-            "user",
-            MailboxMessageType::Message,
-            "for-a2",
-            None,
-        )
+        .write("t1", "a2", "user", MailboxMessageType::Message, "for-a2", None)
         .await
         .unwrap();
     let a1_msgs = mailbox.read_unread("t1", "a1").await.unwrap();

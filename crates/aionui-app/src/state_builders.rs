@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use aionui_ai_agent::{
-    AcpRouterState, AgentRouterState, AuxiliaryRouterState, ConnectionTestRouterState,
-    ConnectionTestService, RemoteAgentRouterState, RemoteAgentService,
+    AcpRouterState, AgentRouterState, AuxiliaryRouterState, ConnectionTestRouterState, ConnectionTestService,
+    RemoteAgentRouterState, RemoteAgentService,
 };
 use aionui_assistant::{AssistantRouterState, AssistantService, BuiltinAssistantRegistry};
 use aionui_auth::extract_token_from_ws_headers;
@@ -10,21 +10,19 @@ use aionui_channel::ChannelRouterState;
 use aionui_conversation::{ConversationRouterState, ConversationService};
 use aionui_cron::{CronEventEmitter, CronRouterState};
 use aionui_db::{
-    IAcpSessionRepository, IAgentMetadataRepository, IAssistantOverrideRepository,
-    IAssistantRepository, SqliteAcpSessionRepository, SqliteAgentMetadataRepository,
-    SqliteAssistantOverrideRepository, SqliteAssistantRepository, SqliteClientPreferenceRepository,
-    SqliteConversationRepository, SqliteProviderRepository, SqliteRemoteAgentRepository,
-    SqliteSettingsRepository,
+    IAcpSessionRepository, IAgentMetadataRepository, IAssistantOverrideRepository, IAssistantRepository,
+    SqliteAcpSessionRepository, SqliteAgentMetadataRepository, SqliteAssistantOverrideRepository,
+    SqliteAssistantRepository, SqliteClientPreferenceRepository, SqliteConversationRepository,
+    SqliteProviderRepository, SqliteRemoteAgentRepository, SqliteSettingsRepository,
 };
 use aionui_extension::{
-    AssistantRuleDispatcher, ExtensionRegistry, ExtensionRouterState, ExtensionStateStore,
-    ExternalPathsManager, HubIndexManager, HubInstaller, HubRouterState, SkillRouterState,
+    AssistantRuleDispatcher, ExtensionRegistry, ExtensionRouterState, ExtensionStateStore, ExternalPathsManager,
+    HubIndexManager, HubInstaller, HubRouterState, SkillRouterState,
 };
 use aionui_file::{FileRouterState, FileService, FileWatchService, SnapshotService};
 use aionui_mcp::{
-    AionrsAdapter, AionuiAdapter, ClaudeAdapter, CodeBuddyAdapter, CodexAdapter, GeminiAdapter,
-    McpAgentAdapter, McpConfigService, McpConnectionTestService, McpRouterState, McpSyncService,
-    OpencodeAdapter, QwenAdapter,
+    AionrsAdapter, AionuiAdapter, ClaudeAdapter, CodeBuddyAdapter, CodexAdapter, GeminiAdapter, McpAgentAdapter,
+    McpConfigService, McpConnectionTestService, McpRouterState, McpSyncService, OpencodeAdapter, QwenAdapter,
 };
 use aionui_office::{
     ConversionService, OfficeRouterState, OfficecliWatchManager, ProxyService,
@@ -33,8 +31,8 @@ use aionui_office::{
 use aionui_realtime::{NoopMessageRouter, WsHandlerState};
 use aionui_shell::ShellRouterState;
 use aionui_system::{
-    ClientPrefService, ModelFetchService, ProtocolDetectionService, ProviderService,
-    SettingsService, SystemRouterState, VersionCheckService,
+    ClientPrefService, ModelFetchService, ProtocolDetectionService, ProviderService, SettingsService,
+    SystemRouterState, VersionCheckService,
 };
 use aionui_team::{TeamRouterState, TeamSessionService};
 
@@ -53,9 +51,7 @@ pub struct ChannelOrchestratorComponents {
 }
 
 /// Build all default `ModuleStates` from application services.
-pub async fn build_module_states(
-    services: &AppServices,
-) -> (ModuleStates, ChannelOrchestratorComponents) {
+pub async fn build_module_states(services: &AppServices) -> (ModuleStates, ChannelOrchestratorComponents) {
     let (ext_state, hub_state, mut skill_state) = build_extension_states(services).await;
     let assistant = build_assistant_state(services, ext_state.registry.clone());
     let cron = build_cron_state(services);
@@ -90,11 +86,7 @@ pub async fn build_module_states(
         hub: hub_state,
         skill: skill_state,
         channel: channel_state,
-        team: build_team_state(
-            services,
-            Some(cron.cron_service.clone()),
-            backend_binary_path.clone(),
-        ),
+        team: build_team_state(services, Some(cron.cron_service.clone()), backend_binary_path.clone()),
         cron,
         office: build_office_state(services),
         shell: build_shell_state(services),
@@ -108,22 +100,12 @@ pub async fn build_module_states(
 }
 
 /// Build the default `AssistantRouterState` from application services.
-pub fn build_assistant_state(
-    services: &AppServices,
-    extension_registry: ExtensionRegistry,
-) -> AssistantRouterState {
+pub fn build_assistant_state(services: &AppServices, extension_registry: ExtensionRegistry) -> AssistantRouterState {
     let pool = services.database.pool().clone();
-    let repo: Arc<dyn IAssistantRepository> =
-        Arc::new(SqliteAssistantRepository::new(pool.clone()));
-    let override_repo: Arc<dyn IAssistantOverrideRepository> =
-        Arc::new(SqliteAssistantOverrideRepository::new(pool));
+    let repo: Arc<dyn IAssistantRepository> = Arc::new(SqliteAssistantRepository::new(pool.clone()));
+    let override_repo: Arc<dyn IAssistantOverrideRepository> = Arc::new(SqliteAssistantOverrideRepository::new(pool));
     let builtin = Arc::new(BuiltinAssistantRegistry::load());
-    let service = Arc::new(AssistantService::new(
-        repo,
-        override_repo,
-        builtin,
-        extension_registry,
-    ));
+    let service = Arc::new(AssistantService::new(repo, override_repo, builtin, extension_registry));
     AssistantRouterState { service }
 }
 
@@ -135,23 +117,12 @@ pub fn build_system_state(services: &AppServices) -> SystemRouterState {
     let http_client = reqwest::Client::new();
 
     SystemRouterState {
-        settings_service: SettingsService::new(Arc::new(SqliteSettingsRepository::new(
-            pool.clone(),
-        ))),
-        client_pref_service: ClientPrefService::new(Arc::new(
-            SqliteClientPreferenceRepository::new(pool),
-        )),
+        settings_service: SettingsService::new(Arc::new(SqliteSettingsRepository::new(pool.clone()))),
+        client_pref_service: ClientPrefService::new(Arc::new(SqliteClientPreferenceRepository::new(pool))),
         provider_service: ProviderService::new(provider_repo.clone(), encryption_key),
-        model_fetch_service: ModelFetchService::new(
-            provider_repo,
-            encryption_key,
-            http_client.clone(),
-        ),
+        model_fetch_service: ModelFetchService::new(provider_repo, encryption_key, http_client.clone()),
         protocol_detection_service: ProtocolDetectionService::new(http_client.clone()),
-        version_check_service: VersionCheckService::new(
-            http_client,
-            env!("CARGO_PKG_VERSION").to_owned(),
-        ),
+        version_check_service: VersionCheckService::new(http_client, env!("CARGO_PKG_VERSION").to_owned()),
     }
 }
 
@@ -164,13 +135,10 @@ pub fn build_conversation_state(
     let repo = Arc::new(SqliteConversationRepository::new(pool.clone()));
     let agent_metadata_repo: Arc<dyn IAgentMetadataRepository> =
         Arc::new(SqliteAgentMetadataRepository::new(pool.clone()));
-    let acp_session_repo: Arc<dyn IAcpSessionRepository> =
-        Arc::new(SqliteAcpSessionRepository::new(pool));
-    let skill_resolver = Arc::new(
-        aionui_conversation::skill_resolver::ExtensionSkillResolver::new(
-            services.skill_paths.clone(),
-        ),
-    );
+    let acp_session_repo: Arc<dyn IAcpSessionRepository> = Arc::new(SqliteAcpSessionRepository::new(pool));
+    let skill_resolver = Arc::new(aionui_conversation::skill_resolver::ExtensionSkillResolver::new(
+        services.skill_paths.clone(),
+    ));
     let conversation_service = ConversationService::new_with_workspace_root(
         repo,
         services.event_bus.clone(),
@@ -231,8 +199,7 @@ pub fn build_file_state(services: &AppServices) -> FileRouterState {
         dirs::home_dir().unwrap_or_else(std::env::temp_dir),
     ];
     let file_service = Arc::new(FileService::new(broadcaster.clone(), allowed_roots));
-    let watch_service =
-        Arc::new(FileWatchService::new(broadcaster).expect("file watch service initialization"));
+    let watch_service = Arc::new(FileWatchService::new(broadcaster).expect("file watch service initialization"));
     let snapshot_service = Arc::new(SnapshotService::new());
     FileRouterState {
         file_service,
@@ -244,8 +211,7 @@ pub fn build_file_state(services: &AppServices) -> FileRouterState {
 /// Build the default `McpRouterState` from application services.
 pub fn build_mcp_state(services: &AppServices) -> McpRouterState {
     let pool = services.database.pool().clone();
-    let repo: Arc<dyn aionui_db::IMcpServerRepository> =
-        Arc::new(aionui_db::SqliteMcpServerRepository::new(pool));
+    let repo: Arc<dyn aionui_db::IMcpServerRepository> = Arc::new(aionui_db::SqliteMcpServerRepository::new(pool));
 
     let adapters: Vec<Arc<dyn McpAgentAdapter>> = vec![
         Arc::new(ClaudeAdapter),
@@ -272,12 +238,9 @@ pub fn build_mcp_state(services: &AppServices) -> McpRouterState {
 }
 
 /// Build the default `ChannelRouterState` and orchestrator components.
-pub async fn build_channel_state(
-    services: &AppServices,
-) -> (ChannelRouterState, ChannelOrchestratorComponents) {
+pub async fn build_channel_state(services: &AppServices) -> (ChannelRouterState, ChannelOrchestratorComponents) {
     let pool = services.database.pool().clone();
-    let repo: Arc<dyn aionui_db::IChannelRepository> =
-        Arc::new(aionui_db::SqliteChannelRepository::new(pool));
+    let repo: Arc<dyn aionui_db::IChannelRepository> = Arc::new(aionui_db::SqliteChannelRepository::new(pool));
     let encryption_key = derive_encryption_key(&services.jwt_secret_raw);
 
     let (message_tx, message_rx) = tokio::sync::mpsc::channel(256);
@@ -305,8 +268,7 @@ pub async fn build_channel_state(
     let pref_pool = services.database.pool().clone();
     let pref_repo: Arc<dyn aionui_db::IClientPreferenceRepository> =
         Arc::new(SqliteClientPreferenceRepository::new(pref_pool));
-    let channel_settings =
-        Arc::new(aionui_channel::channel_settings::ChannelSettingsService::new(pref_repo));
+    let channel_settings = Arc::new(aionui_channel::channel_settings::ChannelSettingsService::new(pref_repo));
 
     // Build orchestrator dependencies
     let action_executor = Arc::new(aionui_channel::action::ActionExecutor::new(
@@ -319,15 +281,12 @@ pub async fn build_channel_state(
     let conv_repo: Arc<dyn aionui_db::IConversationRepository> = Arc::new(
         aionui_db::SqliteConversationRepository::new(services.database.pool().clone()),
     );
-    let skill_resolver = Arc::new(
-        aionui_conversation::skill_resolver::ExtensionSkillResolver::new(
-            services.skill_paths.clone(),
-        ),
+    let skill_resolver = Arc::new(aionui_conversation::skill_resolver::ExtensionSkillResolver::new(
+        services.skill_paths.clone(),
+    ));
+    let agent_metadata_repo: Arc<dyn aionui_db::IAgentMetadataRepository> = Arc::new(
+        aionui_db::SqliteAgentMetadataRepository::new(services.database.pool().clone()),
     );
-    let agent_metadata_repo: Arc<dyn aionui_db::IAgentMetadataRepository> =
-        Arc::new(aionui_db::SqliteAgentMetadataRepository::new(
-            services.database.pool().clone(),
-        ));
     let acp_session_repo: Arc<dyn aionui_db::IAcpSessionRepository> = Arc::new(
         aionui_db::SqliteAcpSessionRepository::new(services.database.pool().clone()),
     );
@@ -394,19 +353,15 @@ pub fn build_team_state(
     backend_binary_path: Arc<std::path::PathBuf>,
 ) -> TeamRouterState {
     let pool = services.database.pool().clone();
-    let team_repo: Arc<dyn aionui_db::ITeamRepository> =
-        Arc::new(aionui_db::SqliteTeamRepository::new(pool.clone()));
+    let team_repo: Arc<dyn aionui_db::ITeamRepository> = Arc::new(aionui_db::SqliteTeamRepository::new(pool.clone()));
     let conv_repo: Arc<dyn aionui_db::IConversationRepository> =
         Arc::new(SqliteConversationRepository::new(pool.clone()));
     let agent_metadata_repo: Arc<dyn IAgentMetadataRepository> =
         Arc::new(SqliteAgentMetadataRepository::new(pool.clone()));
-    let acp_session_repo: Arc<dyn IAcpSessionRepository> =
-        Arc::new(SqliteAcpSessionRepository::new(pool));
-    let skill_resolver = Arc::new(
-        aionui_conversation::skill_resolver::ExtensionSkillResolver::new(
-            services.skill_paths.clone(),
-        ),
-    );
+    let acp_session_repo: Arc<dyn IAcpSessionRepository> = Arc::new(SqliteAcpSessionRepository::new(pool));
+    let skill_resolver = Arc::new(aionui_conversation::skill_resolver::ExtensionSkillResolver::new(
+        services.skill_paths.clone(),
+    ));
     let conv_service = ConversationService::new_with_workspace_root(
         conv_repo,
         services.event_bus.clone(),
@@ -431,20 +386,16 @@ pub fn build_team_state(
 /// Build the default `CronRouterState` from application services.
 pub fn build_cron_state(services: &AppServices) -> CronRouterState {
     let pool = services.database.pool().clone();
-    let cron_repo: Arc<dyn aionui_db::ICronRepository> =
-        Arc::new(aionui_db::SqliteCronRepository::new(pool.clone()));
+    let cron_repo: Arc<dyn aionui_db::ICronRepository> = Arc::new(aionui_db::SqliteCronRepository::new(pool.clone()));
 
     let conv_repo: Arc<dyn aionui_db::IConversationRepository> =
         Arc::new(SqliteConversationRepository::new(pool.clone()));
     let agent_metadata_repo: Arc<dyn IAgentMetadataRepository> =
         Arc::new(SqliteAgentMetadataRepository::new(pool.clone()));
-    let acp_session_repo: Arc<dyn IAcpSessionRepository> =
-        Arc::new(SqliteAcpSessionRepository::new(pool));
-    let skill_resolver = Arc::new(
-        aionui_conversation::skill_resolver::ExtensionSkillResolver::new(
-            services.skill_paths.clone(),
-        ),
-    );
+    let acp_session_repo: Arc<dyn IAcpSessionRepository> = Arc::new(SqliteAcpSessionRepository::new(pool));
+    let skill_resolver = Arc::new(aionui_conversation::skill_resolver::ExtensionSkillResolver::new(
+        services.skill_paths.clone(),
+    ));
     let conv_service = ConversationService::new_with_workspace_root(
         conv_repo.clone(),
         services.event_bus.clone(),
@@ -487,11 +438,7 @@ pub fn build_cron_state(services: &AppServices) -> CronRouterState {
         std::path::PathBuf::from(&services.data_dir),
     ));
 
-    tick_service_ref
-        .0
-        .lock()
-        .unwrap()
-        .replace(cron_service.clone());
+    tick_service_ref.0.lock().unwrap().replace(cron_service.clone());
 
     CronRouterState {
         cron_service,
@@ -503,12 +450,8 @@ pub fn build_cron_state(services: &AppServices) -> CronRouterState {
 pub fn build_office_state(services: &AppServices) -> OfficeRouterState {
     let data_dir = std::path::Path::new(&services.data_dir);
 
-    let spawner: Arc<dyn aionui_office::ProcessSpawner> =
-        Arc::new(aionui_office::DefaultProcessSpawner);
-    let watch_manager = Arc::new(OfficecliWatchManager::new(
-        spawner,
-        services.event_bus.clone(),
-    ));
+    let spawner: Arc<dyn aionui_office::ProcessSpawner> = Arc::new(aionui_office::DefaultProcessSpawner);
+    let watch_manager = Arc::new(OfficecliWatchManager::new(spawner, services.event_bus.clone()));
 
     let snapshot_service = Arc::new(OfficeSnapshotService::new(data_dir));
     let star_office_detector = Arc::new(StarOfficeDetector::new(reqwest::Client::new()));
@@ -549,9 +492,7 @@ struct CronServiceTickRef(std::sync::Mutex<Option<Arc<aionui_cron::service::Cron
 pub async fn build_extension_states(
     services: &AppServices,
 ) -> (ExtensionRouterState, HubRouterState, SkillRouterState) {
-    let legacy_home_dir = dirs::home_dir()
-        .unwrap_or_else(std::env::temp_dir)
-        .join(".aionui");
+    let legacy_home_dir = dirs::home_dir().unwrap_or_else(std::env::temp_dir).join(".aionui");
 
     let skill_data_dir = std::path::PathBuf::from(&services.data_dir);
 
@@ -607,8 +548,7 @@ pub fn build_ws_state(services: &AppServices) -> WsHandlerState {
     let jwt_service = services.jwt_service.clone();
     let token_validator = Arc::new(move |token: &str| jwt_service.verify(token).is_ok());
 
-    let token_extractor =
-        Arc::new(|headers: &axum::http::HeaderMap| extract_token_from_ws_headers(headers));
+    let token_extractor = Arc::new(|headers: &axum::http::HeaderMap| extract_token_from_ws_headers(headers));
 
     WsHandlerState {
         manager: services.ws_manager.clone(),

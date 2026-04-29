@@ -79,9 +79,7 @@ fn mv9_file_reference_not_found() {
 
 #[test]
 fn non_file_reference_passes_through() {
-    let result =
-        resolve_file_reference("Just a normal system prompt", std::path::Path::new("/tmp"))
-            .unwrap();
+    let result = resolve_file_reference("Just a normal system prompt", std::path::Path::new("/tmp")).unwrap();
     assert_eq!(result, "Just a normal system prompt");
 }
 
@@ -135,8 +133,7 @@ fn path_traversal_nested_dotdot_blocked() {
     let outside = std::env::temp_dir().join("ext_it_traversal_nested_secret.txt");
     std::fs::write(&outside, "nested secret").unwrap();
 
-    let err = resolve_file_reference("@file:deep/../../ext_it_traversal_nested_secret.txt", &dir)
-        .unwrap_err();
+    let err = resolve_file_reference("@file:deep/../../ext_it_traversal_nested_secret.txt", &dir).unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("traversal") || msg.contains("Path traversal"));
 

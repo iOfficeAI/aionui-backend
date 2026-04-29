@@ -12,9 +12,7 @@ use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
 
-use aionui_auth::{
-    AuthRouterState, CookieConfig, JwtService, QrTokenStore, auth_routes, hash_password,
-};
+use aionui_auth::{AuthRouterState, CookieConfig, JwtService, QrTokenStore, auth_routes, hash_password};
 use aionui_db::{IUserRepository, SqliteUserRepository, init_database_memory};
 
 // ---------------------------------------------------------------------------
@@ -24,8 +22,7 @@ use aionui_db::{IUserRepository, SqliteUserRepository, init_database_memory};
 /// Create a test app with an in-memory database.
 async fn test_app() -> (Router, TestContext) {
     let db = init_database_memory().await.unwrap();
-    let user_repo =
-        Arc::new(SqliteUserRepository::new(db.pool().clone())) as Arc<dyn IUserRepository>;
+    let user_repo = Arc::new(SqliteUserRepository::new(db.pool().clone())) as Arc<dyn IUserRepository>;
     let jwt_service = Arc::new(JwtService::new("test_secret_for_routes".into()));
     let cookie_config = Arc::new(CookieConfig {
         secure: false,
@@ -97,11 +94,7 @@ fn get_with_token(uri: &str, token: &str) -> Request<Body> {
 
 /// Helper: perform a GET request without auth.
 fn get_anonymous(uri: &str) -> Request<Body> {
-    Request::builder()
-        .method("GET")
-        .uri(uri)
-        .body(Body::empty())
-        .unwrap()
+    Request::builder().method("GET").uri(uri).body(Body::empty()).unwrap()
 }
 
 /// Helper: extract response body as JSON.
@@ -139,12 +132,7 @@ async fn t4_1_login_success() {
     assert_eq!(resp.status(), StatusCode::OK);
 
     // Check Set-Cookie header
-    let set_cookie = resp
-        .headers()
-        .get(header::SET_COOKIE)
-        .unwrap()
-        .to_str()
-        .unwrap();
+    let set_cookie = resp.headers().get(header::SET_COOKIE).unwrap().to_str().unwrap();
     assert!(set_cookie.contains("aionui-session="));
     assert!(set_cookie.contains("HttpOnly"));
 
@@ -243,12 +231,7 @@ async fn t5_1_logout_success() {
     assert_eq!(resp.status(), StatusCode::OK);
 
     // Cookie should be cleared
-    let set_cookie = resp
-        .headers()
-        .get(header::SET_COOKIE)
-        .unwrap()
-        .to_str()
-        .unwrap();
+    let set_cookie = resp.headers().get(header::SET_COOKIE).unwrap().to_str().unwrap();
     assert!(set_cookie.contains("Max-Age=0"));
 
     let json = body_json(resp).await;
@@ -602,12 +585,7 @@ async fn t11_1_qr_login_success() {
     assert_eq!(resp.status(), StatusCode::OK);
 
     // Check Set-Cookie
-    let set_cookie = resp
-        .headers()
-        .get(header::SET_COOKIE)
-        .unwrap()
-        .to_str()
-        .unwrap();
+    let set_cookie = resp.headers().get(header::SET_COOKIE).unwrap().to_str().unwrap();
     assert!(set_cookie.contains("aionui-session="));
 
     let json = body_json(resp).await;
@@ -672,11 +650,6 @@ async fn qr_login_page_returns_html() {
     let resp = app.oneshot(req).await.unwrap();
 
     assert_eq!(resp.status(), StatusCode::OK);
-    let content_type = resp
-        .headers()
-        .get("content-type")
-        .unwrap()
-        .to_str()
-        .unwrap();
+    let content_type = resp.headers().get("content-type").unwrap().to_str().unwrap();
     assert!(content_type.contains("text/html"));
 }

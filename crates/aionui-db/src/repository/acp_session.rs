@@ -77,11 +77,7 @@ pub trait IAcpSessionRepository: Send + Sync {
 
     /// Record the CLI-assigned `session_id` after `session/new` or
     /// `session/load` succeeds. Returns `true` when the row existed.
-    async fn update_session_id(
-        &self,
-        conversation_id: &str,
-        session_id: &str,
-    ) -> Result<bool, DbError>;
+    async fn update_session_id(&self, conversation_id: &str, session_id: &str) -> Result<bool, DbError>;
 
     /// Delete the row. Called by the conversation delete hook — no DB
     /// foreign key, so this must be invoked explicitly.
@@ -91,10 +87,7 @@ pub trait IAcpSessionRepository: Send + Sync {
     /// Returns `None` when the row does not exist or the JSON lacks a
     /// `runtime` key; returns `Some(Default::default())` when the key
     /// is present but empty.
-    async fn load_runtime_state(
-        &self,
-        conversation_id: &str,
-    ) -> Result<Option<PersistedSessionState>, DbError>;
+    async fn load_runtime_state(&self, conversation_id: &str) -> Result<Option<PersistedSessionState>, DbError>;
 
     /// Merge a partial runtime update into `session_config.runtime`.
     /// Assumes the row exists (created alongside the conversation);

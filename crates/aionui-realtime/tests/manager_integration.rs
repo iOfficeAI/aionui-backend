@@ -3,8 +3,7 @@ use std::time::Duration;
 
 use aionui_api_types::WebSocketMessage;
 use aionui_realtime::{
-    ConnectionId, PER_CONNECTION_BUFFER, TokenValidator, WebSocketCloseCode, WebSocketManager,
-    WsOutbound,
+    ConnectionId, PER_CONNECTION_BUFFER, TokenValidator, WebSocketCloseCode, WebSocketManager, WsOutbound,
 };
 use serde_json::json;
 use tokio::sync::mpsc;
@@ -138,10 +137,7 @@ fn send_to_reaches_only_target_connection() {
     }
 
     let target_id = pairs[2].0;
-    mgr.send_to(
-        target_id,
-        WebSocketMessage::new("private", json!({"secret": true})),
-    );
+    mgr.send_to(target_id, WebSocketMessage::new("private", json!({"secret": true})));
 
     for (id, rx) in &mut pairs {
         if *id == target_id {
@@ -151,10 +147,7 @@ fn send_to_reaches_only_target_connection() {
                 other => panic!("expected Text, got {other:?}"),
             }
         } else {
-            assert!(
-                rx.try_recv().is_err(),
-                "non-target {id} should not receive message"
-            );
+            assert!(rx.try_recv().is_err(), "non-target {id} should not receive message");
         }
     }
 }

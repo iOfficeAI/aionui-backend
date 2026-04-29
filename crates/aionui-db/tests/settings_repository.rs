@@ -24,10 +24,7 @@ async fn get_settings_returns_none_when_no_row_exists() {
 #[tokio::test]
 async fn upsert_creates_settings_with_given_values() {
     let r = repo().await;
-    let s = r
-        .upsert_settings("zh-CN", false, true, true, false)
-        .await
-        .unwrap();
+    let s = r.upsert_settings("zh-CN", false, true, true, false).await.unwrap();
 
     assert_eq!(s.language, "zh-CN");
     assert!(!s.notification_enabled);
@@ -42,9 +39,7 @@ async fn upsert_creates_settings_with_given_values() {
 #[tokio::test]
 async fn upsert_then_get_returns_consistent_data() {
     let r = repo().await;
-    r.upsert_settings("en-US", true, false, false, true)
-        .await
-        .unwrap();
+    r.upsert_settings("en-US", true, false, false, true).await.unwrap();
 
     let s = r.get_settings().await.unwrap().unwrap();
     assert_eq!(s.language, "en-US");
@@ -59,12 +54,8 @@ async fn upsert_then_get_returns_consistent_data() {
 #[tokio::test]
 async fn upsert_overwrites_previous_settings() {
     let r = repo().await;
-    r.upsert_settings("en-US", true, false, false, false)
-        .await
-        .unwrap();
-    r.upsert_settings("ja-JP", false, true, true, true)
-        .await
-        .unwrap();
+    r.upsert_settings("en-US", true, false, false, false).await.unwrap();
+    r.upsert_settings("ja-JP", false, true, true, true).await.unwrap();
 
     let s = r.get_settings().await.unwrap().unwrap();
     assert_eq!(s.language, "ja-JP");
@@ -79,14 +70,8 @@ async fn upsert_overwrites_previous_settings() {
 #[tokio::test]
 async fn upsert_advances_updated_at() {
     let r = repo().await;
-    let first = r
-        .upsert_settings("en-US", true, false, false, false)
-        .await
-        .unwrap();
-    let second = r
-        .upsert_settings("en-US", true, false, false, false)
-        .await
-        .unwrap();
+    let first = r.upsert_settings("en-US", true, false, false, false).await.unwrap();
+    let second = r.upsert_settings("en-US", true, false, false, false).await.unwrap();
 
     assert!(second.updated_at >= first.updated_at);
 }

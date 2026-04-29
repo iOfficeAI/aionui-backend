@@ -268,10 +268,7 @@ mod tests {
     #[test]
     fn env_response_serde() {
         let resp = AcpEnvResponse {
-            env: HashMap::from([
-                ("PATH".into(), "/usr/bin".into()),
-                ("HOME".into(), "/home/user".into()),
-            ]),
+            env: HashMap::from([("PATH".into(), "/usr/bin".into()), ("HOME".into(), "/home/user".into())]),
         };
         let json = serde_json::to_value(&resp).unwrap();
         assert_eq!(json["env"]["PATH"], "/usr/bin");

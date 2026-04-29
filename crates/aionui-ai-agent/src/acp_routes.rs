@@ -6,8 +6,8 @@ use axum::extract::{Extension, Json, State};
 use axum::routing::{get, post};
 
 use aionui_api_types::{
-    AcpEnvResponse, AcpHealthCheckRequest, AcpHealthCheckResponse, ApiResponse, DetectCliRequest,
-    DetectCliResponse, ProbeModelRequest,
+    AcpEnvResponse, AcpHealthCheckRequest, AcpHealthCheckResponse, ApiResponse, DetectCliRequest, DetectCliResponse,
+    ProbeModelRequest,
 };
 use aionui_auth::CurrentUser;
 use aionui_common::AppError;

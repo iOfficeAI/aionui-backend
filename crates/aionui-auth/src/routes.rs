@@ -10,9 +10,8 @@ use axum::routing::{get, post};
 use axum::{Extension, Router};
 
 use aionui_api_types::{
-    ApiResponse, AuthStatusResponse, ChangePasswordRequest, LoginRequest, LoginResponse,
-    PublicUser, QrLoginRequest, RefreshResponse, RefreshTokenRequest, UserInfoResponse,
-    WsTokenResponse,
+    ApiResponse, AuthStatusResponse, ChangePasswordRequest, LoginRequest, LoginResponse, PublicUser, QrLoginRequest,
+    RefreshResponse, RefreshTokenRequest, UserInfoResponse, WsTokenResponse,
 };
 use aionui_common::AppError;
 use aionui_common::constants::COOKIE_MAX_AGE_DAYS;
@@ -23,8 +22,7 @@ use crate::middleware::{AuthState, CurrentUser, auth_middleware};
 use crate::password::{dummy_password_hash, hash_password, verify_password_timed};
 use crate::qr_token::QrTokenStore;
 use crate::rate_limit::{
-    RateLimiter, api_rate_limit_middleware, auth_rate_limit_middleware,
-    authenticated_action_rate_limit_middleware,
+    RateLimiter, api_rate_limit_middleware, auth_rate_limit_middleware, authenticated_action_rate_limit_middleware,
 };
 use crate::validation::validate_password;
 use crate::{CookieConfig, JwtService};
@@ -77,10 +75,7 @@ pub fn auth_routes(state: AuthRouterState) -> Router {
     // API rate limited public routes (no auth required)
     let api_public = Router::new()
         .route("/api/auth/status", get(status_handler))
-        .route_layer(from_fn_with_state(
-            api_limiter.clone(),
-            api_rate_limit_middleware,
-        ))
+        .route_layer(from_fn_with_state(api_limiter.clone(), api_rate_limit_middleware))
         .with_state(state.clone());
 
     // Authenticated routes: api limiter -> auth -> action limiter
@@ -95,10 +90,7 @@ pub fn auth_routes(state: AuthRouterState) -> Router {
             authenticated_action_rate_limit_middleware,
         ))
         .route_layer(from_fn_with_state(auth_state, auth_middleware))
-        .route_layer(from_fn_with_state(
-            api_limiter.clone(),
-            api_rate_limit_middleware,
-        ))
+        .route_layer(from_fn_with_state(api_limiter.clone(), api_rate_limit_middleware))
         .with_state(state.clone());
 
     // API + action limited routes (token in body, no auth middleware)
@@ -134,14 +126,10 @@ async fn login_handler(
 
     // Input length validation (per API spec)
     if req.username.len() > 32 {
-        return Err(AppError::BadRequest(
-            "Username must not exceed 32 characters".into(),
-        ));
+        return Err(AppError::BadRequest("Username must not exceed 32 characters".into()));
     }
     if req.password.len() > 128 {
-        return Err(AppError::BadRequest(
-            "Password must not exceed 128 characters".into(),
-        ));
+        return Err(AppError::BadRequest("Password must not exceed 128 characters".into()));
     }
 
     // Look up user; run dummy verify on miss to prevent timing attacks
@@ -164,13 +152,10 @@ async fn login_handler(
     };
 
     if !password_valid {
-        return Err(AppError::Unauthorized(
-            "Invalid username or password".into(),
-        ));
+        return Err(AppError::Unauthorized("Invalid username or password".into()));
     }
 
-    let user =
-        found_user.ok_or_else(|| AppError::Unauthorized("Invalid username or password".into()))?;
+    let user = found_user.ok_or_else(|| AppError::Unauthorized("Invalid username or password".into()))?;
 
     let token = state
         .jwt_service
@@ -198,10 +183,7 @@ async fn login_handler(
 // POST /logout
 // ---------------------------------------------------------------------------
 
-async fn logout_handler(
-    State(state): State<AuthRouterState>,
-    headers: HeaderMap,
-) -> Result<Response, AppError> {
+async fn logout_handler(State(state): State<AuthRouterState>, headers: HeaderMap) -> Result<Response, AppError> {
     if let Some(token) = extract_token_from_headers(&headers) {
         state.jwt_service.blacklist_token(&token);
     }
@@ -284,9 +266,7 @@ async fn change_password_handler(
     // Verify current password
     let valid = verify_password_timed(&req.current_password, &user.password_hash).await?;
     if !valid {
-        return Err(AppError::Unauthorized(
-            "Current password is incorrect".into(),
-        ));
+        return Err(AppError::Unauthorized("Current password is incorrect".into()));
     }
 
     // Hash new password on blocking thread
@@ -354,8 +334,7 @@ async fn ws_token_handler(
     headers: HeaderMap,
 ) -> Result<Json<WsTokenResponse>, AppError> {
     // Reuse the existing session token for WebSocket connections
-    let token = extract_token_from_headers(&headers)
-        .ok_or_else(|| AppError::Unauthorized("No token found".into()))?;
+    let token = extract_token_from_headers(&headers).ok_or_else(|| AppError::Unauthorized("No token found".into()))?;
 
     // Ensure user still exists
     state

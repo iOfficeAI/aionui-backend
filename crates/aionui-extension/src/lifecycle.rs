@@ -4,8 +4,8 @@ use tokio::process::Command;
 use tracing::{info, warn};
 
 use crate::constants::{
-    LIFECYCLE_ON_ACTIVATE_TIMEOUT_SECS, LIFECYCLE_ON_DEACTIVATE_TIMEOUT_SECS,
-    LIFECYCLE_ON_INSTALL_TIMEOUT_SECS, LIFECYCLE_ON_UNINSTALL_TIMEOUT_SECS,
+    LIFECYCLE_ON_ACTIVATE_TIMEOUT_SECS, LIFECYCLE_ON_DEACTIVATE_TIMEOUT_SECS, LIFECYCLE_ON_INSTALL_TIMEOUT_SECS,
+    LIFECYCLE_ON_UNINSTALL_TIMEOUT_SECS,
 };
 use crate::error::ExtensionError;
 use crate::types::LifecycleHooks;
@@ -90,13 +90,9 @@ pub async fn execute_hook(
         "executing lifecycle hook"
     );
 
-    let child_future = Command::new(&script)
-        .current_dir(ext_dir)
-        .kill_on_drop(true)
-        .output();
+    let child_future = Command::new(&script).current_dir(ext_dir).kill_on_drop(true).output();
 
-    let result =
-        tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), child_future).await;
+    let result = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), child_future).await;
 
     match result {
         Err(_elapsed) => {
@@ -258,13 +254,7 @@ mod tests {
     #[tokio::test]
     async fn test_execute_hook_script_not_found() {
         let dir = tempfile::tempdir().unwrap();
-        let result = execute_hook(
-            dir.path(),
-            "nonexistent.sh",
-            HookKind::OnActivate,
-            "test-ext",
-        )
-        .await;
+        let result = execute_hook(dir.path(), "nonexistent.sh", HookKind::OnActivate, "test-ext").await;
 
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -292,11 +282,7 @@ mod tests {
     async fn test_execute_hook_nonzero_exit() {
         let dir = tempfile::tempdir().unwrap();
         let script_path = dir.path().join("fail.sh");
-        std::fs::write(
-            &script_path,
-            "#!/bin/sh\necho 'something broke' >&2\nexit 1\n",
-        )
-        .unwrap();
+        std::fs::write(&script_path, "#!/bin/sh\necho 'something broke' >&2\nexit 1\n").unwrap();
 
         #[cfg(unix)]
         {
@@ -362,8 +348,7 @@ mod tests {
             std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
 
-        let result =
-            execute_hook(dir.path(), "check_cwd.sh", HookKind::OnActivate, "test-ext").await;
+        let result = execute_hook(dir.path(), "check_cwd.sh", HookKind::OnActivate, "test-ext").await;
 
         assert!(result.is_ok());
         assert!(marker.exists());

@@ -12,9 +12,9 @@ use tracing::debug;
 use crate::types::McpServerTransport;
 use protocol::{
     JsonRpcRequest, JsonRpcResponse, SseEvent, build_http_headers, build_initialize_request,
-    build_initialized_notification, build_tools_list_request, error_result, read_sse_events,
-    rpc_error_result, run_stdio_protocol, spawn_error_result, success_result, timeout_result,
-    wait_for_endpoint, wait_for_jsonrpc_response,
+    build_initialized_notification, build_tools_list_request, error_result, read_sse_events, rpc_error_result,
+    run_stdio_protocol, spawn_error_result, success_result, timeout_result, wait_for_endpoint,
+    wait_for_jsonrpc_response,
 };
 
 // ---------------------------------------------------------------------------
@@ -55,16 +55,10 @@ impl McpConnectionTestService {
     ///
     /// Dispatches to the appropriate transport handler.  Always returns
     /// a result (never errors) -- failures are encoded in the struct.
-    pub async fn test_connection(
-        &self,
-        name: &str,
-        transport: &McpServerTransport,
-    ) -> McpConnectionTestResult {
+    pub async fn test_connection(&self, name: &str, transport: &McpServerTransport) -> McpConnectionTestResult {
         debug!(name, ?transport, "starting MCP connection test");
         match transport {
-            McpServerTransport::Stdio { command, args, env } => {
-                self.test_stdio(command, args, env).await
-            }
+            McpServerTransport::Stdio { command, args, env } => self.test_stdio(command, args, env).await,
             McpServerTransport::Http { url, headers } => self.test_http(url, headers).await,
             McpServerTransport::Sse { url, headers } => self.test_sse(url, headers).await,
         }
@@ -111,22 +105,14 @@ impl McpConnectionTestService {
 
     // -- HTTP (Streamable HTTP) transport ---------------------------------
 
-    async fn test_http(
-        &self,
-        url: &str,
-        headers: &HashMap<String, String>,
-    ) -> McpConnectionTestResult {
+    async fn test_http(&self, url: &str, headers: &HashMap<String, String>) -> McpConnectionTestResult {
         match tokio::time::timeout(self.timeout, self.test_http_inner(url, headers)).await {
             Ok(r) => r,
             Err(_) => timeout_result(self.timeout),
         }
     }
 
-    async fn test_http_inner(
-        &self,
-        url: &str,
-        headers: &HashMap<String, String>,
-    ) -> McpConnectionTestResult {
+    async fn test_http_inner(&self, url: &str, headers: &HashMap<String, String>) -> McpConnectionTestResult {
         let mut req_headers = build_http_headers(headers);
         req_headers.insert(
             reqwest::header::CONTENT_TYPE,
@@ -134,9 +120,7 @@ impl McpConnectionTestService {
         );
         req_headers.insert(
             reqwest::header::ACCEPT,
-            "application/json, text/event-stream"
-                .parse()
-                .expect("valid header"),
+            "application/json, text/event-stream".parse().expect("valid header"),
         );
 
         // 1. initialize
@@ -214,31 +198,21 @@ impl McpConnectionTestService {
             .and_then(|v| v.to_str().ok())
             .map(String::from);
 
-        let rpc = protocol::parse_http_response(resp)
-            .await
-            .map_err(error_result)?;
+        let rpc = protocol::parse_http_response(resp).await.map_err(error_result)?;
 
         Ok(HttpMcpResponse { rpc, session_id })
     }
 
     // -- SSE transport ----------------------------------------------------
 
-    async fn test_sse(
-        &self,
-        url: &str,
-        headers: &HashMap<String, String>,
-    ) -> McpConnectionTestResult {
+    async fn test_sse(&self, url: &str, headers: &HashMap<String, String>) -> McpConnectionTestResult {
         match tokio::time::timeout(self.timeout, self.test_sse_inner(url, headers)).await {
             Ok(r) => r,
             Err(_) => timeout_result(self.timeout),
         }
     }
 
-    async fn test_sse_inner(
-        &self,
-        url: &str,
-        headers: &HashMap<String, String>,
-    ) -> McpConnectionTestResult {
+    async fn test_sse_inner(&self, url: &str, headers: &HashMap<String, String>) -> McpConnectionTestResult {
         let mut req_headers = build_http_headers(headers);
 
         // 1. Open SSE connection
@@ -269,9 +243,7 @@ impl McpConnectionTestService {
             "application/json".parse().expect("valid header"),
         );
 
-        let result = self
-            .run_sse_protocol(url, &req_headers, &mut event_rx)
-            .await;
+        let result = self.run_sse_protocol(url, &req_headers, &mut event_rx).await;
         reader_handle.abort();
         result
     }
@@ -289,10 +261,7 @@ impl McpConnectionTestService {
         };
 
         // 4. initialize
-        if let Err(e) = self
-            .sse_post(&endpoint, headers, &build_initialize_request(1))
-            .await
-        {
+        if let Err(e) = self.sse_post(&endpoint, headers, &build_initialize_request(1)).await {
             return error_result(format!("Failed to send initialize: {e}"));
         }
         let init_resp = match wait_for_jsonrpc_response(event_rx).await {
@@ -309,10 +278,7 @@ impl McpConnectionTestService {
             .await;
 
         // 6. tools/list
-        if let Err(e) = self
-            .sse_post(&endpoint, headers, &build_tools_list_request(2))
-            .await
-        {
+        if let Err(e) = self.sse_post(&endpoint, headers, &build_tools_list_request(2)).await {
             return error_result(format!("Failed to send tools/list: {e}"));
         }
         let tools_resp = match wait_for_jsonrpc_response(event_rx).await {
@@ -362,8 +328,7 @@ mod tests {
 
     #[test]
     fn service_with_timeout() {
-        let svc = McpConnectionTestService::new(reqwest::Client::new())
-            .with_timeout(Duration::from_secs(5));
+        let svc = McpConnectionTestService::new(reqwest::Client::new()).with_timeout(Duration::from_secs(5));
         assert_eq!(svc.timeout, Duration::from_secs(5));
     }
 }

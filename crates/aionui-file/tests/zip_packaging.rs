@@ -45,10 +45,7 @@ async fn create_zip_text_content() {
         },
     ];
 
-    let result = svc
-        .create_zip(zip_path.to_str().unwrap(), entries, None)
-        .await
-        .unwrap();
+    let result = svc.create_zip(zip_path.to_str().unwrap(), entries, None).await.unwrap();
     assert!(result);
 
     // Verify the ZIP can be opened and contains correct data
@@ -91,10 +88,7 @@ async fn create_zip_disk_files() {
         },
     ];
 
-    let result = svc
-        .create_zip(zip_path.to_str().unwrap(), entries, None)
-        .await
-        .unwrap();
+    let result = svc.create_zip(zip_path.to_str().unwrap(), entries, None).await.unwrap();
     assert!(result);
 
     let file = fs::File::open(&zip_path).unwrap();
@@ -134,10 +128,7 @@ async fn create_zip_mixed_content_and_disk() {
         },
     ];
 
-    let result = svc
-        .create_zip(zip_path.to_str().unwrap(), entries, None)
-        .await
-        .unwrap();
+    let result = svc.create_zip(zip_path.to_str().unwrap(), entries, None).await.unwrap();
     assert!(result);
 
     let file = fs::File::open(&zip_path).unwrap();
@@ -227,9 +218,7 @@ async fn create_zip_disk_entry_nonexistent_source() {
         file_path: "/nonexistent/path/file.txt".into(),
     }];
 
-    let result = svc
-        .create_zip(zip_path.to_str().unwrap(), entries, None)
-        .await;
+    let result = svc.create_zip(zip_path.to_str().unwrap(), entries, None).await;
     assert!(result.is_err());
 }
 
@@ -239,10 +228,7 @@ async fn create_zip_empty_entries_produces_valid_archive() {
     let zip_path = dir.path().join("empty.zip");
     let svc = make_service(dir.path());
 
-    let result = svc
-        .create_zip(zip_path.to_str().unwrap(), vec![], None)
-        .await
-        .unwrap();
+    let result = svc.create_zip(zip_path.to_str().unwrap(), vec![], None).await.unwrap();
     assert!(result);
 
     let file = fs::File::open(&zip_path).unwrap();
@@ -267,9 +253,7 @@ async fn create_zip_rejects_output_outside_sandbox() {
         content: "data".into(),
     }];
 
-    let result = svc
-        .create_zip(zip_path.to_str().unwrap(), entries, None)
-        .await;
+    let result = svc.create_zip(zip_path.to_str().unwrap(), entries, None).await;
     assert!(result.is_err());
     assert!(!zip_path.exists());
 }
@@ -288,9 +272,7 @@ async fn create_zip_rejects_disk_entry_outside_sandbox() {
         file_path: outside_file.to_string_lossy().into_owned(),
     }];
 
-    let result = svc
-        .create_zip(zip_path.to_str().unwrap(), entries, None)
-        .await;
+    let result = svc.create_zip(zip_path.to_str().unwrap(), entries, None).await;
     assert!(result.is_err());
     assert!(!zip_path.exists());
 }
@@ -305,16 +287,10 @@ async fn create_zip_rejects_nonexistent_disk_entry_in_sandbox() {
     // validate_path rejects it before any ZIP is created.
     let entries = vec![ZipEntry::Disk {
         name: "missing.txt".into(),
-        file_path: dir
-            .path()
-            .join("no_such.txt")
-            .to_string_lossy()
-            .into_owned(),
+        file_path: dir.path().join("no_such.txt").to_string_lossy().into_owned(),
     }];
 
-    let result = svc
-        .create_zip(zip_path.to_str().unwrap(), entries, None)
-        .await;
+    let result = svc.create_zip(zip_path.to_str().unwrap(), entries, None).await;
     assert!(result.is_err());
     assert!(!zip_path.exists());
 }
@@ -352,10 +328,7 @@ async fn cancel_zip_in_progress() {
     // Spawn ZIP creation in a separate task
     let create_handle = tokio::spawn({
         let request_id = request_id.clone();
-        async move {
-            svc.create_zip(&zip_path_str, entries, Some(request_id))
-                .await
-        }
+        async move { svc.create_zip(&zip_path_str, entries, Some(request_id)).await }
     });
 
     // Give a brief moment for the creation to start, then cancel

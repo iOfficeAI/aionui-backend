@@ -8,8 +8,7 @@ use crate::error::ChannelError;
 use crate::pairing::PairingService;
 use crate::session::SessionManager;
 use crate::types::{
-    ActionBehavior, ActionButton, ActionCategory, ActionResponse, UnifiedAction,
-    UnifiedIncomingMessage,
+    ActionBehavior, ActionButton, ActionCategory, ActionResponse, UnifiedAction, UnifiedIncomingMessage,
 };
 
 /// Result of processing an incoming message.
@@ -66,19 +65,13 @@ impl ActionExecutor {
     /// 1. Authorization check → if unauthorized, trigger pairing
     /// 2. Button callback → route to action handler
     /// 3. Text message → get/create session → return Dispatched for AI
-    pub async fn handle_incoming_message(
-        &self,
-        msg: &UnifiedIncomingMessage,
-    ) -> Result<MessageResult, ChannelError> {
+    pub async fn handle_incoming_message(&self, msg: &UnifiedIncomingMessage) -> Result<MessageResult, ChannelError> {
         let platform_type = msg.platform.to_string();
         let user_id = &msg.user.id;
         let chat_id = &msg.chat_id;
 
         // 1. Authorization check — resolve platform user → internal user ID
-        let internal_user_id = self
-            .pairing
-            .get_internal_user_id(user_id, &platform_type)
-            .await?;
+        let internal_user_id = self.pairing.get_internal_user_id(user_id, &platform_type).await?;
 
         let internal_user_id = match internal_user_id {
             Some(id) => id,
@@ -154,29 +147,19 @@ impl ActionExecutor {
 
     // ── Platform actions ────────────────────────────────────────────
 
-    async fn handle_platform_action(
-        &self,
-        action: &UnifiedAction,
-    ) -> Result<ActionResponse, ChannelError> {
+    async fn handle_platform_action(&self, action: &UnifiedAction) -> Result<ActionResponse, ChannelError> {
         match action.action.as_str() {
             "pairing.show" | "pairing.refresh" => {
                 let code = self
                     .pairing
-                    .request_pairing(
-                        &action.context.user_id,
-                        &action.context.platform.to_string(),
-                        None,
-                    )
+                    .request_pairing(&action.context.user_id, &action.context.platform.to_string(), None)
                     .await?;
                 Ok(build_pairing_response(&code))
             }
             "pairing.check" => {
                 let authorized = self
                     .pairing
-                    .is_user_authorized(
-                        &action.context.user_id,
-                        &action.context.platform.to_string(),
-                    )
+                    .is_user_authorized(&action.context.user_id, &action.context.platform.to_string())
                     .await?;
                 if authorized {
                     Ok(ActionResponse {
@@ -245,10 +228,7 @@ impl ActionExecutor {
             "session.new" => {
                 let user_id = internal_user_id;
                 let chat_id = &action.context.chat_id;
-                let agent_config = self
-                    .settings
-                    .get_agent_config(action.context.platform)
-                    .await?;
+                let agent_config = self.settings.get_agent_config(action.context.platform).await?;
                 let session = self
                     .session_mgr
                     .reset_session(user_id, chat_id, &agent_config.agent_type, None)
@@ -275,10 +255,7 @@ impl ActionExecutor {
             "session.status" => {
                 let user_id = internal_user_id;
                 let chat_id = &action.context.chat_id;
-                let agent_config = self
-                    .settings
-                    .get_agent_config(action.context.platform)
-                    .await?;
+                let agent_config = self.settings.get_agent_config(action.context.platform).await?;
                 let session = self
                     .session_mgr
                     .get_or_create_session(user_id, chat_id, &agent_config.agent_type, None)
@@ -396,9 +373,7 @@ impl ActionExecutor {
                     .session_mgr
                     .get_or_create_session(internal_user_id, chat_id, agent_type, None)
                     .await?;
-                self.session_mgr
-                    .update_agent_type(&session.id, agent_type)
-                    .await?;
+                self.session_mgr.update_agent_type(&session.id, agent_type).await?;
 
                 Ok(ActionResponse {
                     text: Some(format!("Agent switched to: {agent_type}")),
@@ -419,10 +394,7 @@ impl ActionExecutor {
 
     // ── Chat actions ────────────────────────────────────────────────
 
-    async fn handle_chat_action(
-        &self,
-        action: &UnifiedAction,
-    ) -> Result<ActionResponse, ChannelError> {
+    async fn handle_chat_action(&self, action: &UnifiedAction) -> Result<ActionResponse, ChannelError> {
         match action.action.as_str() {
             "chat.send" | "chat.regenerate" | "chat.continue" => {
                 // These are handled by the message flow, not action responses.
@@ -577,17 +549,13 @@ fn build_unknown_action_response(action: &str) -> ActionResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{
-        ActionContext, MessageContentType, PluginType, UnifiedMessageContent, UnifiedUser,
-    };
+    use crate::types::{ActionContext, MessageContentType, PluginType, UnifiedMessageContent, UnifiedUser};
     use aionui_api_types::WebSocketMessage;
     use aionui_common::{TimestampMs, now_ms};
     use aionui_db::models::{
         AssistantSessionRow, AssistantUserRow, ChannelPluginRow, ClientPreference, PairingCodeRow,
     };
-    use aionui_db::{
-        DbError, IChannelRepository, IClientPreferenceRepository, UpdatePluginStatusParams,
-    };
+    use aionui_db::{DbError, IChannelRepository, IClientPreferenceRepository, UpdatePluginStatusParams};
     use aionui_realtime::EventBroadcaster;
     use std::sync::Mutex;
 
@@ -641,11 +609,7 @@ mod tests {
         async fn upsert_plugin(&self, _row: &ChannelPluginRow) -> Result<(), DbError> {
             Ok(())
         }
-        async fn update_plugin_status(
-            &self,
-            _id: &str,
-            _params: &UpdatePluginStatusParams,
-        ) -> Result<(), DbError> {
+        async fn update_plugin_status(&self, _id: &str, _params: &UpdatePluginStatusParams) -> Result<(), DbError> {
             Ok(())
         }
         async fn delete_plugin(&self, _id: &str) -> Result<(), DbError> {
@@ -663,20 +627,14 @@ mod tests {
             let users = self.users.lock().unwrap();
             Ok(users
                 .iter()
-                .find(|u| {
-                    u.platform_user_id == platform_user_id && u.platform_type == platform_type
-                })
+                .find(|u| u.platform_user_id == platform_user_id && u.platform_type == platform_type)
                 .cloned())
         }
         async fn create_user(&self, row: &AssistantUserRow) -> Result<(), DbError> {
             self.users.lock().unwrap().push(row.clone());
             Ok(())
         }
-        async fn update_user_last_active(
-            &self,
-            _id: &str,
-            _last_active: TimestampMs,
-        ) -> Result<(), DbError> {
+        async fn update_user_last_active(&self, _id: &str, _last_active: TimestampMs) -> Result<(), DbError> {
             Ok(())
         }
         async fn delete_user(&self, _id: &str) -> Result<(), DbError> {
@@ -707,18 +665,10 @@ mod tests {
             sessions.push(new_row.clone());
             Ok(new_row.clone())
         }
-        async fn update_session_activity(
-            &self,
-            _id: &str,
-            _last_activity: TimestampMs,
-        ) -> Result<(), DbError> {
+        async fn update_session_activity(&self, _id: &str, _last_activity: TimestampMs) -> Result<(), DbError> {
             Ok(())
         }
-        async fn update_session_conversation(
-            &self,
-            id: &str,
-            conversation_id: &str,
-        ) -> Result<(), DbError> {
+        async fn update_session_conversation(&self, id: &str, conversation_id: &str) -> Result<(), DbError> {
             let mut sessions = self.sessions.lock().unwrap();
             if let Some(s) = sessions.iter_mut().find(|s| s.id == id) {
                 s.conversation_id = Some(conversation_id.to_owned());
@@ -727,11 +677,7 @@ mod tests {
                 Err(DbError::NotFound(id.into()))
             }
         }
-        async fn update_session_agent_type(
-            &self,
-            id: &str,
-            agent_type: &str,
-        ) -> Result<(), DbError> {
+        async fn update_session_agent_type(&self, id: &str, agent_type: &str) -> Result<(), DbError> {
             let mut sessions = self.sessions.lock().unwrap();
             if let Some(s) = sessions.iter_mut().find(|s| s.id == id) {
                 s.agent_type = agent_type.to_owned();
@@ -741,17 +687,10 @@ mod tests {
             }
         }
         async fn delete_sessions_by_user(&self, user_id: &str) -> Result<(), DbError> {
-            self.sessions
-                .lock()
-                .unwrap()
-                .retain(|s| s.user_id != user_id);
+            self.sessions.lock().unwrap().retain(|s| s.user_id != user_id);
             Ok(())
         }
-        async fn delete_session_by_user_chat(
-            &self,
-            user_id: &str,
-            chat_id: &str,
-        ) -> Result<(), DbError> {
+        async fn delete_session_by_user_chat(&self, user_id: &str, chat_id: &str) -> Result<(), DbError> {
             let mut sessions = self.sessions.lock().unwrap();
             sessions.retain(|s| !(s.user_id == user_id && s.chat_id.as_deref() == Some(chat_id)));
             Ok(())
@@ -763,11 +702,7 @@ mod tests {
         }
         async fn get_pending_pairings(&self) -> Result<Vec<PairingCodeRow>, DbError> {
             let pairings = self.pairings.lock().unwrap();
-            Ok(pairings
-                .iter()
-                .filter(|p| p.status == "pending")
-                .cloned()
-                .collect())
+            Ok(pairings.iter().filter(|p| p.status == "pending").cloned().collect())
         }
         async fn get_pairing_by_code(&self, code: &str) -> Result<Option<PairingCodeRow>, DbError> {
             let pairings = self.pairings.lock().unwrap();
@@ -820,12 +755,7 @@ mod tests {
         (executor, repo)
     }
 
-    fn make_text_message(
-        user_id: &str,
-        chat_id: &str,
-        text: &str,
-        platform: PluginType,
-    ) -> UnifiedIncomingMessage {
+    fn make_text_message(user_id: &str, chat_id: &str, text: &str, platform: PluginType) -> UnifiedIncomingMessage {
         UnifiedIncomingMessage {
             id: "msg_1".into(),
             platform,
@@ -1214,10 +1144,7 @@ mod tests {
         let (executor, repo) = setup();
         repo.add_authorized_user("tg_42", "telegram");
 
-        let params = HashMap::from([
-            ("callId".into(), "call_123".into()),
-            ("value".into(), "true".into()),
-        ]);
+        let params = HashMap::from([("callId".into(), "call_123".into()), ("value".into(), "true".into())]);
         let msg = make_action_message(
             "tg_42",
             "chat_1",

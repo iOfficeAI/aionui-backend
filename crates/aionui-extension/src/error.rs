@@ -28,9 +28,7 @@ pub enum ExtensionError {
         actual: String,
     },
 
-    #[error(
-        "API version incompatible: extension '{name}' requires API {required}, supported {supported}"
-    )]
+    #[error("API version incompatible: extension '{name}' requires API {required}, supported {supported}")]
     ApiVersionIncompatible {
         name: String,
         required: String,
@@ -38,10 +36,7 @@ pub enum ExtensionError {
     },
 
     #[error("WebUI route '{route}' must be under '/{extension_name}/' namespace")]
-    InvalidWebuiRouteNamespace {
-        extension_name: String,
-        route: String,
-    },
+    InvalidWebuiRouteNamespace { extension_name: String, route: String },
 
     #[error("WebUI route '{route}' uses reserved prefix '{prefix}'")]
     ReservedWebuiRoute { route: String, prefix: String },
@@ -50,14 +45,9 @@ pub enum ExtensionError {
     ThemeCssNotFound(String),
 
     #[error("Contribution resolution failed for '{extension_name}': {reason}")]
-    ResolutionFailed {
-        extension_name: String,
-        reason: String,
-    },
+    ResolutionFailed { extension_name: String, reason: String },
 
-    #[error(
-        "Lifecycle hook '{hook}' timed out after {timeout_secs}s for extension '{extension_name}'"
-    )]
+    #[error("Lifecycle hook '{hook}' timed out after {timeout_secs}s for extension '{extension_name}'")]
     HookTimeout {
         extension_name: String,
         hook: String,
@@ -108,37 +98,23 @@ impl From<ExtensionError> for AppError {
             ExtensionError::FileReferenceNotFound(path) => {
                 AppError::NotFound(format!("File reference not found: {path}"))
             }
-            ExtensionError::PathTraversal(path) => {
-                AppError::BadRequest(format!("Path traversal detected: {path}"))
-            }
+            ExtensionError::PathTraversal(path) => AppError::BadRequest(format!("Path traversal detected: {path}")),
             ExtensionError::EngineIncompatible { .. } => AppError::BadRequest(err.to_string()),
             ExtensionError::ApiVersionIncompatible { .. } => AppError::BadRequest(err.to_string()),
-            ExtensionError::InvalidWebuiRouteNamespace { .. } => {
-                AppError::BadRequest(err.to_string())
-            }
+            ExtensionError::InvalidWebuiRouteNamespace { .. } => AppError::BadRequest(err.to_string()),
             ExtensionError::ReservedWebuiRoute { .. } => AppError::BadRequest(err.to_string()),
-            ExtensionError::ThemeCssNotFound(path) => {
-                AppError::NotFound(format!("Theme CSS not found: {path}"))
-            }
+            ExtensionError::ThemeCssNotFound(path) => AppError::NotFound(format!("Theme CSS not found: {path}")),
             ExtensionError::HookTimeout { .. } => AppError::Internal(err.to_string()),
             ExtensionError::HookFailed { .. } => AppError::Internal(err.to_string()),
-            ExtensionError::HookNotFound(path) => {
-                AppError::NotFound(format!("Hook script not found: {path}"))
-            }
+            ExtensionError::HookNotFound(path) => AppError::NotFound(format!("Hook script not found: {path}")),
             ExtensionError::ResolutionFailed { .. } => AppError::Internal(err.to_string()),
-            ExtensionError::NotFound(name) => {
-                AppError::NotFound(format!("Extension not found: {name}"))
-            }
+            ExtensionError::NotFound(name) => AppError::NotFound(format!("Extension not found: {name}")),
             ExtensionError::StatePersistence(msg) => AppError::Internal(msg),
             ExtensionError::BuiltinSkillDeletion(name) => {
                 AppError::BadRequest(format!("Cannot delete built-in skill: {name}"))
             }
-            ExtensionError::SkillNotFound(name) => {
-                AppError::NotFound(format!("Skill not found: {name}"))
-            }
-            ExtensionError::InvalidSkillPath(path) => {
-                AppError::BadRequest(format!("Invalid skill path: {path}"))
-            }
+            ExtensionError::SkillNotFound(name) => AppError::NotFound(format!("Skill not found: {name}")),
+            ExtensionError::InvalidSkillPath(path) => AppError::BadRequest(format!("Invalid skill path: {path}")),
             ExtensionError::Io(e) => AppError::Internal(e.to_string()),
             ExtensionError::JsonParse(e) => AppError::BadRequest(e.to_string()),
         }
@@ -152,10 +128,7 @@ mod tests {
     #[test]
     fn test_manifest_validation_error_display() {
         let err = ExtensionError::ManifestValidation("name is required".into());
-        assert_eq!(
-            err.to_string(),
-            "Manifest validation failed: name is required"
-        );
+        assert_eq!(err.to_string(), "Manifest validation failed: name is required");
     }
 
     #[test]
@@ -176,10 +149,7 @@ mod tests {
             version: "not-semver".into(),
             reason: "unexpected character".into(),
         };
-        assert_eq!(
-            err.to_string(),
-            "Invalid version 'not-semver': unexpected character"
-        );
+        assert_eq!(err.to_string(), "Invalid version 'not-semver': unexpected character");
     }
 
     #[test]
@@ -191,10 +161,7 @@ mod tests {
     #[test]
     fn test_file_reference_not_found_error_display() {
         let err = ExtensionError::FileReferenceNotFound("prompts/system.md".into());
-        assert_eq!(
-            err.to_string(),
-            "File reference not found: prompts/system.md"
-        );
+        assert_eq!(err.to_string(), "File reference not found: prompts/system.md");
     }
 
     #[test]

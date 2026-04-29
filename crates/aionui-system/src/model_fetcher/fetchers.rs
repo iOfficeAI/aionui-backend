@@ -21,9 +21,7 @@ pub(crate) async fn fetch_for_platform(
         "vertex-ai" => Ok(vertex_ai_models()),
         "new-api" => fetch_new_api(client, &config.base_url, &config.api_key).await,
         "minimax" => Ok(minimax_models()),
-        "dashscope-coding" => {
-            fetch_dashscope_coding(client, &config.base_url, &config.api_key).await
-        }
+        "dashscope-coding" => fetch_dashscope_coding(client, &config.base_url, &config.api_key).await,
         _ => fetch_openai_compatible(client, &config.base_url, &config.api_key).await,
     }
 }
@@ -89,11 +87,7 @@ const ANTHROPIC_FALLBACK_MODELS: &[&str] = &[
     "claude-3-7-sonnet-20250219",
 ];
 
-async fn fetch_anthropic(
-    client: &reqwest::Client,
-    base_url: &str,
-    api_key: &str,
-) -> Result<Vec<ModelInfo>, AppError> {
+async fn fetch_anthropic(client: &reqwest::Client, base_url: &str, api_key: &str) -> Result<Vec<ModelInfo>, AppError> {
     let url = format!("{}/v1/models", base_url.trim_end_matches('/'));
     let result = client
         .get(&url)
@@ -105,9 +99,10 @@ async fn fetch_anthropic(
 
     match result {
         Ok(resp) if resp.status().is_success() => {
-            let body: AnthropicModelsResponse = resp.json().await.map_err(|e| {
-                AppError::BadGateway(format!("Failed to parse Anthropic response: {e}"))
-            })?;
+            let body: AnthropicModelsResponse = resp
+                .json()
+                .await
+                .map_err(|e| AppError::BadGateway(format!("Failed to parse Anthropic response: {e}")))?;
             Ok(body.data.into_iter().map(|m| ModelInfo::Id(m.id)).collect())
         }
         Ok(resp) => {
@@ -140,22 +135,16 @@ struct GeminiModel {
 
 const GEMINI_FALLBACK_MODELS: &[&str] = &["gemini-2.5-pro", "gemini-2.5-flash"];
 
-async fn fetch_gemini(
-    client: &reqwest::Client,
-    base_url: &str,
-    api_key: &str,
-) -> Result<Vec<ModelInfo>, AppError> {
-    let url = format!(
-        "{}/v1beta/models?key={api_key}",
-        base_url.trim_end_matches('/')
-    );
+async fn fetch_gemini(client: &reqwest::Client, base_url: &str, api_key: &str) -> Result<Vec<ModelInfo>, AppError> {
+    let url = format!("{}/v1beta/models?key={api_key}", base_url.trim_end_matches('/'));
     let result = client.get(&url).timeout(REQUEST_TIMEOUT).send().await;
 
     match result {
         Ok(resp) if resp.status().is_success() => {
-            let body: GeminiModelsResponse = resp.json().await.map_err(|e| {
-                AppError::BadGateway(format!("Failed to parse Gemini response: {e}"))
-            })?;
+            let body: GeminiModelsResponse = resp
+                .json()
+                .await
+                .map_err(|e| AppError::BadGateway(format!("Failed to parse Gemini response: {e}")))?;
             let models = body
                 .models
                 .into_iter()
@@ -266,11 +255,7 @@ fn minimax_models() -> Vec<ModelInfo> {
 // new-api (OpenAI-compatible with /v1 enforcement)
 // ---------------------------------------------------------------------------
 
-async fn fetch_new_api(
-    client: &reqwest::Client,
-    base_url: &str,
-    api_key: &str,
-) -> Result<Vec<ModelInfo>, AppError> {
+async fn fetch_new_api(client: &reqwest::Client, base_url: &str, api_key: &str) -> Result<Vec<ModelInfo>, AppError> {
     let normalized = ensure_v1_path(base_url);
     fetch_openai_compatible(client, &normalized, api_key).await
 }
@@ -328,19 +313,14 @@ async fn fetch_dashscope_coding(
 // ---------------------------------------------------------------------------
 
 fn fallback_models(ids: &[&str]) -> Vec<ModelInfo> {
-    ids.iter()
-        .map(|id| ModelInfo::Id((*id).to_string()))
-        .collect()
+    ids.iter().map(|id| ModelInfo::Id((*id).to_string())).collect()
 }
 
 fn check_response_status(resp: &reqwest::Response) -> Result<(), AppError> {
     if resp.status().is_success() {
         return Ok(());
     }
-    Err(AppError::BadGateway(format!(
-        "Remote API returned {}",
-        resp.status()
-    )))
+    Err(AppError::BadGateway(format!("Remote API returned {}", resp.status())))
 }
 
 fn remote_error(e: &reqwest::Error) -> AppError {
@@ -365,18 +345,12 @@ mod tests {
 
     #[test]
     fn ensure_v1_path_missing() {
-        assert_eq!(
-            ensure_v1_path("https://api.example.com"),
-            "https://api.example.com/v1"
-        );
+        assert_eq!(ensure_v1_path("https://api.example.com"), "https://api.example.com/v1");
     }
 
     #[test]
     fn ensure_v1_path_trailing_slash() {
-        assert_eq!(
-            ensure_v1_path("https://api.example.com/"),
-            "https://api.example.com/v1"
-        );
+        assert_eq!(ensure_v1_path("https://api.example.com/"), "https://api.example.com/v1");
     }
 
     #[test]

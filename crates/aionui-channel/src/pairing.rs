@@ -18,8 +18,7 @@ use crate::types::PairingStatus;
 /// Returns a zero-padded string (e.g., "003421").
 pub fn generate_pairing_code() -> Result<String, ChannelError> {
     let mut bytes = [0u8; 4];
-    getrandom::getrandom(&mut bytes)
-        .map_err(|e| ChannelError::InvalidConfig(format!("RNG failure: {e}")))?;
+    getrandom::getrandom(&mut bytes).map_err(|e| ChannelError::InvalidConfig(format!("RNG failure: {e}")))?;
     let num = u32::from_le_bytes(bytes) % 10u32.pow(PAIRING_CODE_LENGTH as u32);
     Ok(format!("{num:0>width$}", width = PAIRING_CODE_LENGTH))
 }
@@ -56,8 +55,7 @@ impl PairingService {
         display_name: Option<&str>,
     ) -> Result<String, ChannelError> {
         // Expire any existing pending codes for this user
-        self.expire_user_pending_codes(platform_user_id, platform_type)
-            .await?;
+        self.expire_user_pending_codes(platform_user_id, platform_type).await?;
 
         let code = generate_pairing_code()?;
         let now = now_ms();
@@ -171,15 +169,8 @@ impl PairingService {
     }
 
     /// Checks whether a platform user is already authorized.
-    pub async fn is_user_authorized(
-        &self,
-        platform_user_id: &str,
-        platform_type: &str,
-    ) -> Result<bool, ChannelError> {
-        let user = self
-            .repo
-            .get_user_by_platform(platform_user_id, platform_type)
-            .await?;
+    pub async fn is_user_authorized(&self, platform_user_id: &str, platform_type: &str) -> Result<bool, ChannelError> {
+        let user = self.repo.get_user_by_platform(platform_user_id, platform_type).await?;
         Ok(user.is_some())
     }
 
@@ -191,10 +182,7 @@ impl PairingService {
         platform_user_id: &str,
         platform_type: &str,
     ) -> Result<Option<String>, ChannelError> {
-        let user = self
-            .repo
-            .get_user_by_platform(platform_user_id, platform_type)
-            .await?;
+        let user = self.repo.get_user_by_platform(platform_user_id, platform_type).await?;
         Ok(user.map(|u| u.id))
     }
 
@@ -249,11 +237,7 @@ impl PairingService {
     ///
     /// Called before creating a new code to ensure only one active code
     /// per user at a time.
-    async fn expire_user_pending_codes(
-        &self,
-        platform_user_id: &str,
-        platform_type: &str,
-    ) -> Result<(), ChannelError> {
+    async fn expire_user_pending_codes(&self, platform_user_id: &str, platform_type: &str) -> Result<(), ChannelError> {
         let pending = self.repo.get_pending_pairings().await?;
         for row in pending {
             if row.platform_user_id == platform_user_id && row.platform_type == platform_type {
@@ -273,9 +257,7 @@ impl PairingService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aionui_db::models::{
-        AssistantSessionRow, AssistantUserRow, ChannelPluginRow, PairingCodeRow,
-    };
+    use aionui_db::models::{AssistantSessionRow, AssistantUserRow, ChannelPluginRow, PairingCodeRow};
     use aionui_db::{DbError, IChannelRepository, UpdatePluginStatusParams};
     use std::sync::Mutex;
 
@@ -341,11 +323,7 @@ mod tests {
         async fn upsert_plugin(&self, _row: &ChannelPluginRow) -> Result<(), DbError> {
             Ok(())
         }
-        async fn update_plugin_status(
-            &self,
-            _id: &str,
-            _params: &UpdatePluginStatusParams,
-        ) -> Result<(), DbError> {
+        async fn update_plugin_status(&self, _id: &str, _params: &UpdatePluginStatusParams) -> Result<(), DbError> {
             Ok(())
         }
         async fn delete_plugin(&self, _id: &str) -> Result<(), DbError> {
@@ -366,28 +344,23 @@ mod tests {
             let users = self.users.lock().unwrap();
             Ok(users
                 .iter()
-                .find(|u| {
-                    u.platform_user_id == platform_user_id && u.platform_type == platform_type
-                })
+                .find(|u| u.platform_user_id == platform_user_id && u.platform_type == platform_type)
                 .cloned())
         }
 
         async fn create_user(&self, row: &AssistantUserRow) -> Result<(), DbError> {
             let mut users = self.users.lock().unwrap();
-            if users.iter().any(|u| {
-                u.platform_user_id == row.platform_user_id && u.platform_type == row.platform_type
-            }) {
+            if users
+                .iter()
+                .any(|u| u.platform_user_id == row.platform_user_id && u.platform_type == row.platform_type)
+            {
                 return Err(DbError::Conflict("user already exists".into()));
             }
             users.push(row.clone());
             Ok(())
         }
 
-        async fn update_user_last_active(
-            &self,
-            id: &str,
-            last_active: TimestampMs,
-        ) -> Result<(), DbError> {
+        async fn update_user_last_active(&self, id: &str, last_active: TimestampMs) -> Result<(), DbError> {
             let mut users = self.users.lock().unwrap();
             if let Some(u) = users.iter_mut().find(|u| u.id == id) {
                 u.last_active = Some(last_active);
@@ -424,35 +397,19 @@ mod tests {
         ) -> Result<AssistantSessionRow, DbError> {
             Ok(new_row.clone())
         }
-        async fn update_session_activity(
-            &self,
-            _id: &str,
-            _last_activity: TimestampMs,
-        ) -> Result<(), DbError> {
+        async fn update_session_activity(&self, _id: &str, _last_activity: TimestampMs) -> Result<(), DbError> {
             Ok(())
         }
-        async fn update_session_conversation(
-            &self,
-            _id: &str,
-            _conversation_id: &str,
-        ) -> Result<(), DbError> {
+        async fn update_session_conversation(&self, _id: &str, _conversation_id: &str) -> Result<(), DbError> {
             Ok(())
         }
-        async fn update_session_agent_type(
-            &self,
-            _id: &str,
-            _agent_type: &str,
-        ) -> Result<(), DbError> {
+        async fn update_session_agent_type(&self, _id: &str, _agent_type: &str) -> Result<(), DbError> {
             Ok(())
         }
         async fn delete_sessions_by_user(&self, _user_id: &str) -> Result<(), DbError> {
             Ok(())
         }
-        async fn delete_session_by_user_chat(
-            &self,
-            _user_id: &str,
-            _chat_id: &str,
-        ) -> Result<(), DbError> {
+        async fn delete_session_by_user_chat(&self, _user_id: &str, _chat_id: &str) -> Result<(), DbError> {
             Ok(())
         }
 
@@ -469,11 +426,7 @@ mod tests {
 
         async fn get_pending_pairings(&self) -> Result<Vec<PairingCodeRow>, DbError> {
             let pairings = self.pairings.lock().unwrap();
-            Ok(pairings
-                .iter()
-                .filter(|p| p.status == "pending")
-                .cloned()
-                .collect())
+            Ok(pairings.iter().filter(|p| p.status == "pending").cloned().collect())
         }
 
         async fn get_pairing_by_code(&self, code: &str) -> Result<Option<PairingCodeRow>, DbError> {
@@ -540,8 +493,7 @@ mod tests {
 
     #[test]
     fn codes_are_not_all_identical() {
-        let codes: std::collections::HashSet<String> =
-            (0..50).map(|_| generate_pairing_code().unwrap()).collect();
+        let codes: std::collections::HashSet<String> = (0..50).map(|_| generate_pairing_code().unwrap()).collect();
         // With 6-digit codes, 50 random samples should produce > 1 unique
         assert!(codes.len() > 1);
     }
@@ -551,10 +503,7 @@ mod tests {
     #[tokio::test]
     async fn request_pairing_creates_code() {
         let (svc, repo, _bc) = make_service();
-        let code = svc
-            .request_pairing("tg_42", "telegram", Some("Alice"))
-            .await
-            .unwrap();
+        let code = svc.request_pairing("tg_42", "telegram", Some("Alice")).await.unwrap();
         assert_eq!(code.len(), PAIRING_CODE_LENGTH);
 
         let pairings = repo.get_pairings();
@@ -569,9 +518,7 @@ mod tests {
     #[tokio::test]
     async fn request_pairing_broadcasts_event() {
         let (svc, _repo, bc) = make_service();
-        svc.request_pairing("tg_42", "telegram", Some("Alice"))
-            .await
-            .unwrap();
+        svc.request_pairing("tg_42", "telegram", Some("Alice")).await.unwrap();
 
         let events = bc.take_events();
         assert_eq!(events.len(), 1);
@@ -598,14 +545,8 @@ mod tests {
     async fn request_pairing_expires_old_code() {
         let (svc, repo, _bc) = make_service();
 
-        let code1 = svc
-            .request_pairing("tg_42", "telegram", Some("Alice"))
-            .await
-            .unwrap();
-        let code2 = svc
-            .request_pairing("tg_42", "telegram", Some("Alice"))
-            .await
-            .unwrap();
+        let code1 = svc.request_pairing("tg_42", "telegram", Some("Alice")).await.unwrap();
+        let code2 = svc.request_pairing("tg_42", "telegram", Some("Alice")).await.unwrap();
 
         assert_ne!(code1, code2);
 
@@ -630,10 +571,7 @@ mod tests {
     #[tokio::test]
     async fn approve_creates_user_and_updates_status() {
         let (svc, repo, _bc) = make_service();
-        let code = svc
-            .request_pairing("tg_42", "telegram", Some("Alice"))
-            .await
-            .unwrap();
+        let code = svc.request_pairing("tg_42", "telegram", Some("Alice")).await.unwrap();
 
         svc.approve_pairing(&code).await.unwrap();
 
@@ -653,10 +591,7 @@ mod tests {
     #[tokio::test]
     async fn approve_broadcasts_user_authorized() {
         let (svc, _repo, bc) = make_service();
-        let code = svc
-            .request_pairing("tg_42", "telegram", Some("Alice"))
-            .await
-            .unwrap();
+        let code = svc.request_pairing("tg_42", "telegram", Some("Alice")).await.unwrap();
         bc.take_events(); // clear request event
 
         svc.approve_pairing(&code).await.unwrap();
@@ -680,10 +615,7 @@ mod tests {
     #[tokio::test]
     async fn approve_already_approved_returns_already_processed() {
         let (svc, _repo, _bc) = make_service();
-        let code = svc
-            .request_pairing("tg_42", "telegram", None)
-            .await
-            .unwrap();
+        let code = svc.request_pairing("tg_42", "telegram", None).await.unwrap();
         svc.approve_pairing(&code).await.unwrap();
 
         let err = svc.approve_pairing(&code).await.unwrap_err();
@@ -714,10 +646,7 @@ mod tests {
     #[tokio::test]
     async fn reject_updates_status() {
         let (svc, repo, _bc) = make_service();
-        let code = svc
-            .request_pairing("tg_42", "telegram", None)
-            .await
-            .unwrap();
+        let code = svc.request_pairing("tg_42", "telegram", None).await.unwrap();
 
         svc.reject_pairing(&code).await.unwrap();
 
@@ -736,10 +665,7 @@ mod tests {
     #[tokio::test]
     async fn reject_already_approved_returns_already_processed() {
         let (svc, _repo, _bc) = make_service();
-        let code = svc
-            .request_pairing("tg_42", "telegram", None)
-            .await
-            .unwrap();
+        let code = svc.request_pairing("tg_42", "telegram", None).await.unwrap();
         svc.approve_pairing(&code).await.unwrap();
 
         let err = svc.reject_pairing(&code).await.unwrap_err();
@@ -791,10 +717,7 @@ mod tests {
     #[tokio::test]
     async fn authorized_user_returns_true_after_approval() {
         let (svc, _repo, _bc) = make_service();
-        let code = svc
-            .request_pairing("tg_42", "telegram", None)
-            .await
-            .unwrap();
+        let code = svc.request_pairing("tg_42", "telegram", None).await.unwrap();
         svc.approve_pairing(&code).await.unwrap();
 
         let authorized = svc.is_user_authorized("tg_42", "telegram").await.unwrap();

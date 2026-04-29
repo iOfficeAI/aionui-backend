@@ -15,17 +15,16 @@ use crate::skill_manager::AcpSkillManager;
 use crate::stream_event::{AgentStreamEvent, permission_request_to_event_data};
 use crate::types::{AcpBuildExtra, SendMessageData, SlashCommandItem};
 use agent_client_protocol::schema::{
-    AgentCapabilities, AvailableCommand, CancelNotification, ContentBlock, EnvVariable,
-    HttpHeader, LoadSessionRequest, McpServer, McpServerHttp, NewSessionRequest, PromptRequest,
-    SessionConfigOption, SessionId, SessionModeState, SessionModelState,
-    SetSessionConfigOptionRequest, SetSessionModeRequest, SetSessionModelRequest, UsageUpdate,
+    AgentCapabilities, AvailableCommand, CancelNotification, ContentBlock, EnvVariable, HttpHeader, LoadSessionRequest,
+    McpServer, McpServerHttp, NewSessionRequest, PromptRequest, SessionConfigOption, SessionId, SessionModeState,
+    SessionModelState, SetSessionConfigOptionRequest, SetSessionModeRequest, SetSessionModelRequest, UsageUpdate,
 };
 use aionui_api_types::{AgentHandshake, AgentMetadata};
 
 use aionui_api_types::TeamMcpStdioConfig;
 use aionui_common::{
-    AgentKillReason, AgentType, AppError, CommandSpec, Confirmation, ConversationStatus,
-    TimestampMs, normalize_keys_to_snake_case, now_ms,
+    AgentKillReason, AgentType, AppError, CommandSpec, Confirmation, ConversationStatus, TimestampMs,
+    normalize_keys_to_snake_case, now_ms,
 };
 use serde_json::Value;
 use tokio::sync::{Mutex, RwLock, broadcast, mpsc, oneshot};
@@ -57,9 +56,7 @@ fn normalize_requested_mode(metadata: &AgentMetadata, mode: &str) -> String {
     // native `auto` mode. Keep the mapping data-driven by keying on the
     // vendor backend label rather than re-introducing an AcpBackend
     // enum variant.
-    if matches!(metadata.backend.as_deref(), Some("codex"))
-        && matches!(trimmed, "default" | "autoEdit")
-    {
+    if matches!(metadata.backend.as_deref(), Some("codex")) && matches!(trimmed, "default" | "autoEdit") {
         return "auto".to_owned();
     }
 
@@ -71,9 +68,7 @@ fn normalize_requested_mode(metadata: &AgentMetadata, mode: &str) -> String {
 /// through `session/set_session_config_option`. Boolean toggles and
 /// other future kinds return `None` and are skipped by the replay
 /// path.
-fn extract_config_current_value(
-    kind: &agent_client_protocol::schema::SessionConfigKind,
-) -> Option<String> {
+fn extract_config_current_value(kind: &agent_client_protocol::schema::SessionConfigKind) -> Option<String> {
     use agent_client_protocol::schema::SessionConfigKind;
     match kind {
         SessionConfigKind::Select(sel) => Some(sel.current_value.to_string()),
@@ -132,11 +127,7 @@ fn team_mcp_server(cfg: &TeamMcpStdioConfig, _backend_binary_path: &std::path::P
         HttpHeader::new("Authorization".to_owned(), format!("Bearer {}", cfg.token)),
         HttpHeader::new("X-Slot-Id".to_owned(), cfg.slot_id.clone()),
     ];
-    let http = McpServerHttp::new(
-        format!("aionui-team-{}", cfg.team_id),
-        url,
-    )
-    .headers(headers);
+    let http = McpServerHttp::new(format!("aionui-team-{}", cfg.team_id), url).headers(headers);
     McpServer::Http(http)
 }
 
@@ -268,20 +259,13 @@ impl AcpAgentManager {
     }
 
     async fn preferred_mode(&self) -> Option<String> {
-        self.preferred_mode
-            .read()
-            .await
-            .clone()
-            .filter(|mode| !mode.is_empty())
+        self.preferred_mode.read().await.clone().filter(|mode| !mode.is_empty())
     }
 
     async fn update_cached_mode(&self, mode: &str) {
         let mut snapshot = self.runtime_snapshot.write().await;
         if let Some(modes) = snapshot.modes().cloned() {
-            snapshot.set_modes(SessionModeState::new(
-                mode.to_owned(),
-                modes.available_modes,
-            ));
+            snapshot.set_modes(SessionModeState::new(mode.to_owned(), modes.available_modes));
         }
     }
 
@@ -377,10 +361,7 @@ impl AcpAgentManager {
     async fn _set_modes(&self, mode: &str) -> Result<(), AppError> {
         let sid = self.require_session_id().await?;
         self.protocol
-            .set_mode(SetSessionModeRequest::new(
-                SessionId::new(sid),
-                mode.to_owned(),
-            ))
+            .set_mode(SetSessionModeRequest::new(SessionId::new(sid), mode.to_owned()))
             .await
             .map_err(AppError::from)
             .map(|_| ())
@@ -397,10 +378,7 @@ impl AcpAgentManager {
         let sid = self.require_session_id().await?;
 
         self.protocol
-            .set_model(SetSessionModelRequest::new(
-                SessionId::new(sid),
-                model_id.to_owned(),
-            ))
+            .set_model(SetSessionModelRequest::new(SessionId::new(sid), model_id.to_owned()))
             .await
             .map_err(AppError::from)?;
 
@@ -518,9 +496,7 @@ impl AcpAgentManager {
         // fields — modes, models, config_options, commands — flow
         // through the forwarder started in `start_catalog_sync`.
         let init_handshake = AgentHandshake {
-            agent_capabilities: protocol
-                .agent_capabilities()
-                .and_then(|c| sdk_to_snake_value(&c)),
+            agent_capabilities: protocol.agent_capabilities().and_then(|c| sdk_to_snake_value(&c)),
             auth_methods: protocol.auth_methods().and_then(|m| sdk_to_snake_value(&m)),
             ..Default::default()
         };
@@ -585,8 +561,7 @@ impl AcpAgentManager {
                     .event_tx
                     .send(AgentStreamEvent::AcpPermission(permission_event))
                     .is_err()
-                    && let Some(response_tx) =
-                        this.pending_permissions.lock().unwrap().remove(&call_id)
+                    && let Some(response_tx) = this.pending_permissions.lock().unwrap().remove(&call_id)
                 {
                     let _ = response_tx.send(PermissionDecision::Cancelled);
                 }
@@ -661,12 +636,10 @@ impl AcpAgentManager {
             self.session_new_and_prompt(data).await?;
         } else if has_session && has_messages {
             // Existing session — resume strategy depends on backend
-            self.session_resume_and_send(data, session_id.as_deref())
-                .await?;
+            self.session_resume_and_send(data, session_id.as_deref()).await?;
         } else {
             // Session exists but no previous messages — just prompt
-            self.prompt_existing_session(data, session_id.as_deref())
-                .await?;
+            self.prompt_existing_session(data, session_id.as_deref()).await?;
         }
 
         let mut state = self.state.write().await;
@@ -679,25 +652,19 @@ impl AcpAgentManager {
     /// Create a new ACP session and send the first prompt.
     async fn session_new_and_prompt(&self, data: &SendMessageData) -> Result<(), AppError> {
         // Emit Start event
-        let _ = self.event_tx.send(AgentStreamEvent::Start(
-            crate::stream_event::StartEventData { session_id: None },
-        ));
+        let _ = self
+            .event_tx
+            .send(AgentStreamEvent::Start(crate::stream_event::StartEventData {
+                session_id: None,
+            }));
 
-        let req = build_new_session_request(
-            &self.workspace,
-            &self.config,
-            self.backend_binary_path.as_path(),
-        );
+        let req = build_new_session_request(&self.workspace, &self.config, self.backend_binary_path.as_path());
         tracing::info!(
             has_team_mcp = self.config.team_mcp_stdio_config.is_some(),
             mcp_servers_count = req.mcp_servers.len(),
             "session_new_and_prompt: sending session/new"
         );
-        let session_response = self
-            .protocol
-            .new_session(req)
-            .await
-            .map_err(AppError::from)?;
+        let session_response = self.protocol.new_session(req).await.map_err(AppError::from)?;
 
         let sid = session_response.session_id.to_string();
 
@@ -763,11 +730,11 @@ impl AcpAgentManager {
             .map_err(AppError::from)?;
 
         // Emit Finish event when prompt completes
-        let _ = self.event_tx.send(AgentStreamEvent::Finish(
-            crate::stream_event::FinishEventData {
+        let _ = self
+            .event_tx
+            .send(AgentStreamEvent::Finish(crate::stream_event::FinishEventData {
                 session_id: Some(sid),
-            },
-        ));
+            }));
 
         Ok(())
     }
@@ -782,11 +749,7 @@ impl AcpAgentManager {
     /// preloaded `current_*` values because they reflect the user's
     /// last explicit choice; the CLI's own `current_*` is only used
     /// when the snapshot has nothing yet.
-    async fn session_resume_and_send(
-        &self,
-        data: &SendMessageData,
-        session_id: Option<&str>,
-    ) -> Result<(), AppError> {
+    async fn session_resume_and_send(&self, data: &SendMessageData, session_id: Option<&str>) -> Result<(), AppError> {
         if self.supports_session_load()
             && let Some(sid) = session_id
         {
@@ -796,18 +759,13 @@ impl AcpAgentManager {
                 let snapshot = self.runtime_snapshot.read().await;
                 (
                     snapshot.modes().map(|m| m.current_mode_id.to_string()),
-                    snapshot
-                        .model_info()
-                        .map(|m| m.current_model_id.to_string()),
+                    snapshot.model_info().map(|m| m.current_model_id.to_string()),
                 )
             };
 
             let resp = self
                 .protocol
-                .load_session(LoadSessionRequest::new(
-                    SessionId::new(sid),
-                    &self.workspace,
-                ))
+                .load_session(LoadSessionRequest::new(SessionId::new(sid), &self.workspace))
                 .await
                 .map_err(AppError::from)?;
 
@@ -843,20 +801,15 @@ impl AcpAgentManager {
     }
 
     /// Send a prompt to an already-established session.
-    async fn prompt_existing_session(
-        &self,
-        data: &SendMessageData,
-        session_id: Option<&str>,
-    ) -> Result<(), AppError> {
-        let sid = session_id
-            .ok_or_else(|| AppError::Internal("Cannot prompt: no session ID available".into()))?;
+    async fn prompt_existing_session(&self, data: &SendMessageData, session_id: Option<&str>) -> Result<(), AppError> {
+        let sid = session_id.ok_or_else(|| AppError::Internal("Cannot prompt: no session ID available".into()))?;
 
         // Emit Start event
-        let _ = self.event_tx.send(AgentStreamEvent::Start(
-            crate::stream_event::StartEventData {
+        let _ = self
+            .event_tx
+            .send(AgentStreamEvent::Start(crate::stream_event::StartEventData {
                 session_id: Some(sid.to_owned()),
-            },
-        ));
+            }));
 
         self.protocol
             .prompt(PromptRequest::new(
@@ -867,11 +820,11 @@ impl AcpAgentManager {
             .map_err(AppError::from)?;
 
         // Emit Finish event
-        let _ = self.event_tx.send(AgentStreamEvent::Finish(
-            crate::stream_event::FinishEventData {
+        let _ = self
+            .event_tx
+            .send(AgentStreamEvent::Finish(crate::stream_event::FinishEventData {
                 session_id: Some(sid.to_owned()),
-            },
-        ));
+            }));
 
         Ok(())
     }
@@ -990,10 +943,7 @@ impl AcpAgentManager {
     }
 
     fn native_skill_support(&self) -> bool {
-        self.metadata
-            .native_skills_dirs
-            .as_ref()
-            .is_some_and(|v| !v.is_empty())
+        self.metadata.native_skills_dirs.as_ref().is_some_and(|v| !v.is_empty())
     }
 
     /// Return the active session id or a `BadRequest` error.
@@ -1045,8 +995,7 @@ impl crate::agent_manager::IAgentManager for AcpAgentManager {
     async fn stop(&self) -> Result<(), AppError> {
         let session_id = self.state.read().await.session_id.clone();
         if let Some(sid) = session_id {
-            self.protocol
-                .cancel(CancelNotification::new(SessionId::new(sid)));
+            self.protocol.cancel(CancelNotification::new(SessionId::new(sid)));
         }
         for (_, responder) in self.pending_permissions.lock().unwrap().drain() {
             let _ = responder.send(PermissionDecision::Cancelled);
@@ -1062,24 +1011,19 @@ impl crate::agent_manager::IAgentManager for AcpAgentManager {
         data: serde_json::Value,
         _always_allow: bool,
     ) -> Result<(), AppError> {
-        let option_id = confirm_option_id(&data).ok_or_else(|| {
-            AppError::BadRequest("ACP confirmation requires an option_id string".into())
-        })?;
+        let option_id = confirm_option_id(&data)
+            .ok_or_else(|| AppError::BadRequest("ACP confirmation requires an option_id string".into()))?;
 
         let responder = self
             .pending_permissions
             .lock()
             .unwrap()
             .remove(call_id)
-            .ok_or_else(|| {
-                AppError::BadRequest(format!("Pending ACP permission not found: {call_id}"))
-            })?;
+            .ok_or_else(|| AppError::BadRequest(format!("Pending ACP permission not found: {call_id}")))?;
 
         responder
             .send(PermissionDecision::Selected { option_id })
-            .map_err(|_| {
-                AppError::BadRequest(format!("Pending ACP permission expired: {call_id}"))
-            })?;
+            .map_err(|_| AppError::BadRequest(format!("Pending ACP permission expired: {call_id}")))?;
 
         debug!(conversation_id = %self.conversation_id, call_id, "ACP permission response forwarded");
         Ok(())
@@ -1101,8 +1045,7 @@ impl crate::agent_manager::IAgentManager for AcpAgentManager {
         );
 
         // Mark closing to prevent reconnect attempts
-        self.closing
-            .store(true, std::sync::atomic::Ordering::Release);
+        self.closing.store(true, std::sync::atomic::Ordering::Release);
 
         // Cancel the current session if active
         if let Ok(state) = self.state.try_read()
@@ -1154,10 +1097,7 @@ impl crate::agent_manager::IAgentManager for AcpAgentManager {
 
         if let Some(sid) = session_id {
             self.protocol
-                .set_mode(SetSessionModeRequest::new(
-                    SessionId::new(sid),
-                    normalized_mode.clone(),
-                ))
+                .set_mode(SetSessionModeRequest::new(SessionId::new(sid), normalized_mode.clone()))
                 .await
                 .map_err(AppError::from)?;
             self.update_cached_mode(&normalized_mode).await;
@@ -1224,10 +1164,7 @@ mod tests {
     fn normalize_requested_mode_rewrites_yolo_when_behavior_policy_maps_it() {
         let meta = metadata_with_yolo_id(Some("full-access"));
         assert_eq!(normalize_requested_mode(&meta, "yolo"), "full-access");
-        assert_eq!(
-            normalize_requested_mode(&meta, "yoloNoSandbox"),
-            "full-access"
-        );
+        assert_eq!(normalize_requested_mode(&meta, "yoloNoSandbox"), "full-access");
     }
 
     #[test]
@@ -1235,10 +1172,7 @@ mod tests {
         let meta = metadata_with_yolo_id(None);
         // No mapping configured — aliases flow through unchanged.
         assert_eq!(normalize_requested_mode(&meta, "yolo"), "yolo");
-        assert_eq!(
-            normalize_requested_mode(&meta, "yoloNoSandbox"),
-            "yoloNoSandbox"
-        );
+        assert_eq!(normalize_requested_mode(&meta, "yoloNoSandbox"), "yoloNoSandbox");
     }
 
     #[test]
@@ -1260,10 +1194,7 @@ mod tests {
     fn normalize_requested_mode_rewrites_yolo_for_builtin_vendors() {
         // Claude / Codebuddy → bypassPermissions.
         let claude_like = metadata_with_yolo_id(Some("bypassPermissions"));
-        assert_eq!(
-            normalize_requested_mode(&claude_like, "yolo"),
-            "bypassPermissions"
-        );
+        assert_eq!(normalize_requested_mode(&claude_like, "yolo"), "bypassPermissions");
         assert_eq!(
             normalize_requested_mode(&claude_like, "yoloNoSandbox"),
             "bypassPermissions"
@@ -1346,11 +1277,8 @@ mod tests {
         assert_eq!(stdio.command, PathBuf::from("/usr/bin/aionui-backend"));
         assert_eq!(stdio.args, vec!["mcp-bridge".to_owned()]);
 
-        let env: std::collections::HashMap<_, _> = stdio
-            .env
-            .iter()
-            .map(|v| (v.name.as_str(), v.value.as_str()))
-            .collect();
+        let env: std::collections::HashMap<_, _> =
+            stdio.env.iter().map(|v| (v.name.as_str(), v.value.as_str())).collect();
         assert_eq!(env.get(TeamMcpStdioConfig::ENV_PORT), Some(&"54321"));
         assert_eq!(env.get(TeamMcpStdioConfig::ENV_TOKEN), Some(&"tok-abc"));
         assert_eq!(env.get(TeamMcpStdioConfig::ENV_SLOT_ID), Some(&"slot-lead"));
@@ -1372,8 +1300,8 @@ mod tests {
         assert_eq!(modes.available_modes, Some(json!({"x": 1})));
         assert!(modes.available_models.is_none());
 
-        let models = catalog_partial_from_event(&AgentStreamEvent::AcpModelInfo(json!([1])))
-            .expect("model event must project");
+        let models =
+            catalog_partial_from_event(&AgentStreamEvent::AcpModelInfo(json!([1]))).expect("model event must project");
         assert_eq!(models.available_models, Some(json!([1])));
 
         let cfg = catalog_partial_from_event(&AgentStreamEvent::AcpConfigOption(json!([
@@ -1384,9 +1312,9 @@ mod tests {
 
         // An unrelated event emits no update.
         assert!(
-            catalog_partial_from_event(&AgentStreamEvent::Start(
-                crate::stream_event::StartEventData { session_id: None }
-            ))
+            catalog_partial_from_event(&AgentStreamEvent::Start(crate::stream_event::StartEventData {
+                session_id: None
+            }))
             .is_none()
         );
     }

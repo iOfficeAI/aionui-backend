@@ -9,11 +9,7 @@ use crate::types::{ExtAgent, ResolvedAgent};
 /// Resolve a single agent contribution.
 ///
 /// The `context` field supports `@file:` references.
-pub fn resolve_agent(
-    agent: &ExtAgent,
-    extension_name: &str,
-    ext_dir: &Path,
-) -> Result<ResolvedAgent, ExtensionError> {
+pub fn resolve_agent(agent: &ExtAgent, extension_name: &str, ext_dir: &Path) -> Result<ResolvedAgent, ExtensionError> {
     let context = agent
         .context
         .as_deref()
@@ -32,11 +28,7 @@ pub fn resolve_agent(
 }
 
 /// Resolve all agent contributions from an extension.
-pub fn resolve_agents(
-    agents: &[ExtAgent],
-    extension_name: &str,
-    ext_dir: &Path,
-) -> Vec<ResolvedAgent> {
+pub fn resolve_agents(agents: &[ExtAgent], extension_name: &str, ext_dir: &Path) -> Vec<ResolvedAgent> {
     agents
         .iter()
         .filter_map(|a| {

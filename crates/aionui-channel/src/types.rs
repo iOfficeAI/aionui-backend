@@ -493,10 +493,7 @@ mod tests {
 
     #[test]
     fn plugin_type_from_str_opt() {
-        assert_eq!(
-            PluginType::from_str_opt("telegram"),
-            Some(PluginType::Telegram)
-        );
+        assert_eq!(PluginType::from_str_opt("telegram"), Some(PluginType::Telegram));
         assert_eq!(PluginType::from_str_opt("lark"), Some(PluginType::Lark));
         assert_eq!(PluginType::from_str_opt("unknown"), None);
     }
@@ -538,10 +535,7 @@ mod tests {
 
     #[test]
     fn plugin_status_from_str_opt() {
-        assert_eq!(
-            PluginStatus::from_str_opt("running"),
-            Some(PluginStatus::Running)
-        );
+        assert_eq!(PluginStatus::from_str_opt("running"), Some(PluginStatus::Running));
         assert_eq!(PluginStatus::from_str_opt("unknown"), None);
     }
 
@@ -571,10 +565,7 @@ mod tests {
 
     #[test]
     fn pairing_status_from_str_opt() {
-        assert_eq!(
-            PairingStatus::from_str_opt("pending"),
-            Some(PairingStatus::Pending)
-        );
+        assert_eq!(PairingStatus::from_str_opt("pending"), Some(PairingStatus::Pending));
         assert_eq!(PairingStatus::from_str_opt("nope"), None);
     }
 

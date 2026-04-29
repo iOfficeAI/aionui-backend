@@ -12,12 +12,11 @@ use http_body_util::BodyExt;
 use tower::ServiceExt;
 
 use aionui_db::{
-    SqliteClientPreferenceRepository, SqliteProviderRepository, SqliteSettingsRepository,
-    init_database_memory,
+    SqliteClientPreferenceRepository, SqliteProviderRepository, SqliteSettingsRepository, init_database_memory,
 };
 use aionui_system::{
-    ClientPrefService, ModelFetchService, ProtocolDetectionService, ProviderService,
-    SettingsService, SystemRouterState, VersionCheckService, settings_routes,
+    ClientPrefService, ModelFetchService, ProtocolDetectionService, ProviderService, SettingsService,
+    SystemRouterState, VersionCheckService, settings_routes,
 };
 
 // ---------------------------------------------------------------------------
@@ -30,18 +29,10 @@ fn build_state(db: &aionui_db::Database) -> SystemRouterState {
     let provider_repo = Arc::new(SqliteProviderRepository::new(db.pool().clone()));
     let http_client = reqwest::Client::new();
     SystemRouterState {
-        settings_service: SettingsService::new(Arc::new(SqliteSettingsRepository::new(
-            db.pool().clone(),
-        ))),
-        client_pref_service: ClientPrefService::new(Arc::new(
-            SqliteClientPreferenceRepository::new(db.pool().clone()),
-        )),
+        settings_service: SettingsService::new(Arc::new(SqliteSettingsRepository::new(db.pool().clone()))),
+        client_pref_service: ClientPrefService::new(Arc::new(SqliteClientPreferenceRepository::new(db.pool().clone()))),
         provider_service: ProviderService::new(provider_repo.clone(), TEST_ENCRYPTION_KEY),
-        model_fetch_service: ModelFetchService::new(
-            provider_repo,
-            TEST_ENCRYPTION_KEY,
-            http_client.clone(),
-        ),
+        model_fetch_service: ModelFetchService::new(provider_repo, TEST_ENCRYPTION_KEY, http_client.clone()),
         protocol_detection_service: ProtocolDetectionService::new(http_client.clone()),
         version_check_service: VersionCheckService::new(http_client, "0.1.0".to_owned()),
     }
@@ -59,11 +50,7 @@ async fn body_json(resp: axum::response::Response) -> serde_json::Value {
 }
 
 fn get_request(uri: &str) -> Request<Body> {
-    Request::builder()
-        .method("GET")
-        .uri(uri)
-        .body(Body::empty())
-        .unwrap()
+    Request::builder().method("GET").uri(uri).body(Body::empty()).unwrap()
 }
 
 fn json_request(method: &str, uri: &str, body: serde_json::Value) -> Request<Body> {
@@ -97,11 +84,7 @@ async fn get_settings_default_values() {
 #[tokio::test]
 async fn patch_settings_single_field() {
     let (app, _db) = setup().await;
-    let req = json_request(
-        "PATCH",
-        "/api/settings",
-        serde_json::json!({"language": "zh-CN"}),
-    );
+    let req = json_request("PATCH", "/api/settings", serde_json::json!({"language": "zh-CN"}));
     let resp = app.oneshot(req).await.unwrap();
 
     assert_eq!(resp.status(), StatusCode::OK);
@@ -171,11 +154,7 @@ async fn patch_settings_type_error_rejected() {
 #[tokio::test]
 async fn patch_settings_unknown_field_ignored() {
     let (app, _db) = setup().await;
-    let req = json_request(
-        "PATCH",
-        "/api/settings",
-        serde_json::json!({"unknown_field": 123}),
-    );
+    let req = json_request("PATCH", "/api/settings", serde_json::json!({"unknown_field": 123}));
     let resp = app.oneshot(req).await.unwrap();
 
     assert_eq!(resp.status(), StatusCode::OK);
@@ -212,10 +191,7 @@ async fn patch_then_get_reflects_changes() {
 #[tokio::test]
 async fn get_client_prefs_empty() {
     let (app, _db) = setup().await;
-    let resp = app
-        .oneshot(get_request("/api/settings/client"))
-        .await
-        .unwrap();
+    let resp = app.oneshot(get_request("/api/settings/client")).await.unwrap();
 
     assert_eq!(resp.status(), StatusCode::OK);
     let json = body_json(resp).await;
@@ -237,10 +213,7 @@ async fn put_and_get_boolean_value() {
 
     let app2 = settings_routes(build_state(&db));
 
-    let resp = app2
-        .oneshot(get_request("/api/settings/client"))
-        .await
-        .unwrap();
+    let resp = app2.oneshot(get_request("/api/settings/client")).await.unwrap();
     let json = body_json(resp).await;
     assert_eq!(json["data"]["system.closeToTray"], true);
 }
@@ -249,20 +222,13 @@ async fn put_and_get_boolean_value() {
 async fn put_and_get_number_value() {
     let (app, db) = setup().await;
 
-    let req = json_request(
-        "PUT",
-        "/api/settings/client",
-        serde_json::json!({"pet.size": 360}),
-    );
+    let req = json_request("PUT", "/api/settings/client", serde_json::json!({"pet.size": 360}));
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
     let app2 = settings_routes(build_state(&db));
 
-    let resp = app2
-        .oneshot(get_request("/api/settings/client"))
-        .await
-        .unwrap();
+    let resp = app2.oneshot(get_request("/api/settings/client")).await.unwrap();
     let json = body_json(resp).await;
     assert_eq!(json["data"]["pet.size"], 360);
 }
@@ -271,20 +237,13 @@ async fn put_and_get_number_value() {
 async fn put_and_get_string_value() {
     let (app, db) = setup().await;
 
-    let req = json_request(
-        "PUT",
-        "/api/settings/client",
-        serde_json::json!({"theme": "dark"}),
-    );
+    let req = json_request("PUT", "/api/settings/client", serde_json::json!({"theme": "dark"}));
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
     let app2 = settings_routes(build_state(&db));
 
-    let resp = app2
-        .oneshot(get_request("/api/settings/client"))
-        .await
-        .unwrap();
+    let resp = app2.oneshot(get_request("/api/settings/client")).await.unwrap();
     let json = body_json(resp).await;
     assert_eq!(json["data"]["theme"], "dark");
 }
@@ -294,28 +253,17 @@ async fn put_null_deletes_key() {
     let (app, db) = setup().await;
 
     // First write a value
-    let req = json_request(
-        "PUT",
-        "/api/settings/client",
-        serde_json::json!({"theme": "dark"}),
-    );
+    let req = json_request("PUT", "/api/settings/client", serde_json::json!({"theme": "dark"}));
     app.oneshot(req).await.unwrap();
 
     // Then delete it with null
     let app2 = settings_routes(build_state(&db));
-    let req = json_request(
-        "PUT",
-        "/api/settings/client",
-        serde_json::json!({"theme": null}),
-    );
+    let req = json_request("PUT", "/api/settings/client", serde_json::json!({"theme": null}));
     app2.oneshot(req).await.unwrap();
 
     // Verify it's gone
     let app3 = settings_routes(build_state(&db));
-    let resp = app3
-        .oneshot(get_request("/api/settings/client"))
-        .await
-        .unwrap();
+    let resp = app3.oneshot(get_request("/api/settings/client")).await.unwrap();
     let json = body_json(resp).await;
     assert_eq!(json["data"], serde_json::json!({}));
 }
@@ -334,10 +282,7 @@ async fn put_batch_write() {
 
     let app2 = settings_routes(build_state(&db));
 
-    let resp = app2
-        .oneshot(get_request("/api/settings/client"))
-        .await
-        .unwrap();
+    let resp = app2.oneshot(get_request("/api/settings/client")).await.unwrap();
     let json = body_json(resp).await;
     assert_eq!(json["data"]["a"], 1);
     assert_eq!(json["data"]["b"], "x");
@@ -375,26 +320,15 @@ async fn get_client_prefs_with_keys_filter() {
 async fn put_overwrite_existing_value() {
     let (app, db) = setup().await;
 
-    let req = json_request(
-        "PUT",
-        "/api/settings/client",
-        serde_json::json!({"k": "v1"}),
-    );
+    let req = json_request("PUT", "/api/settings/client", serde_json::json!({"k": "v1"}));
     app.oneshot(req).await.unwrap();
 
     let app2 = settings_routes(build_state(&db));
-    let req = json_request(
-        "PUT",
-        "/api/settings/client",
-        serde_json::json!({"k": "v2"}),
-    );
+    let req = json_request("PUT", "/api/settings/client", serde_json::json!({"k": "v2"}));
     app2.oneshot(req).await.unwrap();
 
     let app3 = settings_routes(build_state(&db));
-    let resp = app3
-        .oneshot(get_request("/api/settings/client"))
-        .await
-        .unwrap();
+    let resp = app3.oneshot(get_request("/api/settings/client")).await.unwrap();
     let json = body_json(resp).await;
     assert_eq!(json["data"]["k"], "v2");
 }
@@ -411,11 +345,7 @@ async fn put_empty_key_rejected() {
 async fn put_long_key_rejected() {
     let (app, _db) = setup().await;
     let long_key = "x".repeat(256);
-    let req = json_request(
-        "PUT",
-        "/api/settings/client",
-        serde_json::json!({long_key: true}),
-    );
+    let req = json_request("PUT", "/api/settings/client", serde_json::json!({long_key: true}));
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }

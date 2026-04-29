@@ -25,12 +25,10 @@ const OFFICE_EXTENSIONS: &[&str] = &["pptx", "docx", "xlsx"];
 
 /// Returns `true` if the file path has an Office document extension.
 fn is_office_file(path: &Path) -> bool {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| {
-            let lower = ext.to_ascii_lowercase();
-            OFFICE_EXTENSIONS.contains(&lower.as_str())
-        })
+    path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| {
+        let lower = ext.to_ascii_lowercase();
+        OFFICE_EXTENSIONS.contains(&lower.as_str())
+    })
 }
 
 /// Maps a `notify::EventKind` to a human-readable event type string.
@@ -93,38 +91,37 @@ impl FileWatchService {
         let wf = watched_files.clone();
         let db = debounce.clone();
 
-        let file_watcher =
-            notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
-                let event = match res {
-                    Ok(e) => e,
-                    Err(e) => {
-                        warn!(error = %e, "file watcher error");
-                        return;
-                    }
-                };
-
-                let event_type = match event_kind_to_str(&event.kind) {
-                    Some(t) => t,
-                    None => return,
-                };
-
-                for path in &event.paths {
-                    let path_str = path.to_string_lossy().into_owned();
-                    if !wf.contains_key(&path_str) {
-                        continue;
-                    }
-                    if !should_emit(&db, &path_str) {
-                        continue;
-                    }
-                    let payload = FileWatchEvent {
-                        file_path: path_str,
-                        event_type: event_type.to_owned(),
-                    };
-                    let json = serde_json::to_value(&payload).unwrap_or_default();
-                    bc.broadcast(WebSocketMessage::new("fileWatch.fileChanged", json));
+        let file_watcher = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
+            let event = match res {
+                Ok(e) => e,
+                Err(e) => {
+                    warn!(error = %e, "file watcher error");
+                    return;
                 }
-            })
-            .map_err(|e| AppError::Internal(format!("failed to create file watcher: {e}")))?;
+            };
+
+            let event_type = match event_kind_to_str(&event.kind) {
+                Some(t) => t,
+                None => return,
+            };
+
+            for path in &event.paths {
+                let path_str = path.to_string_lossy().into_owned();
+                if !wf.contains_key(&path_str) {
+                    continue;
+                }
+                if !should_emit(&db, &path_str) {
+                    continue;
+                }
+                let payload = FileWatchEvent {
+                    file_path: path_str,
+                    event_type: event_type.to_owned(),
+                };
+                let json = serde_json::to_value(&payload).unwrap_or_default();
+                bc.broadcast(WebSocketMessage::new("fileWatch.fileChanged", json));
+            }
+        })
+        .map_err(|e| AppError::Internal(format!("failed to create file watcher: {e}")))?;
 
         Ok(Self {
             broadcaster,
@@ -194,9 +191,8 @@ impl crate::traits::IFileWatchService for FileWatchService {
     }
 
     async fn start_office_watch(&self, workspace: &str) -> Result<(), AppError> {
-        let canonical = std::fs::canonicalize(workspace).map_err(|e| {
-            AppError::NotFound(format!("cannot resolve workspace {workspace}: {e}"))
-        })?;
+        let canonical = std::fs::canonicalize(workspace)
+            .map_err(|e| AppError::NotFound(format!("cannot resolve workspace {workspace}: {e}")))?;
         let key = canonical.to_string_lossy().into_owned();
 
         {
@@ -213,47 +209,41 @@ impl crate::traits::IFileWatchService for FileWatchService {
         let db = self.debounce.clone();
         let ws = key.clone();
 
-        let mut watcher =
-            notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
-                let event = match res {
-                    Ok(e) => e,
-                    Err(e) => {
-                        warn!(error = %e, "office watcher error");
-                        return;
-                    }
-                };
-
-                if !matches!(event.kind, EventKind::Create(_)) {
+        let mut watcher = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
+            let event = match res {
+                Ok(e) => e,
+                Err(e) => {
+                    warn!(error = %e, "office watcher error");
                     return;
                 }
+            };
 
-                for path in &event.paths {
-                    if !is_office_file(path) {
-                        continue;
-                    }
-                    let path_str = path.to_string_lossy().into_owned();
-                    let debounce_key = format!("office:{path_str}");
-                    if !should_emit(&db, &debounce_key) {
-                        continue;
-                    }
-                    let payload = OfficeFileAddedEvent {
-                        file_path: path_str,
-                        workspace: ws.clone(),
-                    };
-                    let json = serde_json::to_value(&payload).unwrap_or_default();
-                    bc.broadcast(WebSocketMessage::new(
-                        "workspaceOfficeWatch.fileAdded",
-                        json,
-                    ));
+            if !matches!(event.kind, EventKind::Create(_)) {
+                return;
+            }
+
+            for path in &event.paths {
+                if !is_office_file(path) {
+                    continue;
                 }
-            })
-            .map_err(|e| AppError::Internal(format!("failed to create office watcher: {e}")))?;
+                let path_str = path.to_string_lossy().into_owned();
+                let debounce_key = format!("office:{path_str}");
+                if !should_emit(&db, &debounce_key) {
+                    continue;
+                }
+                let payload = OfficeFileAddedEvent {
+                    file_path: path_str,
+                    workspace: ws.clone(),
+                };
+                let json = serde_json::to_value(&payload).unwrap_or_default();
+                bc.broadcast(WebSocketMessage::new("workspaceOfficeWatch.fileAdded", json));
+            }
+        })
+        .map_err(|e| AppError::Internal(format!("failed to create office watcher: {e}")))?;
 
         watcher
             .watch(&canonical, RecursiveMode::Recursive)
-            .map_err(|e| {
-                AppError::Internal(format!("failed to watch workspace {workspace}: {e}"))
-            })?;
+            .map_err(|e| AppError::Internal(format!("failed to watch workspace {workspace}: {e}")))?;
 
         let mut watchers = self
             .office_watchers
@@ -330,27 +320,19 @@ mod tests {
     #[test]
     fn modify_event_maps_to_change() {
         assert_eq!(
-            event_kind_to_str(&EventKind::Modify(ModifyKind::Data(
-                notify::event::DataChange::Content
-            ))),
+            event_kind_to_str(&EventKind::Modify(ModifyKind::Data(notify::event::DataChange::Content))),
             Some("change")
         );
     }
 
     #[test]
     fn create_event_maps_to_create() {
-        assert_eq!(
-            event_kind_to_str(&EventKind::Create(CreateKind::File)),
-            Some("create")
-        );
+        assert_eq!(event_kind_to_str(&EventKind::Create(CreateKind::File)), Some("create"));
     }
 
     #[test]
     fn remove_event_maps_to_remove() {
-        assert_eq!(
-            event_kind_to_str(&EventKind::Remove(RemoveKind::File)),
-            Some("remove")
-        );
+        assert_eq!(event_kind_to_str(&EventKind::Remove(RemoveKind::File)), Some("remove"));
     }
 
     #[test]
@@ -365,10 +347,7 @@ mod tests {
 
     #[test]
     fn access_event_is_skipped() {
-        assert_eq!(
-            event_kind_to_str(&EventKind::Access(AccessKind::Read)),
-            None
-        );
+        assert_eq!(event_kind_to_str(&EventKind::Access(AccessKind::Read)), None);
     }
 
     // -- should_emit (debounce) --

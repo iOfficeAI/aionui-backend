@@ -9,9 +9,7 @@ pub fn allocate_port() -> Result<u16, OfficeError> {
 }
 
 pub async fn is_port_listening(port: u16) -> bool {
-    tokio::net::TcpStream::connect(("127.0.0.1", port))
-        .await
-        .is_ok()
+    tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_ok()
 }
 
 #[cfg(test)]

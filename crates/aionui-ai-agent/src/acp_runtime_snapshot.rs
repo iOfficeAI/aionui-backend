@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use crate::stream_event::AgentStreamEvent;
 use agent_client_protocol::schema::{
-    AgentCapabilities, AuthMethod, AvailableCommand, LoadSessionResponse, SessionConfigOption,
-    SessionModeState, SessionModelState, UsageUpdate,
+    AgentCapabilities, AuthMethod, AvailableCommand, LoadSessionResponse, SessionConfigOption, SessionModeState,
+    SessionModelState, UsageUpdate,
 };
 
 /// Decoded per-session runtime state loaded from `acp_session.session_config.runtime`.
@@ -130,8 +130,7 @@ impl AcpRuntimeSnapshot {
                 // `current_mode_id` in place and keep the known modes.
                 if let Ok(update) = serde_json::from_value::<SessionModeState>(value.clone()) {
                     self.modes = Some(update);
-                } else if let Some(current_id) = value.get("currentModeId").and_then(|v| v.as_str())
-                {
+                } else if let Some(current_id) = value.get("currentModeId").and_then(|v| v.as_str()) {
                     if let Some(existing) = self.modes.as_ref() {
                         let available = existing.available_modes.clone();
                         self.modes = Some(SessionModeState::new(current_id.to_owned(), available));
@@ -146,9 +145,7 @@ impl AcpRuntimeSnapshot {
                 }
             }
             AgentStreamEvent::AcpConfigOption(value) => {
-                if let Ok(update) =
-                    serde_json::from_value::<Vec<SessionConfigOption>>(value.clone())
-                {
+                if let Ok(update) = serde_json::from_value::<Vec<SessionConfigOption>>(value.clone()) {
                     self.config_options = Some(update);
                 }
             }
@@ -177,17 +174,15 @@ impl AcpRuntimeSnapshot {
     }
 
     pub fn current_mode_id(&self) -> Option<String> {
-        self.modes
-            .as_ref()
-            .map(|modes| modes.current_mode_id.to_string())
+        self.modes.as_ref().map(|modes| modes.current_mode_id.to_string())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use agent_client_protocol::schema::{
-        AvailableCommand, ModelInfo, SessionConfigOption, SessionConfigSelectOption, SessionMode,
-        SessionModeState, SessionModelState, UsageUpdate,
+        AvailableCommand, ModelInfo, SessionConfigOption, SessionConfigSelectOption, SessionMode, SessionModeState,
+        SessionModelState, UsageUpdate,
     };
     use serde_json::json;
 
@@ -219,10 +214,7 @@ mod tests {
         assert!(models.available_models.is_empty());
 
         assert_eq!(
-            snapshot
-                .config_selections()
-                .get("reasoning")
-                .map(String::as_str),
+            snapshot.config_selections().get("reasoning").map(String::as_str),
             Some("high")
         );
         assert!(
@@ -260,10 +252,7 @@ mod tests {
         let mut snapshot = AcpRuntimeSnapshot::default();
         snapshot.set_modes(SessionModeState::new(
             "code",
-            vec![
-                SessionMode::new("code", "Code"),
-                SessionMode::new("plan", "Plan"),
-            ],
+            vec![SessionMode::new("code", "Code"), SessionMode::new("plan", "Plan")],
         ));
 
         snapshot.apply_event(&AgentStreamEvent::AcpModeInfo(json!({
@@ -287,9 +276,7 @@ mod tests {
             )
         ])));
 
-        let config_options = snapshot
-            .config_options()
-            .expect("config options should be cached");
+        let config_options = snapshot.config_options().expect("config options should be cached");
         assert_eq!(config_options.len(), 1);
         assert_eq!(config_options[0].name, "Mode");
     }
@@ -311,13 +298,7 @@ mod tests {
                 .to_string(),
             "claude-sonnet-4"
         );
-        assert_eq!(
-            snapshot
-                .context_usage()
-                .expect("usage should be cached")
-                .used,
-            1024
-        );
+        assert_eq!(snapshot.context_usage().expect("usage should be cached").used, 1024);
     }
 
     #[test]
@@ -331,9 +312,7 @@ mod tests {
         ];
 
         snapshot.apply_event(&AgentStreamEvent::AvailableCommands(
-            crate::stream_event::AvailableCommandsEventData {
-                commands: cmds.clone(),
-            },
+            crate::stream_event::AvailableCommandsEventData { commands: cmds.clone() },
         ));
 
         let stored = snapshot

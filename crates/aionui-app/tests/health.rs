@@ -14,11 +14,7 @@ fn build_request(method: &str, uri: &str) -> Request<Body> {
 }
 
 async fn response_json(body: Body) -> serde_json::Value {
-    let bytes = body
-        .collect()
-        .await
-        .expect("failed to read body")
-        .to_bytes();
+    let bytes = body.collect().await.expect("failed to read body").to_bytes();
     serde_json::from_slice(&bytes).expect("failed to parse JSON")
 }
 
@@ -78,14 +74,8 @@ async fn health_check_has_security_headers() {
         .expect("request failed");
 
     assert_eq!(response.headers().get("x-frame-options").unwrap(), "DENY");
-    assert_eq!(
-        response.headers().get("x-content-type-options").unwrap(),
-        "nosniff"
-    );
-    assert_eq!(
-        response.headers().get("x-xss-protection").unwrap(),
-        "1; mode=block"
-    );
+    assert_eq!(response.headers().get("x-content-type-options").unwrap(), "nosniff");
+    assert_eq!(response.headers().get("x-xss-protection").unwrap(), "1; mode=block");
     assert_eq!(
         response.headers().get("referrer-policy").unwrap(),
         "strict-origin-when-cross-origin"

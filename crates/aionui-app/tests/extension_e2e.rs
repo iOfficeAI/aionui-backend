@@ -5,10 +5,7 @@ use serde_json::json;
 use tempfile::TempDir;
 use tower::ServiceExt;
 
-use common::{
-    body_json, build_app, build_app_with_skill_paths, get_with_token, json_with_token,
-    setup_and_login,
-};
+use common::{body_json, build_app, build_app_with_skill_paths, get_with_token, json_with_token, setup_and_login};
 
 // ---------------------------------------------------------------------------
 // EQ — Extension query (unauthenticated → rejected)
@@ -17,10 +14,7 @@ use common::{
 #[tokio::test]
 async fn eq_unauthenticated_access_rejected() {
     let (app, _) = build_app().await;
-    let resp = app
-        .oneshot(common::get_request("/api/extensions"))
-        .await
-        .unwrap();
+    let resp = app.oneshot(common::get_request("/api/extensions")).await.unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
 }
 
@@ -33,10 +27,7 @@ async fn eq1_get_loaded_extensions_empty() {
     let (mut app, services) = build_app().await;
     let (token, _csrf) = setup_and_login(&mut app, &services, "user1", "pass1").await;
 
-    let resp = app
-        .oneshot(get_with_token("/api/extensions", &token))
-        .await
-        .unwrap();
+    let resp = app.oneshot(get_with_token("/api/extensions", &token)).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
     let json = body_json(resp).await;
@@ -344,10 +335,7 @@ async fn sm11_get_skill_paths() {
     let (mut app, services) = build_app().await;
     let (token, _csrf) = setup_and_login(&mut app, &services, "user1", "pass1").await;
 
-    let resp = app
-        .oneshot(get_with_token("/api/skills/paths", &token))
-        .await
-        .unwrap();
+    let resp = app.oneshot(get_with_token("/api/skills/paths", &token)).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
     let json = body_json(resp).await;
@@ -401,20 +389,14 @@ async fn cp1_get_external_paths_empty() {
 #[tokio::test]
 async fn auth_hub_unauthenticated() {
     let (app, _) = build_app().await;
-    let resp = app
-        .oneshot(common::get_request("/api/hub/extensions"))
-        .await
-        .unwrap();
+    let resp = app.oneshot(common::get_request("/api/hub/extensions")).await.unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]
 async fn auth_skills_unauthenticated() {
     let (app, _) = build_app().await;
-    let resp = app
-        .oneshot(common::get_request("/api/skills"))
-        .await
-        .unwrap();
+    let resp = app.oneshot(common::get_request("/api/skills")).await.unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
 }
 
@@ -691,10 +673,7 @@ async fn sl1_list_skills_tags_builtin_and_custom_with_source_field() {
     write_skill(&builtin_dir, "review", "Built-in review skill");
     write_skill(&paths.user_skills_dir, "my-skill", "A user-imported skill");
 
-    let resp = app
-        .oneshot(get_with_token("/api/skills", &token))
-        .await
-        .unwrap();
+    let resp = app.oneshot(get_with_token("/api/skills", &token)).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
     let json = body_json(resp).await;
@@ -730,10 +709,7 @@ async fn sl2_list_skills_user_custom_overrides_builtin() {
     write_skill(&builtin_dir, "review", "Built-in review");
     write_skill(&paths.user_skills_dir, "review", "Custom review override");
 
-    let resp = app
-        .oneshot(get_with_token("/api/skills", &token))
-        .await
-        .unwrap();
+    let resp = app.oneshot(get_with_token("/api/skills", &token)).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
     let json = body_json(resp).await;
@@ -749,10 +725,7 @@ async fn sl3_list_skills_returns_empty_array_when_no_skills() {
     let (mut app, services, _paths) = build_app_with_skill_paths(tmp.path()).await;
     let (token, _csrf) = setup_and_login(&mut app, &services, "user1", "pass1").await;
 
-    let resp = app
-        .oneshot(get_with_token("/api/skills", &token))
-        .await
-        .unwrap();
+    let resp = app.oneshot(get_with_token("/api/skills", &token)).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
     let json = body_json(resp).await;
@@ -787,8 +760,7 @@ async fn ba1_auto_skills_lists_underscore_builtin_entries() {
     assert_eq!(json["success"], true);
     let arr = json["data"].as_array().unwrap();
     assert_eq!(arr.len(), 2);
-    let names: std::collections::HashSet<_> =
-        arr.iter().map(|v| v["name"].as_str().unwrap()).collect();
+    let names: std::collections::HashSet<_> = arr.iter().map(|v| v["name"].as_str().unwrap()).collect();
     assert!(names.contains("cron"));
     assert!(names.contains("skill-creator"));
     assert!(!names.contains("review"));

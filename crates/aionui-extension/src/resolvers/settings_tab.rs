@@ -16,13 +16,8 @@ pub fn resolve_settings_tab(tab: &ExtSettingsTab, extension_name: &str) -> Resol
 }
 
 /// Resolve all settings tab contributions from an extension.
-pub fn resolve_settings_tabs(
-    tabs: &[ExtSettingsTab],
-    extension_name: &str,
-) -> Vec<ResolvedSettingsTab> {
-    tabs.iter()
-        .map(|t| resolve_settings_tab(t, extension_name))
-        .collect()
+pub fn resolve_settings_tabs(tabs: &[ExtSettingsTab], extension_name: &str) -> Vec<ResolvedSettingsTab> {
+    tabs.iter().map(|t| resolve_settings_tab(t, extension_name)).collect()
 }
 
 #[cfg(test)]

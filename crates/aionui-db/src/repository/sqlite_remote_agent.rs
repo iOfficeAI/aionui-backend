@@ -3,9 +3,7 @@ use sqlx::SqlitePool;
 
 use crate::error::DbError;
 use crate::models::RemoteAgentRow;
-use crate::repository::remote_agent::{
-    CreateRemoteAgentParams, IRemoteAgentRepository, UpdateRemoteAgentParams,
-};
+use crate::repository::remote_agent::{CreateRemoteAgentParams, IRemoteAgentRepository, UpdateRemoteAgentParams};
 
 /// SQLite-backed implementation of [`IRemoteAgentRepository`].
 #[derive(Clone, Debug)]
@@ -22,11 +20,9 @@ impl SqliteRemoteAgentRepository {
 #[async_trait::async_trait]
 impl IRemoteAgentRepository for SqliteRemoteAgentRepository {
     async fn list(&self) -> Result<Vec<RemoteAgentRow>, DbError> {
-        let rows = sqlx::query_as::<_, RemoteAgentRow>(
-            "SELECT * FROM remote_agents ORDER BY created_at ASC",
-        )
-        .fetch_all(&self.pool)
-        .await?;
+        let rows = sqlx::query_as::<_, RemoteAgentRow>("SELECT * FROM remote_agents ORDER BY created_at ASC")
+            .fetch_all(&self.pool)
+            .await?;
 
         Ok(rows)
     }
@@ -93,11 +89,7 @@ impl IRemoteAgentRepository for SqliteRemoteAgentRepository {
         })
     }
 
-    async fn update(
-        &self,
-        id: &str,
-        params: UpdateRemoteAgentParams<'_>,
-    ) -> Result<RemoteAgentRow, DbError> {
+    async fn update(&self, id: &str, params: UpdateRemoteAgentParams<'_>) -> Result<RemoteAgentRow, DbError> {
         let existing = self
             .find_by_id(id)
             .await?
@@ -177,16 +169,10 @@ fn merge_update(existing: RemoteAgentRow, params: UpdateRemoteAgentParams<'_>) -
         protocol: params.protocol.unwrap_or(&existing.protocol).to_string(),
         url: params.url.unwrap_or(&existing.url).to_string(),
         auth_type: params.auth_type.unwrap_or(&existing.auth_type).to_string(),
-        auth_token: params
-            .auth_token
-            .map_or(existing.auth_token, |v| v.map(String::from)),
+        auth_token: params.auth_token.map_or(existing.auth_token, |v| v.map(String::from)),
         allow_insecure: params.allow_insecure.unwrap_or(existing.allow_insecure),
-        avatar: params
-            .avatar
-            .map_or(existing.avatar, |v| v.map(String::from)),
-        description: params
-            .description
-            .map_or(existing.description, |v| v.map(String::from)),
+        avatar: params.avatar.map_or(existing.avatar, |v| v.map(String::from)),
+        description: params.description.map_or(existing.description, |v| v.map(String::from)),
         // Device fields are not updated via UpdateRemoteAgentParams
         device_id: existing.device_id,
         device_public_key: existing.device_public_key,
@@ -416,9 +402,7 @@ mod tests {
             .unwrap();
 
         // Now update status to error without providing last_connected_at
-        repo.update_status(&created.id, "error", None)
-            .await
-            .unwrap();
+        repo.update_status(&created.id, "error", None).await.unwrap();
 
         let found = repo.find_by_id(&created.id).await.unwrap().unwrap();
         assert_eq!(found.status, "error");
@@ -432,9 +416,7 @@ mod tests {
         let created = repo.create(sample_params()).await.unwrap();
         assert!(created.last_connected_at.is_none());
 
-        repo.update_status(&created.id, "error", None)
-            .await
-            .unwrap();
+        repo.update_status(&created.id, "error", None).await.unwrap();
 
         let found = repo.find_by_id(&created.id).await.unwrap().unwrap();
         assert_eq!(found.status, "error");
@@ -444,10 +426,7 @@ mod tests {
     #[tokio::test]
     async fn update_status_nonexistent_returns_not_found() {
         let (repo, _db) = setup().await;
-        let err = repo
-            .update_status("no_id", "connected", None)
-            .await
-            .unwrap_err();
+        let err = repo.update_status("no_id", "connected", None).await.unwrap_err();
         assert!(matches!(err, DbError::NotFound(_)));
     }
 

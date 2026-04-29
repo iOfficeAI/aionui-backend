@@ -15,11 +15,7 @@ pub enum ApiClientError {
     AllKeysExhausted,
 
     #[error("HTTP error {status}: {body}")]
-    HttpError {
-        status: u16,
-        body: String,
-        retryable: bool,
-    },
+    HttpError { status: u16, body: String, retryable: bool },
 
     #[error("request failed: {0}")]
     RequestFailed(#[from] reqwest::Error),
@@ -71,25 +67,18 @@ impl RotatingClient {
     ///
     /// `build_request` receives `(http_client, base_url, api_key)` and
     /// must return a ready-to-send [`reqwest::RequestBuilder`].
-    pub async fn execute_with_retry<F>(
-        &self,
-        build_request: F,
-    ) -> Result<serde_json::Value, ApiClientError>
+    pub async fn execute_with_retry<F>(&self, build_request: F) -> Result<serde_json::Value, ApiClientError>
     where
         F: Fn(&reqwest::Client, &str, &str) -> reqwest::RequestBuilder,
     {
         let mut last_error = String::new();
 
         for attempt in 0..=self.max_retries {
-            let key = self
-                .key_manager
-                .get_available_key()
-                .await
-                .ok_or(if attempt == 0 {
-                    ApiClientError::NoKeysConfigured
-                } else {
-                    ApiClientError::AllKeysExhausted
-                })?;
+            let key = self.key_manager.get_available_key().await.ok_or(if attempt == 0 {
+                ApiClientError::NoKeysConfigured
+            } else {
+                ApiClientError::AllKeysExhausted
+            })?;
 
             let request = build_request(&self.http_client, &self.base_url, &key);
 
@@ -108,10 +97,7 @@ impl RotatingClient {
                     let retryable = is_retryable_status(status_code);
 
                     if retryable && attempt < self.max_retries {
-                        warn!(
-                            status = status_code,
-                            attempt, "retryable error, rotating key"
-                        );
+                        warn!(status = status_code, attempt, "retryable error, rotating key");
                         self.key_manager.blacklist_current().await;
                         last_error = format!("HTTP {status_code}: {body}");
                         let delay = self.retry_delay_ms * (attempt as u64 + 1);
@@ -243,10 +229,7 @@ mod tests {
 
     #[test]
     fn normalize_leaves_clean_url() {
-        assert_eq!(
-            normalize_base_url("https://api.example.com"),
-            "https://api.example.com"
-        );
+        assert_eq!(normalize_base_url("https://api.example.com"), "https://api.example.com");
     }
 
     #[test]

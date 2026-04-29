@@ -46,15 +46,10 @@ fn build_env_filter(log_level: Option<&str>) -> EnvFilter {
     EnvFilter::new(format!("{suppressions},{user_directives}"))
 }
 
-fn init_tracing(
-    log_dir: &Path,
-    log_level: Option<&str>,
-) -> tracing_appender::non_blocking::WorkerGuard {
+fn init_tracing(log_dir: &Path, log_level: Option<&str>) -> tracing_appender::non_blocking::WorkerGuard {
     std::fs::create_dir_all(log_dir).expect("failed to create log directory");
 
-    let console_layer = fmt::layer()
-        .with_target(true)
-        .with_filter(build_env_filter(log_level));
+    let console_layer = fmt::layer().with_target(true).with_filter(build_env_filter(log_level));
 
     let file_appender = tracing_appender::rolling::RollingFileAppender::builder()
         .rotation(tracing_appender::rolling::Rotation::DAILY)
@@ -91,9 +86,7 @@ async fn main() -> Result<ExitCode> {
 
     let cli = Cli::parse();
 
-    let log_dir = cli
-        .log_dir
-        .unwrap_or_else(|| Path::new(&cli.data_dir).join("logs"));
+    let log_dir = cli.log_dir.unwrap_or_else(|| Path::new(&cli.data_dir).join("logs"));
     let _log_guard = init_tracing(&log_dir, cli.log_level.as_deref());
 
     let config = AppConfig {
@@ -106,10 +99,7 @@ async fn main() -> Result<ExitCode> {
     let boot = Instant::now();
 
     // Initialize database and all services
-    info!(
-        "Initializing database at {}",
-        config.database_path().display()
-    );
+    info!("Initializing database at {}", config.database_path().display());
     let database = aionui_db::init_database(&config.database_path()).await?;
     info!(elapsed_ms = boot.elapsed().as_millis(), "startup: database initialized");
 
@@ -149,11 +139,12 @@ async fn main() -> Result<ExitCode> {
             }
         }
     }
-    info!(elapsed_ms = boot.elapsed().as_millis(), "startup: builtin skills materialized");
+    info!(
+        elapsed_ms = boot.elapsed().as_millis(),
+        "startup: builtin skills materialized"
+    );
 
-    let services =
-        AppServices::from_database_with_data_dir(database, config.data_dir.clone(), config.local)
-            .await?;
+    let services = AppServices::from_database_with_data_dir(database, config.data_dir.clone(), config.local).await?;
     info!(elapsed_ms = boot.elapsed().as_millis(), "startup: services constructed");
 
     if config.local {
@@ -185,9 +176,7 @@ async fn main() -> Result<ExitCode> {
 
 async fn shutdown_signal() {
     let ctrl_c = async {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("failed to install Ctrl+C handler");
+        tokio::signal::ctrl_c().await.expect("failed to install Ctrl+C handler");
     };
 
     #[cfg(unix)]

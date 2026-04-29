@@ -25,18 +25,14 @@ pub mod watcher;
 
 pub use classifier::{AssistantClassifier, AssistantRuleDispatcher, DefaultUserClassifier};
 pub use constants::*;
-pub use dependency::{
-    DependencyIssue, DependencyValidationResult, topological_sort, validate_dependencies,
-};
+pub use dependency::{DependencyIssue, DependencyValidationResult, topological_sort, validate_dependencies};
 pub use error::ExtensionError;
 pub use lifecycle::{HookKind, execute_hook, needs_install_hook, resolve_hook_path};
 pub use loader::{ScanPath, filter_by_engine_compatibility, load_all, resolve_scan_paths};
 pub use manifest::{parse_manifest, validate_manifest};
 pub use permission::{build_permission_summary, calculate_risk_level};
 pub use registry::{ExtensionRegistry, ExtensionSummary};
-pub use resolvers::{
-    resolve_all_contributions, resolve_extension_contributions, resolve_i18n_for_all,
-};
+pub use resolvers::{resolve_all_contributions, resolve_extension_contributions, resolve_i18n_for_all};
 pub use startup_materialize::materialize_if_needed;
 pub use state::{ExtensionStateStore, load_states_from_file, save_states_to_file};
 pub use template::{resolve_env_map, resolve_env_templates, resolve_file_reference};
@@ -49,15 +45,13 @@ pub use hub_routes::{HubRouterState, hub_routes};
 pub use routes::{ExtensionRouterState, extension_routes};
 pub use skill_routes::{SkillRouterState, skill_routes};
 pub use skill_service::{
-    BUILTIN_SKILLS_ENV_VAR, BuiltinAutoSkillItem, ExternalSkillSource, NamedPath,
-    ResolvedAgentSkill, ScannedSkill, SkillListItem, SkillPaths, SkillSource,
-    builtin_skills_corpus, delete_skill, detect_and_count_external_skills,
-    detect_common_skill_paths, export_skill_with_symlink, get_skill_paths, import_skill,
-    import_skill_with_symlink, link_workspace_skills, list_available_skills,
-    list_builtin_auto_skills, materialize_skills_for_agent, read_builtin_rule, read_builtin_skill,
-    read_skill_info, resolve_skill_paths, scan_for_skills,
+    BUILTIN_SKILLS_ENV_VAR, BuiltinAutoSkillItem, ExternalSkillSource, NamedPath, ResolvedAgentSkill, ScannedSkill,
+    SkillListItem, SkillPaths, SkillSource, builtin_skills_corpus, delete_skill, detect_and_count_external_skills,
+    detect_common_skill_paths, export_skill_with_symlink, get_skill_paths, import_skill, import_skill_with_symlink,
+    link_workspace_skills, list_available_skills, list_builtin_auto_skills, materialize_skills_for_agent,
+    read_builtin_rule, read_builtin_skill, read_skill_info, resolve_skill_paths, scan_for_skills,
 };
 pub use skill_service::{
-    delete_assistant_rule, delete_assistant_skill, read_assistant_rule, read_assistant_skill,
-    write_assistant_rule, write_assistant_skill,
+    delete_assistant_rule, delete_assistant_skill, read_assistant_rule, read_assistant_skill, write_assistant_rule,
+    write_assistant_skill,
 };

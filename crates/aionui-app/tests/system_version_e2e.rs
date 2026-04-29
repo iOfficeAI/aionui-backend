@@ -9,8 +9,8 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use common::{
-    body_json, build_app, build_app_with_mock_version, delete_with_token, get_with_token,
-    json_with_token, setup_and_login,
+    body_json, build_app, build_app_with_mock_version, delete_with_token, get_with_token, json_with_token,
+    setup_and_login,
 };
 
 // ===========================================================================
@@ -22,10 +22,7 @@ async fn system_info_with_auth() {
     let (mut app, services) = build_app().await;
     let (token, _csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
-    let resp = app
-        .oneshot(get_with_token("/api/system/info", &token))
-        .await
-        .unwrap();
+    let resp = app.oneshot(get_with_token("/api/system/info", &token)).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let json = body_json(resp).await;
     assert_eq!(json["success"], true);
@@ -42,12 +39,7 @@ async fn system_info_with_auth() {
 // Version check
 // ===========================================================================
 
-fn make_github_release(
-    tag: &str,
-    draft: bool,
-    prerelease: bool,
-    assets: Vec<serde_json::Value>,
-) -> serde_json::Value {
+fn make_github_release(tag: &str, draft: bool, prerelease: bool, assets: Vec<serde_json::Value>) -> serde_json::Value {
     json!({
         "tag_name": tag,
         "name": format!("Release {tag}"),
@@ -74,14 +66,12 @@ async fn version_check_has_update_with_auth() {
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/repos/iOfficeAI/AionUi/releases"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(json!([make_github_release(
-                "v2.0.0",
-                false,
-                false,
-                vec![make_github_asset("app-2.0.0-darwin-arm64.dmg", 80_000_000),]
-            ),])),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([make_github_release(
+            "v2.0.0",
+            false,
+            false,
+            vec![make_github_asset("app-2.0.0-darwin-arm64.dmg", 80_000_000),]
+        ),])))
         .mount(&mock_server)
         .await;
 
@@ -101,14 +91,12 @@ async fn version_check_no_update_with_auth() {
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/repos/iOfficeAI/AionUi/releases"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(json!([make_github_release(
-                "v1.0.0",
-                false,
-                false,
-                vec![]
-            ),])),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([make_github_release(
+            "v1.0.0",
+            false,
+            false,
+            vec![]
+        ),])))
         .mount(&mock_server)
         .await;
 
@@ -159,13 +147,7 @@ async fn full_system_flow_e2e() {
     assert_eq!(json["data"]["language"], "en-US");
 
     // 2. Update language
-    let req = json_with_token(
-        "PATCH",
-        "/api/settings",
-        json!({"language": "zh-CN"}),
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("PATCH", "/api/settings", json!({"language": "zh-CN"}), &token, &csrf);
     let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let json = body_json(resp).await;

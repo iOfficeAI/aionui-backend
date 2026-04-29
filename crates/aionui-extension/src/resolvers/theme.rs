@@ -9,16 +9,10 @@ use crate::types::{ExtTheme, ResolvedTheme};
 ///
 /// The CSS file path is relative to the extension directory.
 /// Cover image path is resolved to an absolute path.
-pub fn resolve_theme(
-    theme: &ExtTheme,
-    extension_name: &str,
-    ext_dir: &Path,
-) -> Result<ResolvedTheme, ExtensionError> {
+pub fn resolve_theme(theme: &ExtTheme, extension_name: &str, ext_dir: &Path) -> Result<ResolvedTheme, ExtensionError> {
     let css_path = ext_dir.join(&theme.css_file);
     if !css_path.exists() {
-        return Err(ExtensionError::ThemeCssNotFound(
-            css_path.display().to_string(),
-        ));
+        return Err(ExtensionError::ThemeCssNotFound(css_path.display().to_string()));
     }
 
     let css_content = std::fs::read_to_string(&css_path)?;
@@ -39,11 +33,7 @@ pub fn resolve_theme(
 }
 
 /// Resolve all theme contributions from an extension.
-pub fn resolve_themes(
-    themes: &[ExtTheme],
-    extension_name: &str,
-    ext_dir: &Path,
-) -> Vec<ResolvedTheme> {
+pub fn resolve_themes(themes: &[ExtTheme], extension_name: &str, ext_dir: &Path) -> Vec<ResolvedTheme> {
     themes
         .iter()
         .filter_map(|t| {
@@ -84,13 +74,7 @@ mod tests {
         assert_eq!(result.extension_name, "my-ext");
         assert_eq!(result.id, "dark-theme");
         assert_eq!(result.css_content, ":root { --bg: #000; }");
-        assert!(
-            result
-                .cover_image
-                .as_ref()
-                .unwrap()
-                .contains("images/dark.png")
-        );
+        assert!(result.cover_image.as_ref().unwrap().contains("images/dark.png"));
 
         std::fs::remove_dir_all(&dir).unwrap();
     }

@@ -2,9 +2,7 @@ use std::any::Any;
 use std::sync::Arc;
 
 use aionui_api_types::AgentModeResponse;
-use aionui_common::{
-    AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, TimestampMs,
-};
+use aionui_common::{AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, TimestampMs};
 use tokio::sync::broadcast;
 
 use crate::stream_event::AgentStreamEvent;
@@ -62,13 +60,8 @@ pub trait IAgentManager: Send + Sync {
     /// If `always_allow` is `true`, the confirmation's `action` (and optional
     /// `command_type`) are recorded in the session-level approval memory so
     /// that future identical requests can be auto-approved by the frontend.
-    fn confirm(
-        &self,
-        msg_id: &str,
-        call_id: &str,
-        data: serde_json::Value,
-        always_allow: bool,
-    ) -> Result<(), AppError>;
+    fn confirm(&self, msg_id: &str, call_id: &str, data: serde_json::Value, always_allow: bool)
+    -> Result<(), AppError>;
 
     /// Get the list of pending confirmation items.
     fn get_confirmations(&self) -> Vec<Confirmation>;

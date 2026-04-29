@@ -15,13 +15,7 @@ async fn t8_1_bedrock_missing_config() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
-    let req = json_with_token(
-        "POST",
-        "/api/bedrock/test-connection",
-        json!({}),
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("POST", "/api/bedrock/test-connection", json!({}), &token, &csrf);
     let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 
@@ -180,10 +174,5 @@ async fn t8_1_bedrock_invalid_credentials() {
 
     let json = body_json(resp).await;
     assert_eq!(json["success"], false);
-    assert!(
-        json["error"]
-            .as_str()
-            .unwrap()
-            .contains("Bedrock credentials invalid")
-    );
+    assert!(json["error"].as_str().unwrap().contains("Bedrock credentials invalid"));
 }

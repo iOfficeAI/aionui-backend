@@ -34,9 +34,7 @@ impl Default for QrTokenStore {
 
 impl QrTokenStore {
     pub fn new() -> Self {
-        Self {
-            tokens: DashMap::new(),
-        }
+        Self { tokens: DashMap::new() }
     }
 
     /// Generate a new QR login token and store it.

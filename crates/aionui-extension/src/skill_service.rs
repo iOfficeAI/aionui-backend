@@ -4,9 +4,8 @@ use include_dir::{Dir, include_dir};
 use tracing::{debug, warn};
 
 use crate::constants::{
-    ASSISTANT_RULES_DIR_NAME, ASSISTANT_SKILLS_DIR_NAME, BUILTIN_AUTO_SKILLS_SUBDIR,
-    BUILTIN_RULES_DIR_NAME, COMMON_SKILL_DIRS, CRON_SKILLS_DIR_NAME, SKILL_MANIFEST_FILE,
-    SKILLS_DIR_NAME,
+    ASSISTANT_RULES_DIR_NAME, ASSISTANT_SKILLS_DIR_NAME, BUILTIN_AUTO_SKILLS_SUBDIR, BUILTIN_RULES_DIR_NAME,
+    COMMON_SKILL_DIRS, CRON_SKILLS_DIR_NAME, SKILL_MANIFEST_FILE, SKILLS_DIR_NAME,
 };
 use crate::error::ExtensionError;
 
@@ -16,8 +15,7 @@ use crate::error::ExtensionError;
 /// authoritative at build time; an optional on-disk override
 /// (`AIONUI_BUILTIN_SKILLS_PATH`) is consulted at runtime for rapid
 /// iteration and E2E fixtures.
-static BUILTIN_SKILLS: Dir<'static> =
-    include_dir!("$CARGO_MANIFEST_DIR/../aionui-app/assets/builtin-skills");
+static BUILTIN_SKILLS: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/../aionui-app/assets/builtin-skills");
 
 /// Name of the environment variable that, when set, overrides the embedded
 /// corpus with an on-disk directory. Consumed by
@@ -101,10 +99,7 @@ pub fn resolve_skill_paths(app_resource_dir: &Path, data_dir: &Path) -> SkillPat
 ///
 /// Returns the file content as a string. Returns an empty string if the
 /// file does not exist (graceful degradation per API spec).
-pub async fn read_builtin_rule(
-    paths: &SkillPaths,
-    file_name: &str,
-) -> Result<String, ExtensionError> {
+pub async fn read_builtin_rule(paths: &SkillPaths, file_name: &str) -> Result<String, ExtensionError> {
     validate_filename(file_name)?;
     let file_path = paths.builtin_rules_dir.join(file_name);
     read_file_or_empty(&file_path).await
@@ -121,10 +116,7 @@ pub async fn read_builtin_rule(
 /// Reads from `paths.builtin_skills_dir`, which is always populated at
 /// startup by [`crate::startup_materialize::materialize_if_needed`].
 /// Rejects `..`-style traversal.
-pub async fn read_builtin_skill(
-    paths: &SkillPaths,
-    file_name: &str,
-) -> Result<String, ExtensionError> {
+pub async fn read_builtin_skill(paths: &SkillPaths, file_name: &str) -> Result<String, ExtensionError> {
     validate_builtin_skill_path(file_name)?;
     let file_path = paths.builtin_skills_dir.join(file_name);
     read_file_or_empty(&file_path).await
@@ -162,10 +154,7 @@ pub async fn write_assistant_rule(
 }
 
 /// Delete all locale versions of an assistant rule.
-pub async fn delete_assistant_rule(
-    paths: &SkillPaths,
-    assistant_id: &str,
-) -> Result<bool, ExtensionError> {
+pub async fn delete_assistant_rule(paths: &SkillPaths, assistant_id: &str) -> Result<bool, ExtensionError> {
     delete_assistant_resource(&paths.assistant_rules_dir, assistant_id).await
 }
 
@@ -189,10 +178,7 @@ pub async fn write_assistant_skill(
 }
 
 /// Delete all locale versions of an assistant skill.
-pub async fn delete_assistant_skill(
-    paths: &SkillPaths,
-    assistant_id: &str,
-) -> Result<bool, ExtensionError> {
+pub async fn delete_assistant_skill(paths: &SkillPaths, assistant_id: &str) -> Result<bool, ExtensionError> {
     delete_assistant_resource(&paths.assistant_skills_dir, assistant_id).await
 }
 
@@ -244,9 +230,7 @@ pub struct SkillListItem {
 /// consumers (e.g. the SkillsHubSettings export-symlink flow) can
 /// resolve the path on disk. `relative_location` is populated for
 /// built-ins only.
-pub async fn list_available_skills(
-    paths: &SkillPaths,
-) -> Result<Vec<SkillListItem>, ExtensionError> {
+pub async fn list_available_skills(paths: &SkillPaths) -> Result<Vec<SkillListItem>, ExtensionError> {
     let mut skills = std::collections::HashMap::new();
 
     // 1. Built-in skills (lower priority)
@@ -371,9 +355,7 @@ pub struct BuiltinAutoSkillItem {
 /// Reads from `{paths.builtin_skills_dir}/auto-inject/`. A missing
 /// `auto-inject/` directory yields an empty list, matching the
 /// graceful-degradation semantics used elsewhere in this module.
-pub async fn list_builtin_auto_skills(
-    paths: &SkillPaths,
-) -> Result<Vec<BuiltinAutoSkillItem>, ExtensionError> {
+pub async fn list_builtin_auto_skills(paths: &SkillPaths) -> Result<Vec<BuiltinAutoSkillItem>, ExtensionError> {
     let auto_dir = paths.builtin_skills_dir.join(BUILTIN_AUTO_SKILLS_SUBDIR);
     let mut items = list_auto_skills_from_disk(&auto_dir).await;
     items.sort_by(|a, b| a.name.cmp(&b.name));
@@ -392,10 +374,7 @@ async fn list_auto_skills_from_disk(auto_dir: &Path) -> Vec<BuiltinAutoSkillItem
             BuiltinAutoSkillItem {
                 name,
                 description: s.description,
-                location: format!(
-                    "{BUILTIN_AUTO_SKILLS_SUBDIR}/{}/{SKILL_MANIFEST_FILE}",
-                    s.name
-                ),
+                location: format!("{BUILTIN_AUTO_SKILLS_SUBDIR}/{}/{SKILL_MANIFEST_FILE}", s.name),
             }
         })
         .collect()
@@ -415,12 +394,8 @@ pub async fn read_skill_info(skill_path: &Path) -> Result<(String, String), Exte
         .await
         .map_err(|_| ExtensionError::SkillNotFound(skill_path.display().to_string()))?;
 
-    let (name, description) = parse_frontmatter_fields(&content).ok_or_else(|| {
-        ExtensionError::InvalidSkillPath(format!(
-            "No valid frontmatter in {}",
-            skill_file.display()
-        ))
-    })?;
+    let (name, description) = parse_frontmatter_fields(&content)
+        .ok_or_else(|| ExtensionError::InvalidSkillPath(format!("No valid frontmatter in {}", skill_file.display())))?;
 
     // Fallback: use directory name if name is empty
     let final_name = if name.is_empty() {
@@ -458,10 +433,7 @@ pub async fn import_skill(paths: &SkillPaths, skill_path: &Path) -> Result<Strin
 /// Import a skill by creating a symlink in the user skills directory.
 ///
 /// Returns the skill name.
-pub async fn import_skill_with_symlink(
-    paths: &SkillPaths,
-    skill_path: &Path,
-) -> Result<String, ExtensionError> {
+pub async fn import_skill_with_symlink(paths: &SkillPaths, skill_path: &Path) -> Result<String, ExtensionError> {
     let (name, _) = read_skill_info(skill_path).await?;
     validate_filename(&name)?;
 
@@ -484,10 +456,7 @@ pub async fn import_skill_with_symlink(
 }
 
 /// Export a skill by creating a symlink in the target directory.
-pub async fn export_skill_with_symlink(
-    skill_path: &Path,
-    target_dir: &Path,
-) -> Result<(), ExtensionError> {
+pub async fn export_skill_with_symlink(skill_path: &Path, target_dir: &Path) -> Result<(), ExtensionError> {
     let skill_name = skill_path
         .file_name()
         .map(|f| f.to_string_lossy().into_owned())
@@ -695,10 +664,7 @@ fn resolve_skill_source_path(paths: &SkillPaths, name: &str) -> Option<PathBuf> 
     if top.is_dir() {
         return Some(top);
     }
-    let auto = paths
-        .builtin_skills_dir
-        .join(BUILTIN_AUTO_SKILLS_SUBDIR)
-        .join(name);
+    let auto = paths.builtin_skills_dir.join(BUILTIN_AUTO_SKILLS_SUBDIR).join(name);
     if auto.is_dir() {
         return Some(auto);
     }
@@ -776,9 +742,7 @@ fn custom_source_slug(path: &str) -> String {
 ///
 /// The returned list preserves deterministic `source` slugs — see
 /// [`ExternalSkillSource::source`] for the contract.
-pub async fn detect_and_count_external_skills(
-    custom_paths: &[NamedPath],
-) -> Vec<ExternalSkillSource> {
+pub async fn detect_and_count_external_skills(custom_paths: &[NamedPath]) -> Vec<ExternalSkillSource> {
     let Some(home) = dirs::home_dir() else {
         return Vec::new();
     };
@@ -1066,22 +1030,16 @@ async fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), ExtensionError
 /// Create a symlink (platform-aware).
 #[cfg(unix)]
 async fn create_symlink(src: &Path, dst: &Path) -> Result<(), ExtensionError> {
-    tokio::fs::symlink(src, dst)
-        .await
-        .map_err(ExtensionError::Io)
+    tokio::fs::symlink(src, dst).await.map_err(ExtensionError::Io)
 }
 
 #[cfg(windows)]
 async fn create_symlink(src: &Path, dst: &Path) -> Result<(), ExtensionError> {
     // Use junction on Windows for directory symlinks
     if src.is_dir() {
-        tokio::fs::symlink_dir(src, dst)
-            .await
-            .map_err(ExtensionError::Io)
+        tokio::fs::symlink_dir(src, dst).await.map_err(ExtensionError::Io)
     } else {
-        tokio::fs::symlink_file(src, dst)
-            .await
-            .map_err(ExtensionError::Io)
+        tokio::fs::symlink_file(src, dst).await.map_err(ExtensionError::Io)
     }
 }
 
@@ -1225,15 +1183,11 @@ mod tests {
             .unwrap();
 
         // Read with matching locale
-        let content = read_assistant_rule(&paths, "abc123", Some("zh-CN"))
-            .await
-            .unwrap();
+        let content = read_assistant_rule(&paths, "abc123", Some("zh-CN")).await.unwrap();
         assert_eq!(content, "中文内容");
 
         // Read with non-matching locale → falls back to default
-        let content = read_assistant_rule(&paths, "abc123", Some("ja-JP"))
-            .await
-            .unwrap();
+        let content = read_assistant_rule(&paths, "abc123", Some("ja-JP")).await.unwrap();
         assert_eq!(content, "Default content");
 
         // Read without locale → default
@@ -1255,9 +1209,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let paths = make_test_paths(tmp.path());
 
-        write_assistant_rule(&paths, "abc123", "Default", None)
-            .await
-            .unwrap();
+        write_assistant_rule(&paths, "abc123", "Default", None).await.unwrap();
         write_assistant_rule(&paths, "abc123", "Chinese", Some("zh-CN"))
             .await
             .unwrap();
@@ -1271,9 +1223,7 @@ mod tests {
         // Verify all files are gone
         let content = read_assistant_rule(&paths, "abc123", None).await.unwrap();
         assert!(content.is_empty());
-        let content = read_assistant_rule(&paths, "abc123", Some("zh-CN"))
-            .await
-            .unwrap();
+        let content = read_assistant_rule(&paths, "abc123", Some("zh-CN")).await.unwrap();
         assert!(content.is_empty());
     }
 
@@ -1388,10 +1338,7 @@ mod tests {
         let debug_skill = skills.iter().find(|s| s.name == "debug").unwrap();
         assert!(!debug_skill.is_custom);
         assert_eq!(debug_skill.source, SkillSource::Builtin);
-        assert_eq!(
-            debug_skill.relative_location.as_deref(),
-            Some("debug/SKILL.md")
-        );
+        assert_eq!(debug_skill.relative_location.as_deref(), Some("debug/SKILL.md"));
 
         let my_skill = skills.iter().find(|s| s.name == "my-skill").unwrap();
         assert_eq!(my_skill.source, SkillSource::Custom);
@@ -1515,9 +1462,7 @@ mod tests {
         )
         .unwrap();
 
-        let name = import_skill_with_symlink(&paths, &source_dir)
-            .await
-            .unwrap();
+        let name = import_skill_with_symlink(&paths, &source_dir).await.unwrap();
         assert_eq!(name, "linked");
 
         let link_path = paths.user_skills_dir.join("linked");
@@ -1579,10 +1524,7 @@ mod tests {
         create_skill_in_dir(&builtin_dir, "protected", "Built-in skill");
 
         let result = delete_skill(&paths, "protected").await;
-        assert!(matches!(
-            result,
-            Err(ExtensionError::BuiltinSkillDeletion(_))
-        ));
+        assert!(matches!(result, Err(ExtensionError::BuiltinSkillDeletion(_))));
     }
 
     #[tokio::test]
@@ -1631,9 +1573,7 @@ mod tests {
 
     #[tokio::test]
     async fn scan_for_skills_nonexistent_dir() {
-        let skills = scan_for_skills(Path::new("/nonexistent/path"))
-            .await
-            .unwrap();
+        let skills = scan_for_skills(Path::new("/nonexistent/path")).await.unwrap();
         assert!(skills.is_empty());
     }
 
@@ -1653,9 +1593,7 @@ mod tests {
         .unwrap();
 
         let target_dir = tmp.path().join("exports");
-        export_skill_with_symlink(&source_dir, &target_dir)
-            .await
-            .unwrap();
+        export_skill_with_symlink(&source_dir, &target_dir).await.unwrap();
 
         let link = target_dir.join("my-skill");
         assert!(link.is_symlink());
@@ -1684,13 +1622,9 @@ mod tests {
     /// skills corpus materialized to disk. Use this for tests that
     /// previously relied on the embedded-corpus fallback.
     async fn make_embedded_paths(base: &Path) -> SkillPaths {
-        crate::startup_materialize::materialize_embedded_builtin_skills(
-            base,
-            &BUILTIN_SKILLS,
-            "test-version",
-        )
-        .await
-        .expect("failed to materialize embedded corpus for test");
+        crate::startup_materialize::materialize_embedded_builtin_skills(base, &BUILTIN_SKILLS, "test-version")
+            .await
+            .expect("failed to materialize embedded corpus for test");
         make_test_paths(base)
     }
 
@@ -1724,11 +1658,7 @@ mod tests {
         let paths = make_embedded_paths(tmp.path()).await;
 
         let autos = list_builtin_auto_skills(&paths).await.unwrap();
-        assert!(
-            autos.len() >= 4,
-            "expected ≥4 auto-inject entries, got {}",
-            autos.len()
-        );
+        assert!(autos.len() >= 4, "expected ≥4 auto-inject entries, got {}", autos.len());
         for item in &autos {
             assert!(
                 item.location.starts_with("auto-inject/"),
@@ -1745,9 +1675,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let paths = make_embedded_paths(tmp.path()).await;
 
-        let content = read_builtin_skill(&paths, "auto-inject/cron/SKILL.md")
-            .await
-            .unwrap();
+        let content = read_builtin_skill(&paths, "auto-inject/cron/SKILL.md").await.unwrap();
         assert!(!content.is_empty(), "embedded cron SKILL.md is empty");
         assert!(
             content.trim_start().starts_with("---"),
@@ -1773,9 +1701,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let paths = make_embedded_paths(tmp.path()).await;
 
-        let content = read_builtin_skill(&paths, "nonexistent/SKILL.md")
-            .await
-            .unwrap();
+        let content = read_builtin_skill(&paths, "nonexistent/SKILL.md").await.unwrap();
         assert!(content.is_empty());
     }
 
@@ -1806,10 +1732,7 @@ mod tests {
         let paths = make_embedded_paths(tmp.path()).await;
 
         let skills = list_available_skills(&paths).await.unwrap();
-        let builtins: Vec<_> = skills
-            .iter()
-            .filter(|s| s.source == SkillSource::Builtin)
-            .collect();
+        let builtins: Vec<_> = skills.iter().filter(|s| s.source == SkillSource::Builtin).collect();
         assert!(!builtins.is_empty(), "no builtin skills listed");
         for s in &builtins {
             let rel = s
@@ -1821,8 +1744,7 @@ mod tests {
                 "relative_location must end in /SKILL.md, got {rel}"
             );
             assert!(
-                s.location
-                    .contains(crate::constants::BUILTIN_SKILLS_DIR_NAME),
+                s.location.contains(crate::constants::BUILTIN_SKILLS_DIR_NAME),
                 "builtin location must live under the view dir, got {}",
                 s.location
             );
@@ -1844,9 +1766,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let paths = make_embedded_paths(tmp.path()).await;
 
-        let list = materialize_skills_for_agent(&paths, "conv-empty", &[])
-            .await
-            .unwrap();
+        let list = materialize_skills_for_agent(&paths, "conv-empty", &[]).await.unwrap();
         assert!(list.is_empty());
         // No per-conversation dir should be created.
         assert!(!paths.data_dir.join("agent-skills").exists());
@@ -1866,10 +1786,7 @@ mod tests {
         assert_eq!(resolved.len(), 1);
         assert_eq!(resolved[0].name, "cron");
         // source_path points at the real on-disk auto-inject directory.
-        let expected = paths
-            .builtin_skills_dir
-            .join(BUILTIN_AUTO_SKILLS_SUBDIR)
-            .join("cron");
+        let expected = paths.builtin_skills_dir.join(BUILTIN_AUTO_SKILLS_SUBDIR).join("cron");
         assert_eq!(resolved[0].source_path, expected);
         assert!(resolved[0].source_path.is_dir());
         assert!(resolved[0].source_path.join(SKILL_MANIFEST_FILE).exists());
@@ -1899,10 +1816,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(resolved.len(), 1);
-        assert_eq!(
-            resolved[0].source_path,
-            paths.user_skills_dir.join("my-custom")
-        );
+        assert_eq!(resolved[0].source_path, paths.user_skills_dir.join("my-custom"));
     }
 
     #[tokio::test]
@@ -1910,10 +1824,9 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let paths = make_embedded_paths(tmp.path()).await;
 
-        let resolved =
-            materialize_skills_for_agent(&paths, "conv-missing", &["no-such-skill".to_owned()])
-                .await
-                .unwrap();
+        let resolved = materialize_skills_for_agent(&paths, "conv-missing", &["no-such-skill".to_owned()])
+            .await
+            .unwrap();
         assert!(resolved.is_empty());
     }
 
@@ -1945,13 +1858,9 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let paths = make_embedded_paths(tmp.path()).await;
 
-        let resolved = materialize_skills_for_agent(
-            &paths,
-            "conv-sorted",
-            &["mermaid".to_owned(), "cron".to_owned()],
-        )
-        .await
-        .unwrap();
+        let resolved = materialize_skills_for_agent(&paths, "conv-sorted", &["mermaid".to_owned(), "cron".to_owned()])
+            .await
+            .unwrap();
         assert_eq!(resolved.len(), 2);
         assert_eq!(resolved[0].name, "cron");
         assert_eq!(resolved[1].name, "mermaid");
@@ -1966,9 +1875,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let paths = make_embedded_paths(tmp.path()).await;
 
-        let err = materialize_skills_for_agent(&paths, "../evil", &[])
-            .await
-            .unwrap_err();
+        let err = materialize_skills_for_agent(&paths, "../evil", &[]).await.unwrap_err();
         assert!(matches!(err, ExtensionError::PathTraversal(_)));
     }
 

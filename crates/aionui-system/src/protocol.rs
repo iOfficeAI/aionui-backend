@@ -2,8 +2,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use aionui_api_types::{
-    DetectProtocolRequest, DetectionSuggestion, KeyTestResult, MultiKeyResult,
-    ProtocolDetectionResponse, SuggestionType,
+    DetectProtocolRequest, DetectionSuggestion, KeyTestResult, MultiKeyResult, ProtocolDetectionResponse,
+    SuggestionType,
 };
 use aionui_common::{AppError, ProtocolType};
 use tokio::sync::Semaphore;
@@ -96,10 +96,7 @@ impl ProtocolDetectionService {
         Self { http_client }
     }
 
-    pub async fn detect_protocol(
-        &self,
-        req: &DetectProtocolRequest,
-    ) -> Result<ProtocolDetectionResponse, AppError> {
+    pub async fn detect_protocol(&self, req: &DetectProtocolRequest) -> Result<ProtocolDetectionResponse, AppError> {
         validate_request(req)?;
 
         let keys = parse_keys(&req.api_key);
@@ -132,10 +129,7 @@ impl ProtocolDetectionService {
                     let suggestion = success_suggestion(*protocol, req.preferred_protocol);
                     let multi_key_result = if req.test_all_keys && keys.len() > 1 {
                         let effective = fixed_base_url.as_deref().unwrap_or(&req.base_url);
-                        Some(
-                            self.test_all_keys(&keys, *protocol, effective, timeout)
-                                .await,
-                        )
+                        Some(self.test_all_keys(&keys, *protocol, effective, timeout).await)
                     } else {
                         None
                     };
@@ -163,10 +157,7 @@ impl ProtocolDetectionService {
         if let Some((protocol, fixed_base_url)) = auth_failure {
             let multi_key_result = if req.test_all_keys && keys.len() > 1 {
                 let effective = fixed_base_url.as_deref().unwrap_or(&req.base_url);
-                Some(
-                    self.test_all_keys(&keys, protocol, effective, timeout)
-                        .await,
-                )
+                Some(self.test_all_keys(&keys, protocol, effective, timeout).await)
             } else {
                 None
             };
@@ -209,12 +200,7 @@ impl ProtocolDetectionService {
         }
     }
 
-    async fn probe_openai(
-        &self,
-        base: &str,
-        api_key: &str,
-        timeout: Duration,
-    ) -> Result<ProbeOutcome, AppError> {
+    async fn probe_openai(&self, base: &str, api_key: &str, timeout: Duration) -> Result<ProbeOutcome, AppError> {
         let urls = [
             (format!("{base}/models"), None),
             (format!("{base}/v1/models"), Some(format!("{base}/v1"))),
@@ -252,20 +238,13 @@ impl ProtocolDetectionService {
         }
 
         if let Some(fixed) = last_auth_failure {
-            return Ok(ProbeOutcome::AuthFailure {
-                fixed_base_url: fixed,
-            });
+            return Ok(ProbeOutcome::AuthFailure { fixed_base_url: fixed });
         }
 
         Err(AppError::BadGateway("OpenAI probe failed".into()))
     }
 
-    async fn probe_anthropic(
-        &self,
-        base: &str,
-        api_key: &str,
-        timeout: Duration,
-    ) -> Result<ProbeOutcome, AppError> {
+    async fn probe_anthropic(&self, base: &str, api_key: &str, timeout: Duration) -> Result<ProbeOutcome, AppError> {
         let url = format!("{base}/v1/models");
         let resp = self
             .http_client
@@ -290,23 +269,13 @@ impl ProtocolDetectionService {
         }
 
         if is_auth_error(resp.status()) {
-            return Ok(ProbeOutcome::AuthFailure {
-                fixed_base_url: None,
-            });
+            return Ok(ProbeOutcome::AuthFailure { fixed_base_url: None });
         }
 
-        Err(AppError::BadGateway(format!(
-            "Anthropic returned {}",
-            resp.status()
-        )))
+        Err(AppError::BadGateway(format!("Anthropic returned {}", resp.status())))
     }
 
-    async fn probe_gemini(
-        &self,
-        base: &str,
-        api_key: &str,
-        timeout: Duration,
-    ) -> Result<ProbeOutcome, AppError> {
+    async fn probe_gemini(&self, base: &str, api_key: &str, timeout: Duration) -> Result<ProbeOutcome, AppError> {
         let url = format!("{base}/v1beta/models?key={api_key}");
         let resp = self
             .http_client
@@ -334,15 +303,10 @@ impl ProtocolDetectionService {
         }
 
         if is_auth_error(resp.status()) {
-            return Ok(ProbeOutcome::AuthFailure {
-                fixed_base_url: None,
-            });
+            return Ok(ProbeOutcome::AuthFailure { fixed_base_url: None });
         }
 
-        Err(AppError::BadGateway(format!(
-            "Gemini returned {}",
-            resp.status()
-        )))
+        Err(AppError::BadGateway(format!("Gemini returned {}", resp.status())))
     }
 
     // -- Multi-key testing --
@@ -449,17 +413,10 @@ fn build_test_order(
     url_inferred: Option<ProtocolType>,
     key_inferred: Option<ProtocolType>,
 ) -> Vec<ProtocolType> {
-    let defaults = [
-        ProtocolType::OpenAI,
-        ProtocolType::Anthropic,
-        ProtocolType::Gemini,
-    ];
+    let defaults = [ProtocolType::OpenAI, ProtocolType::Anthropic, ProtocolType::Gemini];
     let mut order = Vec::with_capacity(3);
 
-    for p in [preferred, url_inferred, key_inferred]
-        .into_iter()
-        .flatten()
-    {
+    for p in [preferred, url_inferred, key_inferred].into_iter().flatten() {
         if p != ProtocolType::Unknown && !order.contains(&p) {
             order.push(p);
         }
@@ -485,10 +442,7 @@ fn protocol_display_name(protocol: ProtocolType) -> &'static str {
     }
 }
 
-fn success_suggestion(
-    detected: ProtocolType,
-    preferred: Option<ProtocolType>,
-) -> DetectionSuggestion {
+fn success_suggestion(detected: ProtocolType, preferred: Option<ProtocolType>) -> DetectionSuggestion {
     let should_switch = matches!(preferred, Some(p) if p != ProtocolType::Unknown && p != detected);
     if should_switch {
         DetectionSuggestion {
@@ -616,10 +570,7 @@ mod tests {
 
     #[test]
     fn infer_url_openai() {
-        assert_eq!(
-            infer_from_url("https://api.openai.com/v1"),
-            Some(ProtocolType::OpenAI)
-        );
+        assert_eq!(infer_from_url("https://api.openai.com/v1"), Some(ProtocolType::OpenAI));
     }
 
     #[test]
@@ -639,10 +590,7 @@ mod tests {
 
     #[test]
     fn infer_key_anthropic() {
-        assert_eq!(
-            infer_from_key("sk-ant-api03-test1234"),
-            Some(ProtocolType::Anthropic)
-        );
+        assert_eq!(infer_from_key("sk-ant-api03-test1234"), Some(ProtocolType::Anthropic));
     }
 
     #[test]
@@ -662,11 +610,7 @@ mod tests {
         let order = build_test_order(None, None, None);
         assert_eq!(
             order,
-            vec![
-                ProtocolType::OpenAI,
-                ProtocolType::Anthropic,
-                ProtocolType::Gemini
-            ]
+            vec![ProtocolType::OpenAI, ProtocolType::Anthropic, ProtocolType::Gemini]
         );
     }
 
@@ -700,11 +644,7 @@ mod tests {
         );
         assert_eq!(
             order,
-            vec![
-                ProtocolType::Gemini,
-                ProtocolType::Anthropic,
-                ProtocolType::OpenAI
-            ]
+            vec![ProtocolType::Gemini, ProtocolType::Anthropic, ProtocolType::OpenAI]
         );
     }
 
@@ -727,11 +667,7 @@ mod tests {
         let order = build_test_order(Some(ProtocolType::Unknown), None, None);
         assert_eq!(
             order,
-            vec![
-                ProtocolType::OpenAI,
-                ProtocolType::Anthropic,
-                ProtocolType::Gemini
-            ]
+            vec![ProtocolType::OpenAI, ProtocolType::Anthropic, ProtocolType::Gemini]
         );
     }
 

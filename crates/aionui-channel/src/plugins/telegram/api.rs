@@ -4,8 +4,7 @@ use tracing::{debug, warn};
 use crate::error::ChannelError;
 
 use super::types::{
-    AnswerCallbackQueryRequest, EditMessageTextRequest, SendMessageRequest, TgMessage, TgResponse,
-    TgUpdate, TgUser,
+    AnswerCallbackQueryRequest, EditMessageTextRequest, SendMessageRequest, TgMessage, TgResponse, TgUpdate, TgUser,
 };
 
 const TELEGRAM_API_BASE: &str = "https://api.telegram.org";
@@ -44,9 +43,7 @@ impl TelegramApi {
 
         if !resp.ok {
             let desc = resp.description.unwrap_or_default();
-            return Err(ChannelError::ConnectionFailed(format!(
-                "Telegram getMe failed: {desc}"
-            )));
+            return Err(ChannelError::ConnectionFailed(format!("Telegram getMe failed: {desc}")));
         }
 
         resp.result
@@ -57,11 +54,7 @@ impl TelegramApi {
     ///
     /// - `offset`: return updates with `update_id >= offset`
     /// - `timeout`: long-polling timeout in seconds (0 = short poll)
-    pub async fn get_updates(
-        &self,
-        offset: Option<i64>,
-        timeout: u32,
-    ) -> Result<Vec<TgUpdate>, ChannelError> {
+    pub async fn get_updates(&self, offset: Option<i64>, timeout: u32) -> Result<Vec<TgUpdate>, ChannelError> {
         let url = format!("{}/getUpdates", self.base_url);
 
         let mut params = vec![("timeout", timeout.to_string())];
@@ -83,9 +76,7 @@ impl TelegramApi {
         if !resp.ok {
             let desc = resp.description.unwrap_or_default();
             warn!("Telegram getUpdates error: {desc}");
-            return Err(ChannelError::PlatformApi(format!(
-                "getUpdates failed: {desc}"
-            )));
+            return Err(ChannelError::PlatformApi(format!("getUpdates failed: {desc}")));
         }
 
         Ok(resp.result.unwrap_or_default())
@@ -102,20 +93,14 @@ impl TelegramApi {
             .json(req)
             .send()
             .await
-            .map_err(|e| {
-                ChannelError::MessageSendFailed(format!("sendMessage request failed: {e}"))
-            })?
+            .map_err(|e| ChannelError::MessageSendFailed(format!("sendMessage request failed: {e}")))?
             .json()
             .await
-            .map_err(|e| {
-                ChannelError::MessageSendFailed(format!("sendMessage parse failed: {e}"))
-            })?;
+            .map_err(|e| ChannelError::MessageSendFailed(format!("sendMessage parse failed: {e}")))?;
 
         if !resp.ok {
             let desc = resp.description.unwrap_or_default();
-            return Err(ChannelError::MessageSendFailed(format!(
-                "sendMessage failed: {desc}"
-            )));
+            return Err(ChannelError::MessageSendFailed(format!("sendMessage failed: {desc}")));
         }
 
         resp.result
@@ -123,10 +108,7 @@ impl TelegramApi {
     }
 
     /// `editMessageText` — edit an existing text message.
-    pub async fn edit_message_text(
-        &self,
-        req: &EditMessageTextRequest,
-    ) -> Result<(), ChannelError> {
+    pub async fn edit_message_text(&self, req: &EditMessageTextRequest) -> Result<(), ChannelError> {
         let url = format!("{}/editMessageText", self.base_url);
         debug!(
             chat_id = req.chat_id,
@@ -140,14 +122,10 @@ impl TelegramApi {
             .json(req)
             .send()
             .await
-            .map_err(|e| {
-                ChannelError::MessageSendFailed(format!("editMessageText request failed: {e}"))
-            })?
+            .map_err(|e| ChannelError::MessageSendFailed(format!("editMessageText request failed: {e}")))?
             .json()
             .await
-            .map_err(|e| {
-                ChannelError::MessageSendFailed(format!("editMessageText parse failed: {e}"))
-            })?;
+            .map_err(|e| ChannelError::MessageSendFailed(format!("editMessageText parse failed: {e}")))?;
 
         if !resp.ok {
             let desc = resp.description.unwrap_or_default();
@@ -160,10 +138,7 @@ impl TelegramApi {
     }
 
     /// `answerCallbackQuery` — acknowledge a callback query.
-    pub async fn answer_callback_query(
-        &self,
-        req: &AnswerCallbackQueryRequest,
-    ) -> Result<(), ChannelError> {
+    pub async fn answer_callback_query(&self, req: &AnswerCallbackQueryRequest) -> Result<(), ChannelError> {
         let url = format!("{}/answerCallbackQuery", self.base_url);
 
         let resp: TgResponse<bool> = self
@@ -172,14 +147,10 @@ impl TelegramApi {
             .json(req)
             .send()
             .await
-            .map_err(|e| {
-                ChannelError::PlatformApi(format!("answerCallbackQuery request failed: {e}"))
-            })?
+            .map_err(|e| ChannelError::PlatformApi(format!("answerCallbackQuery request failed: {e}")))?
             .json()
             .await
-            .map_err(|e| {
-                ChannelError::PlatformApi(format!("answerCallbackQuery parse failed: {e}"))
-            })?;
+            .map_err(|e| ChannelError::PlatformApi(format!("answerCallbackQuery parse failed: {e}")))?;
 
         if !resp.ok {
             let desc = resp.description.unwrap_or_default();

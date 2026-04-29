@@ -6,22 +6,19 @@ use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
-use crate::constants::{
-    TELEGRAM_MAX_RECONNECT_ATTEMPTS, TELEGRAM_MAX_RECONNECT_DELAY, TELEGRAM_MESSAGE_LIMIT,
-};
+use crate::constants::{TELEGRAM_MAX_RECONNECT_ATTEMPTS, TELEGRAM_MAX_RECONNECT_DELAY, TELEGRAM_MESSAGE_LIMIT};
 use crate::error::ChannelError;
 use crate::plugin::{ChannelPlugin, PluginCallbacks};
 use crate::types::{
-    ActionButton, ActionCategory, ActionContext, BotInfo, MessageContentType, ParseMode,
-    PluginConfig, PluginStatus, PluginType, UnifiedAction, UnifiedAttachment,
-    UnifiedIncomingMessage, UnifiedMessageContent, UnifiedOutgoingMessage, UnifiedUser,
+    ActionButton, ActionCategory, ActionContext, BotInfo, MessageContentType, ParseMode, PluginConfig, PluginStatus,
+    PluginType, UnifiedAction, UnifiedAttachment, UnifiedIncomingMessage, UnifiedMessageContent,
+    UnifiedOutgoingMessage, UnifiedUser,
 };
 
 use super::api::TelegramApi;
 use super::types::{
-    AnswerCallbackQueryRequest, EditMessageTextRequest, InlineKeyboardButton, InlineKeyboardMarkup,
-    KeyboardButton, ReplyKeyboardMarkup, ReplyMarkup, SendMessageRequest, TgCallbackQuery,
-    TgMessage,
+    AnswerCallbackQueryRequest, EditMessageTextRequest, InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton,
+    ReplyKeyboardMarkup, ReplyMarkup, SendMessageRequest, TgCallbackQuery, TgMessage,
 };
 
 /// Long-polling timeout in seconds (Telegram recommends 20-30s).
@@ -60,11 +57,7 @@ impl TelegramPlugin {
 
 #[async_trait::async_trait]
 impl ChannelPlugin for TelegramPlugin {
-    async fn initialize(
-        &mut self,
-        config: PluginConfig,
-        callbacks: PluginCallbacks,
-    ) -> Result<(), ChannelError> {
+    async fn initialize(&mut self, config: PluginConfig, callbacks: PluginCallbacks) -> Result<(), ChannelError> {
         self.status = PluginStatus::Initializing;
 
         let token = config
@@ -155,21 +148,14 @@ impl ChannelPlugin for TelegramPlugin {
         Ok(())
     }
 
-    async fn send_message(
-        &self,
-        chat_id: &str,
-        message: UnifiedOutgoingMessage,
-    ) -> Result<String, ChannelError> {
+    async fn send_message(&self, chat_id: &str, message: UnifiedOutgoingMessage) -> Result<String, ChannelError> {
         let api = self
             .api
             .as_ref()
             .ok_or_else(|| ChannelError::PlatformApi("Plugin not initialized".into()))?;
 
         let chat_id_num = parse_chat_id(chat_id)?;
-        let text = truncate_message(
-            message.text.as_deref().unwrap_or(""),
-            TELEGRAM_MESSAGE_LIMIT,
-        );
+        let text = truncate_message(message.text.as_deref().unwrap_or(""), TELEGRAM_MESSAGE_LIMIT);
 
         let parse_mode = message.parse_mode.map(format_parse_mode);
         let reply_markup = build_reply_markup(&message);
@@ -203,14 +189,11 @@ impl ChannelPlugin for TelegramPlugin {
             .ok_or_else(|| ChannelError::PlatformApi("Plugin not initialized".into()))?;
 
         let chat_id_num = parse_chat_id(chat_id)?;
-        let message_id_num = message_id.parse::<i64>().map_err(|_| {
-            ChannelError::InvalidConfig(format!("Invalid message_id: {message_id}"))
-        })?;
+        let message_id_num = message_id
+            .parse::<i64>()
+            .map_err(|_| ChannelError::InvalidConfig(format!("Invalid message_id: {message_id}")))?;
 
-        let text = truncate_message(
-            message.text.as_deref().unwrap_or(""),
-            TELEGRAM_MESSAGE_LIMIT,
-        );
+        let text = truncate_message(message.text.as_deref().unwrap_or(""), TELEGRAM_MESSAGE_LIMIT);
         let parse_mode = message.parse_mode.map(format_parse_mode);
         let reply_markup = build_inline_markup(&message);
 
@@ -316,9 +299,7 @@ async fn poll_loop(
 
 /// Calculate exponential backoff delay, capped at the configured maximum.
 fn backoff_delay(attempt: u32) -> Duration {
-    let delay_secs = 2u64
-        .saturating_pow(attempt)
-        .min(TELEGRAM_MAX_RECONNECT_DELAY.as_secs());
+    let delay_secs = 2u64.saturating_pow(attempt).min(TELEGRAM_MAX_RECONNECT_DELAY.as_secs());
     Duration::from_secs(delay_secs)
 }
 
@@ -419,10 +400,7 @@ async fn handle_message(msg: &TgMessage, message_tx: &mpsc::Sender<UnifiedIncomi
 
     let (content_type, text, attachments) = extract_content(msg);
 
-    let reply_to = msg
-        .reply_to_message
-        .as_ref()
-        .map(|r| r.message_id.to_string());
+    let reply_to = msg.reply_to_message.as_ref().map(|r| r.message_id.to_string());
 
     let unified = UnifiedIncomingMessage {
         id: msg.message_id.to_string(),
@@ -448,9 +426,7 @@ async fn handle_message(msg: &TgMessage, message_tx: &mpsc::Sender<UnifiedIncomi
 // ---------------------------------------------------------------------------
 
 /// Extract content type, text, and attachments from a Telegram message.
-fn extract_content(
-    msg: &TgMessage,
-) -> (MessageContentType, String, Option<Vec<UnifiedAttachment>>) {
+fn extract_content(msg: &TgMessage) -> (MessageContentType, String, Option<Vec<UnifiedAttachment>>) {
     // For media messages, Telegram puts text in `caption` (not `text`).
     let caption = msg.caption.clone().unwrap_or_default();
 

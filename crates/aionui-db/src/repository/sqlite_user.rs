@@ -27,10 +27,9 @@ impl IUserRepository for SqliteUserRepository {
     }
 
     async fn get_system_user(&self) -> Result<Option<User>, DbError> {
-        let user =
-            sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = 'system_default_user'")
-                .fetch_optional(&self.pool)
-                .await?;
+        let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = 'system_default_user'")
+            .fetch_optional(&self.pool)
+            .await?;
 
         Ok(user)
     }
@@ -49,11 +48,7 @@ impl IUserRepository for SqliteUserRepository {
         Ok(user)
     }
 
-    async fn set_system_user_credentials(
-        &self,
-        username: &str,
-        password_hash: &str,
-    ) -> Result<(), DbError> {
+    async fn set_system_user_credentials(&self, username: &str, password_hash: &str) -> Result<(), DbError> {
         let now = aionui_common::now_ms();
         let result = sqlx::query(
             "UPDATE users SET username = ?, password_hash = ?, updated_at = ? \
@@ -72,9 +67,7 @@ impl IUserRepository for SqliteUserRepository {
         })?;
 
         if result.rows_affected() == 0 {
-            return Err(DbError::NotFound(
-                "system_default_user not found".to_string(),
-            ));
+            return Err(DbError::NotFound("system_default_user not found".to_string()));
         }
 
         Ok(())
@@ -467,10 +460,7 @@ mod tests {
         let (repo, _db) = setup().await;
         repo.create_user("taken", "h").await.unwrap();
 
-        let err = repo
-            .set_system_user_credentials("taken", "hash")
-            .await
-            .unwrap_err();
+        let err = repo.set_system_user_credentials("taken", "hash").await.unwrap_err();
         assert!(matches!(err, DbError::Conflict(_)));
     }
 
@@ -478,9 +468,7 @@ mod tests {
     async fn set_system_user_credentials_updates_fields() {
         let (repo, _db) = setup().await;
 
-        repo.set_system_user_credentials("admin", "secure_hash")
-            .await
-            .unwrap();
+        repo.set_system_user_credentials("admin", "secure_hash").await.unwrap();
 
         let user = repo.get_system_user().await.unwrap().unwrap();
         assert_eq!(user.username, "admin");

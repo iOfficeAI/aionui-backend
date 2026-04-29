@@ -3,9 +3,7 @@ use std::sync::Arc;
 
 use aionui_api_types::{CreateProviderRequest, ProviderResponse, UpdateProviderRequest};
 use aionui_common::{AppError, decrypt_string, encrypt_string};
-use aionui_db::{
-    CreateProviderParams, IProviderRepository, UpdateProviderParams, models::Provider,
-};
+use aionui_db::{CreateProviderParams, IProviderRepository, UpdateProviderParams, models::Provider};
 use serde::de::DeserializeOwned;
 
 /// Business logic for model provider CRUD with API key encryption/masking.
@@ -17,18 +15,13 @@ pub struct ProviderService {
 
 impl ProviderService {
     pub fn new(repo: Arc<dyn IProviderRepository>, encryption_key: [u8; 32]) -> Self {
-        Self {
-            repo,
-            encryption_key,
-        }
+        Self { repo, encryption_key }
     }
 
     /// List all providers with masked API keys.
     pub async fn list(&self) -> Result<Vec<ProviderResponse>, AppError> {
         let rows = self.repo.list().await?;
-        rows.into_iter()
-            .map(|row| self.row_to_response(row))
-            .collect()
+        rows.into_iter().map(|row| self.row_to_response(row)).collect()
     }
 
     /// Create a new provider. The API key is encrypted before storage.
@@ -70,11 +63,7 @@ impl ProviderService {
     }
 
     /// Update an existing provider. Only provided fields are changed.
-    pub async fn update(
-        &self,
-        id: &str,
-        req: UpdateProviderRequest,
-    ) -> Result<ProviderResponse, AppError> {
+    pub async fn update(&self, id: &str, req: UpdateProviderRequest) -> Result<ProviderResponse, AppError> {
         validate_update_request(&req)?;
 
         let encrypted_key = req
@@ -133,8 +122,7 @@ impl ProviderService {
             .map_err(|e| AppError::Internal(format!("Failed to parse capabilities JSON: {e}")))?;
         let model_protocols: Option<HashMap<String, String>> =
             deserialize_opt(&row.model_protocols, "model_protocols")?;
-        let model_enabled: Option<HashMap<String, bool>> =
-            deserialize_opt(&row.model_enabled, "model_enabled")?;
+        let model_enabled: Option<HashMap<String, bool>> = deserialize_opt(&row.model_enabled, "model_enabled")?;
         let model_health = deserialize_opt(&row.model_health, "model_health")?;
         let bedrock_config = deserialize_opt(&row.bedrock_config, "bedrock_config")?;
 
@@ -163,10 +151,7 @@ impl ProviderService {
 // ---------------------------------------------------------------------------
 
 /// Serialize an optional value to JSON string.
-fn serialize_opt<T: serde::Serialize>(
-    val: &Option<T>,
-    field: &str,
-) -> Result<Option<String>, AppError> {
+fn serialize_opt<T: serde::Serialize>(val: &Option<T>, field: &str) -> Result<Option<String>, AppError> {
     val.as_ref()
         .map(serde_json::to_string)
         .transpose()
@@ -175,15 +160,11 @@ fn serialize_opt<T: serde::Serialize>(
 
 /// Serialize a value to JSON string.
 fn serialize_json<T: serde::Serialize>(val: &T, field: &str) -> Result<String, AppError> {
-    serde_json::to_string(val)
-        .map_err(|e| AppError::Internal(format!("Failed to serialize {field}: {e}")))
+    serde_json::to_string(val).map_err(|e| AppError::Internal(format!("Failed to serialize {field}: {e}")))
 }
 
 /// Deserialize an optional JSON string into a typed value.
-pub(crate) fn deserialize_opt<T: DeserializeOwned>(
-    json: &Option<String>,
-    field: &str,
-) -> Result<Option<T>, AppError> {
+pub(crate) fn deserialize_opt<T: DeserializeOwned>(json: &Option<String>, field: &str) -> Result<Option<T>, AppError> {
     json.as_deref()
         .map(serde_json::from_str)
         .transpose()
@@ -222,9 +203,7 @@ fn validate_id(id: &str) -> Result<(), AppError> {
         return Err(AppError::BadRequest("id must not be empty".into()));
     }
     if trimmed.len() > 128 {
-        return Err(AppError::BadRequest(
-            "id must be at most 128 characters".into(),
-        ));
+        return Err(AppError::BadRequest("id must be at most 128 characters".into()));
     }
     if !trimmed
         .chars()
@@ -491,39 +470,24 @@ mod tests {
         let svc = setup().await;
         let req = CreateProviderRequest {
             model_protocols: Some(HashMap::from([("gpt-4".into(), "openai".into())])),
-            model_enabled: Some(HashMap::from([
-                ("gpt-4".into(), true),
-                ("gpt-3.5".into(), false),
-            ])),
+            model_enabled: Some(HashMap::from([("gpt-4".into(), true), ("gpt-3.5".into(), false)])),
             ..sample_create_request()
         };
         let created = svc.create(req).await.unwrap();
 
         assert_eq!(
-            created
-                .model_protocols
-                .as_ref()
-                .and_then(|m| m.get("gpt-4")),
+            created.model_protocols.as_ref().and_then(|m| m.get("gpt-4")),
             Some(&"openai".to_string())
         );
+        assert_eq!(created.model_enabled.as_ref().and_then(|m| m.get("gpt-4")), Some(&true));
         assert_eq!(
-            created.model_enabled.as_ref().and_then(|m| m.get("gpt-4")),
-            Some(&true)
-        );
-        assert_eq!(
-            created
-                .model_enabled
-                .as_ref()
-                .and_then(|m| m.get("gpt-3.5")),
+            created.model_enabled.as_ref().and_then(|m| m.get("gpt-3.5")),
             Some(&false)
         );
 
         // And persist through a fresh read.
         let all = svc.list().await.unwrap();
-        assert_eq!(
-            all[0].model_enabled.as_ref().and_then(|m| m.get("gpt-4")),
-            Some(&true)
-        );
+        assert_eq!(all[0].model_enabled.as_ref().and_then(|m| m.get("gpt-4")), Some(&true));
     }
 
     #[tokio::test]

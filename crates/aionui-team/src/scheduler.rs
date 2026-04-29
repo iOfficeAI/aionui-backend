@@ -12,9 +12,7 @@ use crate::error::TeamError;
 use crate::events::TeamEventEmitter;
 use crate::mailbox::Mailbox;
 use crate::task_board::TaskBoard;
-use crate::types::{
-    MailboxMessage, MailboxMessageType, TeamAgent, TeamTask, TeammateRole, TeammateStatus,
-};
+use crate::types::{MailboxMessage, MailboxMessageType, TeamAgent, TeamTask, TeammateRole, TeammateStatus};
 
 pub const WAKE_TIMEOUT_MS: u64 = 60_000;
 
@@ -123,11 +121,7 @@ fn is_settled(status: TeammateStatus) -> bool {
 ///
 /// The resulting text summarises which agent crashed, the reason, and
 /// optionally the last message seen before the crash.
-pub fn format_crash_testament(
-    agent_name: &str,
-    reason: &CrashReason,
-    last_message: Option<&str>,
-) -> String {
+pub fn format_crash_testament(agent_name: &str, reason: &CrashReason, last_message: Option<&str>) -> String {
     let reason_str = match reason {
         CrashReason::ProcessExited => "ProcessExited",
         CrashReason::SessionNotFound => "SessionNotFound",
@@ -261,11 +255,7 @@ impl TeammateManager {
     ///    and as the structured summary column.
     /// 3. Check whether all teammates are settled → returns the lead slot_id
     ///    that the caller should wake, if any.
-    pub async fn mark_idle(
-        &self,
-        slot_id: &str,
-        summary: Option<&str>,
-    ) -> Result<Option<String>, TeamError> {
+    pub async fn mark_idle(&self, slot_id: &str, summary: Option<&str>) -> Result<Option<String>, TeamError> {
         self.set_status(slot_id, TeammateStatus::Idle).await?;
 
         let is_lead = {
@@ -343,20 +333,13 @@ impl TeammateManager {
                     blocked_by: blocked_by.clone(),
                     ..Default::default()
                 };
-                self.task_board
-                    .update_task(&self.team_id, task_id, &update)
-                    .await?;
+                self.task_board.update_task(&self.team_id, task_id, &update).await?;
                 Ok(None)
             }
             SchedulerAction::IdleNotification { summary } => {
-                self.handle_idle_notification(from_slot_id, summary.as_deref())
-                    .await
+                self.handle_idle_notification(from_slot_id, summary.as_deref()).await
             }
-            SchedulerAction::SpawnAgent {
-                name,
-                role,
-                backend,
-            } => {
+            SchedulerAction::SpawnAgent { name, role, backend } => {
                 debug!(
                     team_id = %self.team_id,
                     from = from_slot_id,
@@ -388,11 +371,7 @@ impl TeammateManager {
     ///
     /// Returns an optional leader slot_id to wake if all teammates are
     /// settled.
-    pub async fn finalize_turn(
-        &self,
-        slot_id: &str,
-        actions: &[SchedulerAction],
-    ) -> Result<Option<String>, TeamError> {
+    pub async fn finalize_turn(&self, slot_id: &str, actions: &[SchedulerAction]) -> Result<Option<String>, TeamError> {
         let mut summary: Option<String> = None;
         for action in actions {
             if let SchedulerAction::IdleNotification { summary: s } = action {
@@ -568,19 +547,10 @@ impl TeammateManager {
         Ok(())
     }
 
-    async fn handle_send_message(
-        &self,
-        from_slot_id: &str,
-        to: &str,
-        message: &str,
-    ) -> Result<(), TeamError> {
+    async fn handle_send_message(&self, from_slot_id: &str, to: &str, message: &str) -> Result<(), TeamError> {
         if to == "*" {
             let slots = self.slots.lock().await;
-            let targets: Vec<String> = slots
-                .keys()
-                .filter(|id| id.as_str() != from_slot_id)
-                .cloned()
-                .collect();
+            let targets: Vec<String> = slots.keys().filter(|id| id.as_str() != from_slot_id).cloned().collect();
             drop(slots);
 
             for target in &targets {
@@ -636,9 +606,7 @@ impl TeammateManager {
         };
 
         if from_role != TeammateRole::Lead {
-            return Err(TeamError::InvalidRequest(
-                "only lead can shutdown agents".into(),
-            ));
+            return Err(TeamError::InvalidRequest("only lead can shutdown agents".into()));
         }
 
         {
@@ -780,13 +748,7 @@ mod tests {
         let mailbox = Arc::new(Mailbox::new(repo.clone()));
         let task_board = Arc::new(TaskBoard::new(repo));
         let broadcaster = Arc::new(RecordingBroadcaster::new());
-        let mgr = TeammateManager::new(
-            "t1".into(),
-            agents,
-            mailbox,
-            task_board,
-            broadcaster.clone(),
-        );
+        let mgr = TeammateManager::new("t1".into(), agents, mailbox, task_board, broadcaster.clone());
         (mgr, broadcaster)
     }
 
@@ -808,14 +770,9 @@ mod tests {
         let agents = make_team_agents();
         let (mgr, bc) = make_manager(&agents);
 
-        mgr.set_status("worker-1", TeammateStatus::Working)
-            .await
-            .unwrap();
+        mgr.set_status("worker-1", TeammateStatus::Working).await.unwrap();
 
-        assert_eq!(
-            mgr.get_status("worker-1").await.unwrap(),
-            TeammateStatus::Working
-        );
+        assert_eq!(mgr.get_status("worker-1").await.unwrap(), TeammateStatus::Working);
 
         let events = bc.events();
         assert_eq!(events.len(), 1);
@@ -848,10 +805,7 @@ mod tests {
         assert!(p.tasks.is_empty());
         assert!(p.unread_messages.is_empty());
 
-        assert_eq!(
-            mgr.get_status("worker-1").await.unwrap(),
-            TeammateStatus::Working
-        );
+        assert_eq!(mgr.get_status("worker-1").await.unwrap(), TeammateStatus::Working);
 
         let status_events: Vec<_> = bc
             .events()
@@ -867,9 +821,7 @@ mod tests {
         let agents = make_team_agents();
         let (mgr, _) = make_manager(&agents);
 
-        mgr.set_status("worker-1", TeammateStatus::Working)
-            .await
-            .unwrap();
+        mgr.set_status("worker-1", TeammateStatus::Working).await.unwrap();
 
         let payload = mgr.try_wake("worker-1").await.unwrap();
         assert!(payload.is_none());
@@ -891,9 +843,7 @@ mod tests {
         let agents = make_team_agents();
         let (mgr, _) = make_manager(&agents);
 
-        mgr.set_status("lead-1", TeammateStatus::Working)
-            .await
-            .unwrap();
+        mgr.set_status("lead-1", TeammateStatus::Working).await.unwrap();
         let wake_target = mgr.mark_idle("lead-1", None).await.unwrap();
         assert!(wake_target.is_none());
     }
@@ -905,12 +855,8 @@ mod tests {
         let agents = make_team_agents();
         let (mgr, _) = make_manager(&agents);
 
-        mgr.set_status("worker-1", TeammateStatus::Working)
-            .await
-            .unwrap();
-        mgr.set_status("worker-2", TeammateStatus::Working)
-            .await
-            .unwrap();
+        mgr.set_status("worker-1", TeammateStatus::Working).await.unwrap();
+        mgr.set_status("worker-2", TeammateStatus::Working).await.unwrap();
 
         let result = mgr.mark_idle("worker-1", None).await.unwrap();
         assert!(result.is_none(), "not all teammates idle yet");
@@ -924,12 +870,8 @@ mod tests {
         let agents = make_team_agents();
         let (mgr, _) = make_manager(&agents);
 
-        mgr.set_status("worker-1", TeammateStatus::Working)
-            .await
-            .unwrap();
-        mgr.set_status("worker-2", TeammateStatus::Working)
-            .await
-            .unwrap();
+        mgr.set_status("worker-1", TeammateStatus::Working).await.unwrap();
+        mgr.set_status("worker-2", TeammateStatus::Working).await.unwrap();
 
         let result = mgr.mark_idle("worker-1", None).await.unwrap();
         assert!(result.is_none());
@@ -940,12 +882,8 @@ mod tests {
         let agents = make_team_agents();
         let (mgr, _) = make_manager(&agents);
 
-        mgr.set_status("lead-1", TeammateStatus::Working)
-            .await
-            .unwrap();
-        mgr.set_status("worker-1", TeammateStatus::Working)
-            .await
-            .unwrap();
+        mgr.set_status("lead-1", TeammateStatus::Working).await.unwrap();
+        mgr.set_status("worker-1", TeammateStatus::Working).await.unwrap();
 
         let result = mgr.mark_idle("worker-1", None).await.unwrap();
         assert!(result.is_none());
@@ -958,9 +896,7 @@ mod tests {
         let agents = vec![make_agent("lead-1", "Lead", TeammateRole::Lead)];
         let (mgr, _) = make_manager(&agents);
 
-        mgr.set_status("lead-1", TeammateStatus::Working)
-            .await
-            .unwrap();
+        mgr.set_status("lead-1", TeammateStatus::Working).await.unwrap();
         let result = mgr.mark_idle("lead-1", None).await.unwrap();
         assert!(result.is_none());
     }
@@ -1019,9 +955,7 @@ mod tests {
         let agents = make_team_agents();
         let (mgr, bc) = make_manager(&agents);
 
-        mgr.rename_agent("worker-1", "Renamed Worker")
-            .await
-            .unwrap();
+        mgr.rename_agent("worker-1", "Renamed Worker").await.unwrap();
 
         let agent = mgr.get_agent("worker-1").await.unwrap();
         assert_eq!(agent.name, "Renamed Worker");
@@ -1044,13 +978,7 @@ mod tests {
         let mailbox = Arc::new(Mailbox::new(repo.clone()));
         let task_board = Arc::new(TaskBoard::new(repo));
         let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(RecordingBroadcaster::new());
-        let mgr = TeammateManager::new(
-            "t1".into(),
-            &agents,
-            mailbox.clone(),
-            task_board,
-            broadcaster,
-        );
+        let mgr = TeammateManager::new("t1".into(), &agents, mailbox.clone(), task_board, broadcaster);
 
         let action = SchedulerAction::SendMessage {
             to: "worker-1".into(),
@@ -1071,13 +999,7 @@ mod tests {
         let mailbox = Arc::new(Mailbox::new(repo.clone()));
         let task_board = Arc::new(TaskBoard::new(repo));
         let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(RecordingBroadcaster::new());
-        let mgr = TeammateManager::new(
-            "t1".into(),
-            &agents,
-            mailbox.clone(),
-            task_board,
-            broadcaster,
-        );
+        let mgr = TeammateManager::new("t1".into(), &agents, mailbox.clone(), task_board, broadcaster);
 
         let action = SchedulerAction::SendMessage {
             to: "*".into(),
@@ -1102,13 +1024,7 @@ mod tests {
         let mailbox = Arc::new(Mailbox::new(repo.clone()));
         let task_board = Arc::new(TaskBoard::new(repo));
         let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(RecordingBroadcaster::new());
-        let mgr = TeammateManager::new(
-            "t1".into(),
-            &agents,
-            mailbox,
-            task_board.clone(),
-            broadcaster,
-        );
+        let mgr = TeammateManager::new("t1".into(), &agents, mailbox, task_board.clone(), broadcaster);
 
         let action = SchedulerAction::TaskCreate {
             subject: "Implement feature".into(),
@@ -1133,18 +1049,9 @@ mod tests {
         let mailbox = Arc::new(Mailbox::new(repo.clone()));
         let task_board = Arc::new(TaskBoard::new(repo));
         let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(RecordingBroadcaster::new());
-        let mgr = TeammateManager::new(
-            "t1".into(),
-            &agents,
-            mailbox,
-            task_board.clone(),
-            broadcaster,
-        );
+        let mgr = TeammateManager::new("t1".into(), &agents, mailbox, task_board.clone(), broadcaster);
 
-        let task = task_board
-            .create_task("t1", "Work", None, None, &[])
-            .await
-            .unwrap();
+        let task = task_board.create_task("t1", "Work", None, None, &[]).await.unwrap();
 
         let action = SchedulerAction::TaskUpdate {
             task_id: task.id.clone(),
@@ -1168,27 +1075,16 @@ mod tests {
         let mailbox = Arc::new(Mailbox::new(repo.clone()));
         let task_board = Arc::new(TaskBoard::new(repo));
         let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(RecordingBroadcaster::new());
-        let mgr = TeammateManager::new(
-            "t1".into(),
-            &agents,
-            mailbox.clone(),
-            task_board,
-            broadcaster,
-        );
+        let mgr = TeammateManager::new("t1".into(), &agents, mailbox.clone(), task_board, broadcaster);
 
-        mgr.set_status("worker-1", TeammateStatus::Working)
-            .await
-            .unwrap();
+        mgr.set_status("worker-1", TeammateStatus::Working).await.unwrap();
 
         let action = SchedulerAction::IdleNotification {
             summary: Some("Task done".into()),
         };
         mgr.execute_action("worker-1", &action).await.unwrap();
 
-        assert_eq!(
-            mgr.get_status("worker-1").await.unwrap(),
-            TeammateStatus::Idle
-        );
+        assert_eq!(mgr.get_status("worker-1").await.unwrap(), TeammateStatus::Idle);
 
         let lead_msgs = mailbox.read_unread("t1", "lead-1").await.unwrap();
         assert_eq!(lead_msgs.len(), 1);
@@ -1203,17 +1099,9 @@ mod tests {
         let mailbox = Arc::new(Mailbox::new(repo.clone()));
         let task_board = Arc::new(TaskBoard::new(repo));
         let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(RecordingBroadcaster::new());
-        let mgr = TeammateManager::new(
-            "t1".into(),
-            &agents,
-            mailbox.clone(),
-            task_board,
-            broadcaster,
-        );
+        let mgr = TeammateManager::new("t1".into(), &agents, mailbox.clone(), task_board, broadcaster);
 
-        mgr.set_status("lead-1", TeammateStatus::Working)
-            .await
-            .unwrap();
+        mgr.set_status("lead-1", TeammateStatus::Working).await.unwrap();
 
         let action = SchedulerAction::IdleNotification {
             summary: Some("Done delegating".into()),
@@ -1233,13 +1121,7 @@ mod tests {
         let mailbox = Arc::new(Mailbox::new(repo.clone()));
         let task_board = Arc::new(TaskBoard::new(repo));
         let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(RecordingBroadcaster::new());
-        let mgr = TeammateManager::new(
-            "t1".into(),
-            &agents,
-            mailbox.clone(),
-            task_board,
-            broadcaster,
-        );
+        let mgr = TeammateManager::new("t1".into(), &agents, mailbox.clone(), task_board, broadcaster);
 
         let action = SchedulerAction::ShutdownAgent {
             slot_id: "worker-1".into(),
@@ -1299,20 +1181,10 @@ mod tests {
         let mailbox = Arc::new(Mailbox::new(repo.clone()));
         let task_board = Arc::new(TaskBoard::new(repo));
         let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(RecordingBroadcaster::new());
-        let mgr = TeammateManager::new(
-            "t1".into(),
-            &agents,
-            mailbox.clone(),
-            task_board.clone(),
-            broadcaster,
-        );
+        let mgr = TeammateManager::new("t1".into(), &agents, mailbox.clone(), task_board.clone(), broadcaster);
 
-        mgr.set_status("worker-1", TeammateStatus::Working)
-            .await
-            .unwrap();
-        mgr.set_status("worker-2", TeammateStatus::Working)
-            .await
-            .unwrap();
+        mgr.set_status("worker-1", TeammateStatus::Working).await.unwrap();
+        mgr.set_status("worker-2", TeammateStatus::Working).await.unwrap();
 
         let actions = vec![
             SchedulerAction::TaskCreate {
@@ -1329,10 +1201,7 @@ mod tests {
 
         let wake_signal = mgr.finalize_turn("worker-1", &actions).await.unwrap();
 
-        assert_eq!(
-            mgr.get_status("worker-1").await.unwrap(),
-            TeammateStatus::Idle
-        );
+        assert_eq!(mgr.get_status("worker-1").await.unwrap(), TeammateStatus::Idle);
 
         let tasks = task_board.list_tasks("t1").await.unwrap();
         assert_eq!(tasks.len(), 1);
@@ -1342,9 +1211,11 @@ mod tests {
         // 2. the IdleNotification that mark_idle now writes automatically
         let lead_msgs = mailbox.read_unread("t1", "lead-1").await.unwrap();
         assert_eq!(lead_msgs.len(), 2);
-        assert!(lead_msgs.iter().any(
-            |m| m.msg_type == MailboxMessageType::Message && m.content == "Done with sub-task"
-        ));
+        assert!(
+            lead_msgs
+                .iter()
+                .any(|m| m.msg_type == MailboxMessageType::Message && m.content == "Done with sub-task")
+        );
         assert!(
             lead_msgs
                 .iter()
@@ -1361,17 +1232,9 @@ mod tests {
         let mailbox = Arc::new(Mailbox::new(repo.clone()));
         let task_board = Arc::new(TaskBoard::new(repo));
         let broadcaster = Arc::new(RecordingBroadcaster::new());
-        let mgr = TeammateManager::new(
-            "t1".into(),
-            &agents,
-            mailbox,
-            task_board,
-            broadcaster.clone(),
-        );
+        let mgr = TeammateManager::new("t1".into(), &agents, mailbox, task_board, broadcaster.clone());
 
-        mgr.set_status("worker-1", TeammateStatus::Working)
-            .await
-            .unwrap();
+        mgr.set_status("worker-1", TeammateStatus::Working).await.unwrap();
 
         let actions = vec![SchedulerAction::IdleNotification {
             summary: Some("All done".into()),
@@ -1379,10 +1242,7 @@ mod tests {
 
         mgr.finalize_turn("worker-1", &actions).await.unwrap();
 
-        assert_eq!(
-            mgr.get_status("worker-1").await.unwrap(),
-            TeammateStatus::Idle
-        );
+        assert_eq!(mgr.get_status("worker-1").await.unwrap(), TeammateStatus::Idle);
 
         let idle_events: Vec<_> = broadcaster
             .events()
@@ -1401,12 +1261,8 @@ mod tests {
         let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(RecordingBroadcaster::new());
         let mgr = TeammateManager::new("t1".into(), &agents, mailbox, task_board, broadcaster);
 
-        mgr.set_status("worker-1", TeammateStatus::Working)
-            .await
-            .unwrap();
-        mgr.set_status("worker-2", TeammateStatus::Working)
-            .await
-            .unwrap();
+        mgr.set_status("worker-1", TeammateStatus::Working).await.unwrap();
+        mgr.set_status("worker-2", TeammateStatus::Working).await.unwrap();
 
         mgr.finalize_turn("worker-1", &[]).await.unwrap();
 
@@ -1423,18 +1279,9 @@ mod tests {
         let mailbox = Arc::new(Mailbox::new(repo.clone()));
         let task_board = Arc::new(TaskBoard::new(repo));
         let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(RecordingBroadcaster::new());
-        let mgr = TeammateManager::new(
-            "t1".into(),
-            &agents,
-            mailbox.clone(),
-            task_board.clone(),
-            broadcaster,
-        );
+        let mgr = TeammateManager::new("t1".into(), &agents, mailbox.clone(), task_board.clone(), broadcaster);
 
-        task_board
-            .create_task("t1", "Task A", None, None, &[])
-            .await
-            .unwrap();
+        task_board.create_task("t1", "Task A", None, None, &[]).await.unwrap();
 
         mailbox
             .write(
@@ -1463,20 +1310,10 @@ mod tests {
         let mailbox = Arc::new(Mailbox::new(repo.clone()));
         let task_board = Arc::new(TaskBoard::new(repo));
         let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(RecordingBroadcaster::new());
-        let mgr = TeammateManager::new(
-            "t1".into(),
-            &agents,
-            mailbox.clone(),
-            task_board,
-            broadcaster,
-        );
+        let mgr = TeammateManager::new("t1".into(), &agents, mailbox.clone(), task_board, broadcaster);
 
-        mgr.set_status("worker-1", TeammateStatus::Working)
-            .await
-            .unwrap();
-        mgr.mark_idle("worker-1", Some("sub-task done"))
-            .await
-            .unwrap();
+        mgr.set_status("worker-1", TeammateStatus::Working).await.unwrap();
+        mgr.mark_idle("worker-1", Some("sub-task done")).await.unwrap();
 
         let lead_msgs = mailbox.read_unread("t1", "lead-1").await.unwrap();
         assert_eq!(lead_msgs.len(), 1);
@@ -1493,17 +1330,9 @@ mod tests {
         let mailbox = Arc::new(Mailbox::new(repo.clone()));
         let task_board = Arc::new(TaskBoard::new(repo));
         let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(RecordingBroadcaster::new());
-        let mgr = TeammateManager::new(
-            "t1".into(),
-            &agents,
-            mailbox.clone(),
-            task_board,
-            broadcaster,
-        );
+        let mgr = TeammateManager::new("t1".into(), &agents, mailbox.clone(), task_board, broadcaster);
 
-        mgr.set_status("worker-1", TeammateStatus::Working)
-            .await
-            .unwrap();
+        mgr.set_status("worker-1", TeammateStatus::Working).await.unwrap();
         mgr.mark_idle("worker-1", None).await.unwrap();
 
         let lead_msgs = mailbox.read_unread("t1", "lead-1").await.unwrap();
@@ -1519,17 +1348,9 @@ mod tests {
         let mailbox = Arc::new(Mailbox::new(repo.clone()));
         let task_board = Arc::new(TaskBoard::new(repo));
         let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(RecordingBroadcaster::new());
-        let mgr = TeammateManager::new(
-            "t1".into(),
-            &agents,
-            mailbox.clone(),
-            task_board,
-            broadcaster,
-        );
+        let mgr = TeammateManager::new("t1".into(), &agents, mailbox.clone(), task_board, broadcaster);
 
-        mgr.set_status("lead-1", TeammateStatus::Working)
-            .await
-            .unwrap();
+        mgr.set_status("lead-1", TeammateStatus::Working).await.unwrap();
         mgr.mark_idle("lead-1", Some("done")).await.unwrap();
 
         let lead_msgs = mailbox.read_unread("t1", "lead-1").await.unwrap();
@@ -1541,9 +1362,7 @@ mod tests {
         let agents = make_team_agents();
         let (mgr, bc) = make_manager(&agents);
 
-        mgr.set_status("worker-1", TeammateStatus::Working)
-            .await
-            .unwrap();
+        mgr.set_status("worker-1", TeammateStatus::Working).await.unwrap();
         bc.events.lock().unwrap().clear();
 
         mgr.mark_idle("worker-1", Some("ok")).await.unwrap();
@@ -1564,12 +1383,8 @@ mod tests {
         let agents = make_team_agents();
         let (mgr, _) = make_manager(&agents);
 
-        mgr.set_status("worker-1", TeammateStatus::Completed)
-            .await
-            .unwrap();
-        mgr.set_status("worker-2", TeammateStatus::Working)
-            .await
-            .unwrap();
+        mgr.set_status("worker-1", TeammateStatus::Completed).await.unwrap();
+        mgr.set_status("worker-2", TeammateStatus::Working).await.unwrap();
 
         let result = mgr.mark_idle("worker-2", None).await.unwrap();
         assert_eq!(result.as_deref(), Some("lead-1"));
@@ -1580,12 +1395,8 @@ mod tests {
         let agents = make_team_agents();
         let (mgr, _) = make_manager(&agents);
 
-        mgr.set_status("worker-1", TeammateStatus::Error)
-            .await
-            .unwrap();
-        mgr.set_status("worker-2", TeammateStatus::Working)
-            .await
-            .unwrap();
+        mgr.set_status("worker-1", TeammateStatus::Error).await.unwrap();
+        mgr.set_status("worker-2", TeammateStatus::Working).await.unwrap();
 
         let result = mgr.mark_idle("worker-2", None).await.unwrap();
         assert_eq!(
@@ -1600,12 +1411,8 @@ mod tests {
         let agents = make_team_agents();
         let (mgr, _) = make_manager(&agents);
 
-        mgr.set_status("worker-1", TeammateStatus::Working)
-            .await
-            .unwrap();
-        mgr.set_status("worker-2", TeammateStatus::Working)
-            .await
-            .unwrap();
+        mgr.set_status("worker-1", TeammateStatus::Working).await.unwrap();
+        mgr.set_status("worker-2", TeammateStatus::Working).await.unwrap();
 
         let result = mgr.mark_idle("worker-1", None).await.unwrap();
         assert!(result.is_none(), "worker-2 still Working blocks wake");
@@ -1616,12 +1423,8 @@ mod tests {
         let agents = make_team_agents();
         let (mgr, _) = make_manager(&agents);
 
-        mgr.set_status("worker-1", TeammateStatus::Thinking)
-            .await
-            .unwrap();
-        mgr.set_status("worker-2", TeammateStatus::Working)
-            .await
-            .unwrap();
+        mgr.set_status("worker-1", TeammateStatus::Thinking).await.unwrap();
+        mgr.set_status("worker-2", TeammateStatus::Working).await.unwrap();
 
         let result = mgr.mark_idle("worker-2", None).await.unwrap();
         assert!(result.is_none(), "Thinking is not settled");
@@ -1632,12 +1435,8 @@ mod tests {
         let agents = make_team_agents();
         let (mgr, _) = make_manager(&agents);
 
-        mgr.set_status("worker-1", TeammateStatus::ToolUse)
-            .await
-            .unwrap();
-        mgr.set_status("worker-2", TeammateStatus::Working)
-            .await
-            .unwrap();
+        mgr.set_status("worker-1", TeammateStatus::ToolUse).await.unwrap();
+        mgr.set_status("worker-2", TeammateStatus::Working).await.unwrap();
 
         let result = mgr.mark_idle("worker-2", None).await.unwrap();
         assert!(result.is_none(), "ToolUse is not settled");
@@ -1657,10 +1456,7 @@ mod tests {
         );
 
         mgr.release_wake_lock("worker-1");
-        assert!(
-            mgr.acquire_wake_lock("worker-1"),
-            "lock is reusable after release"
-        );
+        assert!(mgr.acquire_wake_lock("worker-1"), "lock is reusable after release");
 
         mgr.release_wake_lock("worker-1");
         mgr.release_wake_lock("worker-1"); // double release is a no-op
@@ -1672,10 +1468,7 @@ mod tests {
         let (mgr, _) = make_manager(&agents);
 
         assert!(mgr.acquire_wake_lock("worker-1"));
-        assert!(
-            mgr.acquire_wake_lock("worker-2"),
-            "different slot must not be blocked"
-        );
+        assert!(mgr.acquire_wake_lock("worker-2"), "different slot must not be blocked");
     }
 
     // -- W4-D19a: finalize-turn dedup ----------------------------------------
@@ -1722,9 +1515,7 @@ mod tests {
         let mut handles = vec![];
         for _ in 0..16 {
             let mgr = mgr.clone();
-            handles.push(tokio::spawn(
-                async move { mgr.acquire_wake_lock("worker-1") },
-            ));
+            handles.push(tokio::spawn(async move { mgr.acquire_wake_lock("worker-1") }));
         }
 
         let mut winners = 0usize;
@@ -1733,18 +1524,14 @@ mod tests {
                 winners += 1;
             }
         }
-        assert_eq!(
-            winners, 1,
-            "exactly one concurrent acquire should win the lock"
-        );
+        assert_eq!(winners, 1, "exactly one concurrent acquire should win the lock");
     }
 
     // -- W4-D18b: wake_timeouts -------------------------------------------------
 
     #[tokio::test]
     async fn clear_wake_timeout_removes_entry() {
-        let handle =
-            tokio::spawn(async { tokio::time::sleep(std::time::Duration::from_secs(999)).await });
+        let handle = tokio::spawn(async { tokio::time::sleep(std::time::Duration::from_secs(999)).await });
         let map: DashMap<String, tokio::task::JoinHandle<()>> = DashMap::new();
         map.insert("slot-1".into(), handle);
         // Simulate clear
@@ -1770,10 +1557,7 @@ mod tests {
         for (reason, keyword) in [
             (CrashReason::ProcessExited, "ProcessExited"),
             (CrashReason::SessionNotFound, "SessionNotFound"),
-            (
-                CrashReason::Unknown("segfault".into()),
-                "Unknown — segfault",
-            ),
+            (CrashReason::Unknown("segfault".into()), "Unknown — segfault"),
         ] {
             let testament = format_crash_testament("Bob", &reason, None);
             assert!(
@@ -1789,11 +1573,7 @@ mod tests {
     fn crash_testament_includes_last_message_when_provided() {
         use crate::crash_detection::CrashReason;
 
-        let testament = format_crash_testament(
-            "Alice",
-            &CrashReason::ProcessExited,
-            Some("working on task X"),
-        );
+        let testament = format_crash_testament("Alice", &CrashReason::ProcessExited, Some("working on task X"));
         assert!(testament.contains("Last message: working on task X"));
         assert!(testament.contains("ProcessExited"));
         assert!(testament.contains("Alice"));
@@ -1818,13 +1598,7 @@ mod tests {
         let mailbox = Arc::new(Mailbox::new(repo.clone()));
         let task_board = Arc::new(TaskBoard::new(repo));
         let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(RecordingBroadcaster::new());
-        let mgr = TeammateManager::new(
-            "t1".into(),
-            &agents,
-            mailbox.clone(),
-            task_board,
-            broadcaster,
-        );
+        let mgr = TeammateManager::new("t1".into(), &agents, mailbox.clone(), task_board, broadcaster);
 
         mgr.write_crash_testament("worker-1", "Worker1", &CrashReason::ProcessExited, None)
             .await
@@ -1850,23 +1624,12 @@ mod tests {
         let mailbox = Arc::new(Mailbox::new(repo.clone()));
         let task_board = Arc::new(TaskBoard::new(repo));
         let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(RecordingBroadcaster::new());
-        let mgr = TeammateManager::new(
-            "t1".into(),
-            &agents,
-            mailbox.clone(),
-            task_board,
-            broadcaster,
-        );
+        let mgr = TeammateManager::new("t1".into(), &agents, mailbox.clone(), task_board, broadcaster);
 
         // Should not panic or error
-        mgr.write_crash_testament(
-            "worker-1",
-            "Worker1",
-            &CrashReason::SessionNotFound,
-            Some("last words"),
-        )
-        .await
-        .unwrap();
+        mgr.write_crash_testament("worker-1", "Worker1", &CrashReason::SessionNotFound, Some("last words"))
+            .await
+            .unwrap();
 
         // No messages delivered to anyone
         let msgs1 = mailbox.read_unread("t1", "worker-1").await.unwrap();
@@ -1884,13 +1647,7 @@ mod tests {
         let mailbox = Arc::new(Mailbox::new(repo.clone()));
         let task_board = Arc::new(TaskBoard::new(repo));
         let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(RecordingBroadcaster::new());
-        let mgr = TeammateManager::new(
-            "t1".into(),
-            &agents,
-            mailbox.clone(),
-            task_board,
-            broadcaster,
-        );
+        let mgr = TeammateManager::new("t1".into(), &agents, mailbox.clone(), task_board, broadcaster);
 
         // Lead crashing should not write to itself
         mgr.write_crash_testament("lead-1", "Lead", &CrashReason::ProcessExited, None)

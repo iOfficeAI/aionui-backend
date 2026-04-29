@@ -16,9 +16,7 @@ pub struct CronBusyGuard {
 
 impl CronBusyGuard {
     pub fn new() -> Self {
-        Self {
-            states: DashMap::new(),
-        }
+        Self { states: DashMap::new() }
     }
 
     pub fn is_busy(&self, conversation_id: &str) -> bool {
@@ -49,10 +47,7 @@ impl CronBusyGuard {
     }
 
     pub fn active_count(&self) -> usize {
-        self.states
-            .iter()
-            .filter(|entry| entry.is_processing)
-            .count()
+        self.states.iter().filter(|entry| entry.is_processing).count()
     }
 }
 

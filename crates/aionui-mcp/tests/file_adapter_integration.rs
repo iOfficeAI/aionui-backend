@@ -40,34 +40,18 @@ mod aionui {
         }
 
         async fn find_by_id(&self, id: &str) -> Result<Option<McpServerRow>, DbError> {
-            Ok(self
-                .servers
-                .lock()
-                .await
-                .iter()
-                .find(|s| s.id == id)
-                .cloned())
+            Ok(self.servers.lock().await.iter().find(|s| s.id == id).cloned())
         }
 
         async fn find_by_name(&self, name: &str) -> Result<Option<McpServerRow>, DbError> {
-            Ok(self
-                .servers
-                .lock()
-                .await
-                .iter()
-                .find(|s| s.name == name)
-                .cloned())
+            Ok(self.servers.lock().await.iter().find(|s| s.name == name).cloned())
         }
 
         async fn create(&self, _p: CreateMcpServerParams<'_>) -> Result<McpServerRow, DbError> {
             unimplemented!()
         }
 
-        async fn update(
-            &self,
-            _id: &str,
-            _p: UpdateMcpServerParams<'_>,
-        ) -> Result<McpServerRow, DbError> {
+        async fn update(&self, _id: &str, _p: UpdateMcpServerParams<'_>) -> Result<McpServerRow, DbError> {
             unimplemented!()
         }
 
@@ -75,10 +59,7 @@ mod aionui {
             unimplemented!()
         }
 
-        async fn batch_upsert(
-            &self,
-            _s: &[CreateMcpServerParams<'_>],
-        ) -> Result<Vec<McpServerRow>, DbError> {
+        async fn batch_upsert(&self, _s: &[CreateMcpServerParams<'_>]) -> Result<Vec<McpServerRow>, DbError> {
             unimplemented!()
         }
 
@@ -132,16 +113,8 @@ mod aionui {
     async fn detect_returns_all_db_servers() {
         let rows = vec![
             make_row("stdio-srv", "stdio", r#"{"command":"npx","args":[]}"#),
-            make_row(
-                "http-srv",
-                "http",
-                r#"{"url":"https://example.com/mcp","headers":{}}"#,
-            ),
-            make_row(
-                "sse-srv",
-                "sse",
-                r#"{"url":"https://example.com/sse","headers":{}}"#,
-            ),
+            make_row("http-srv", "http", r#"{"url":"https://example.com/mcp","headers":{}}"#),
+            make_row("sse-srv", "sse", r#"{"url":"https://example.com/sse","headers":{}}"#),
         ];
         let repo = Arc::new(MockRepo::new(rows));
         let adapter = AionuiAdapter::new(repo);
@@ -152,18 +125,9 @@ mod aionui {
         assert_eq!(servers[1].name, "http-srv");
         assert_eq!(servers[2].name, "sse-srv");
 
-        assert!(matches!(
-            servers[0].transport,
-            McpServerTransport::Stdio { .. }
-        ));
-        assert!(matches!(
-            servers[1].transport,
-            McpServerTransport::Http { .. }
-        ));
-        assert!(matches!(
-            servers[2].transport,
-            McpServerTransport::Sse { .. }
-        ));
+        assert!(matches!(servers[0].transport, McpServerTransport::Stdio { .. }));
+        assert!(matches!(servers[1].transport, McpServerTransport::Http { .. }));
+        assert!(matches!(servers[2].transport, McpServerTransport::Sse { .. }));
     }
 
     #[tokio::test]

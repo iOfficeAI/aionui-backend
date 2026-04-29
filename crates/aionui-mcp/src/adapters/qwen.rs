@@ -7,8 +7,8 @@ use crate::error::McpError;
 use crate::types::McpServerTransport;
 
 use super::cli_helpers::{
-    DETECT_TIMEOUT, MUTATE_TIMEOUT, build_env_args, build_header_args, is_cli_installed,
-    parse_standard_list_output, run_cli,
+    DETECT_TIMEOUT, MUTATE_TIMEOUT, build_env_args, build_header_args, is_cli_installed, parse_standard_list_output,
+    run_cli,
 };
 
 const CLI_NAME: &str = "qwen";
@@ -47,23 +47,14 @@ impl McpAgentAdapter for QwenAdapter {
         Ok(parse_standard_list_output(&stdout))
     }
 
-    async fn install_server(
-        &self,
-        name: &str,
-        transport: &McpServerTransport,
-    ) -> Result<(), McpError> {
+    async fn install_server(&self, name: &str, transport: &McpServerTransport) -> Result<(), McpError> {
         if !self.is_installed().await? {
             return Err(McpError::AgentNotInstalled(CLI_NAME.into()));
         }
 
         match transport {
             McpServerTransport::Stdio { command, args, env } => {
-                let mut cli_args = vec![
-                    "mcp".to_owned(),
-                    "add".to_owned(),
-                    name.to_owned(),
-                    command.clone(),
-                ];
+                let mut cli_args = vec!["mcp".to_owned(), "add".to_owned(), name.to_owned(), command.clone()];
                 cli_args.extend(args.iter().cloned());
                 cli_args.extend(build_env_args(env, "--env"));
                 cli_args.push("-s".to_owned());
@@ -90,12 +81,7 @@ impl McpAgentAdapter for QwenAdapter {
 
         // Try CLI removal with each scope.
         for scope in REMOVE_SCOPES {
-            let (stdout, _stderr) = run_cli(
-                CLI_NAME,
-                &["mcp", "remove", name, "-s", scope],
-                MUTATE_TIMEOUT,
-            )
-            .await?;
+            let (stdout, _stderr) = run_cli(CLI_NAME, &["mcp", "remove", name, "-s", scope], MUTATE_TIMEOUT).await?;
             let lower = stdout.to_lowercase();
             if lower.contains("removed") {
                 return Ok(());
@@ -167,8 +153,7 @@ async fn remove_from_config_file(name: &str) -> Result<(), McpError> {
 
 /// Get the user's home directory.
 fn home_dir() -> Result<std::path::PathBuf, McpError> {
-    dirs::home_dir()
-        .ok_or_else(|| McpError::AgentOperationFailed("cannot determine home directory".into()))
+    dirs::home_dir().ok_or_else(|| McpError::AgentOperationFailed("cannot determine home directory".into()))
 }
 
 #[cfg(test)]

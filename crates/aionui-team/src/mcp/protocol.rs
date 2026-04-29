@@ -96,19 +96,14 @@ pub async fn read_frame<R: AsyncReadExt + Unpin>(reader: &mut R) -> std::io::Res
     Ok(buf)
 }
 
-pub async fn write_frame<W: AsyncWriteExt + Unpin>(
-    writer: &mut W,
-    data: &[u8],
-) -> std::io::Result<()> {
+pub async fn write_frame<W: AsyncWriteExt + Unpin>(writer: &mut W, data: &[u8]) -> std::io::Result<()> {
     let len = data.len() as u32;
     writer.write_u32(len).await?;
     writer.write_all(data).await?;
     writer.flush().await
 }
 
-pub async fn read_request<R: AsyncReadExt + Unpin>(
-    reader: &mut R,
-) -> std::io::Result<JsonRpcRequest> {
+pub async fn read_request<R: AsyncReadExt + Unpin>(reader: &mut R) -> std::io::Result<JsonRpcRequest> {
     let frame = read_frame(reader).await?;
     serde_json::from_slice(&frame).map_err(std::io::Error::other)
 }
@@ -199,7 +194,8 @@ mod tests {
 
     #[test]
     fn request_with_params() {
-        let json = r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"test","arguments":{"key":"val"}}}"#;
+        let json =
+            r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"test","arguments":{"key":"val"}}}"#;
         let req: JsonRpcRequest = serde_json::from_str(json).unwrap();
         assert_eq!(req.method, "tools/call");
         let params = req.params.unwrap();

@@ -536,9 +536,7 @@ mod tests {
                 description: None,
             },
             target: CronJobTargetDto {
-                payload: CronJobPayloadDto::Message {
-                    text: "ping".into(),
-                },
+                payload: CronJobPayloadDto::Message { text: "ping".into() },
                 execution_mode: None,
             },
             metadata: CronJobMetadataDto {
@@ -856,9 +854,7 @@ mod tests {
 
     #[test]
     fn payload_message_serialize() {
-        let p = CronJobPayloadDto::Message {
-            text: "hello".into(),
-        };
+        let p = CronJobPayloadDto::Message { text: "hello".into() };
         let json = serde_json::to_value(&p).unwrap();
         assert_eq!(json["kind"], "message");
         assert_eq!(json["text"], "hello");
@@ -866,9 +862,7 @@ mod tests {
 
     #[test]
     fn payload_message_roundtrip() {
-        let p = CronJobPayloadDto::Message {
-            text: "test".into(),
-        };
+        let p = CronJobPayloadDto::Message { text: "test".into() };
         let json = serde_json::to_string(&p).unwrap();
         let parsed: CronJobPayloadDto = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, p);

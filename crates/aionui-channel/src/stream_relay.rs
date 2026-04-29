@@ -86,39 +86,25 @@ impl ChannelStreamRelay {
                         text_buffer.push_str(&chunk);
                         has_content = true;
                         if last_edit.elapsed() >= throttle {
-                            let formatted =
-                                format_text_for_platform(&text_buffer, self.config.platform);
+                            let formatted = format_text_for_platform(&text_buffer, self.config.platform);
                             let msg = ChannelMessageService::build_streaming_message(&formatted);
                             let _ = self
                                 .sender
-                                .edit_message(
-                                    &self.config.plugin_id,
-                                    &self.config.chat_id,
-                                    &thinking_msg_id,
-                                    msg,
-                                )
+                                .edit_message(&self.config.plugin_id, &self.config.chat_id, &thinking_msg_id, msg)
                                 .await;
                             last_edit = Instant::now();
                         }
                     }
                     Some(StreamAction::Thinking(_)) => {}
                     Some(StreamAction::ToolCall { name, .. }) => {
-                        let msg = ChannelMessageService::build_streaming_message(&format!(
-                            "\u{23f3} {name}..."
-                        ));
+                        let msg = ChannelMessageService::build_streaming_message(&format!("\u{23f3} {name}..."));
                         let _ = self
                             .sender
-                            .edit_message(
-                                &self.config.plugin_id,
-                                &self.config.chat_id,
-                                &thinking_msg_id,
-                                msg,
-                            )
+                            .edit_message(&self.config.plugin_id, &self.config.chat_id, &thinking_msg_id, msg)
                             .await;
                     }
                     Some(StreamAction::Finish) => {
-                        self.send_final(&text_buffer, has_content, &thinking_msg_id)
-                            .await;
+                        self.send_final(&text_buffer, has_content, &thinking_msg_id).await;
                         info!(
                             plugin_id = %self.config.plugin_id,
                             chat_id = %self.config.chat_id,
@@ -156,8 +142,7 @@ impl ChannelStreamRelay {
                 },
                 Err(broadcast::error::RecvError::Closed) => {
                     warn!("channel stream relay: broadcast closed without terminal event");
-                    self.send_final(&text_buffer, has_content, &thinking_msg_id)
-                        .await;
+                    self.send_final(&text_buffer, has_content, &thinking_msg_id).await;
                     break;
                 }
                 Err(broadcast::error::RecvError::Lagged(n)) => {
@@ -179,12 +164,7 @@ impl ChannelStreamRelay {
             let final_msg = ChannelMessageService::build_final_message(&formatted);
             let _ = self
                 .sender
-                .edit_message(
-                    &self.config.plugin_id,
-                    &self.config.chat_id,
-                    msg_id,
-                    final_msg,
-                )
+                .edit_message(&self.config.plugin_id, &self.config.chat_id, msg_id, final_msg)
                 .await;
         }
     }

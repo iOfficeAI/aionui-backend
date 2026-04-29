@@ -108,12 +108,10 @@ async fn conversations_defaults() {
     .await
     .unwrap();
 
-    let row = sqlx::query(
-        "SELECT extra, pinned, pinned_at, model, source FROM conversations WHERE id = 'conv_def'",
-    )
-    .fetch_one(db.pool())
-    .await
-    .unwrap();
+    let row = sqlx::query("SELECT extra, pinned, pinned_at, model, source FROM conversations WHERE id = 'conv_def'")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
 
     assert_eq!(
         row.get::<String, _>("extra"),
@@ -150,10 +148,7 @@ async fn conversations_status_check_constraint() {
     .execute(db.pool())
     .await;
 
-    assert!(
-        result.is_err(),
-        "invalid status should violate CHECK constraint"
-    );
+    assert!(result.is_err(), "invalid status should violate CHECK constraint");
 }
 
 #[tokio::test]
@@ -189,10 +184,7 @@ async fn conversations_fk_user_id() {
     .execute(db.pool())
     .await;
 
-    assert!(
-        result.is_err(),
-        "non-existent user_id should violate FK constraint"
-    );
+    assert!(result.is_err(), "non-existent user_id should violate FK constraint");
 }
 
 // -- CASCADE delete: users → conversations --
@@ -224,10 +216,7 @@ async fn cascade_delete_user_removes_conversations() {
         .fetch_one(db.pool())
         .await
         .unwrap();
-    assert_eq!(
-        count.0, 0,
-        "conversations should be cascade-deleted with user"
-    );
+    assert_eq!(count.0, 0, "conversations should be cascade-deleted with user");
 }
 
 // -- Messages table: column acceptance --
@@ -279,12 +268,10 @@ async fn messages_defaults() {
     .await
     .unwrap();
 
-    let row = sqlx::query(
-        "SELECT content, hidden, msg_id, position, status FROM messages WHERE id = 'msg_def'",
-    )
-    .fetch_one(db.pool())
-    .await
-    .unwrap();
+    let row = sqlx::query("SELECT content, hidden, msg_id, position, status FROM messages WHERE id = 'msg_def'")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
 
     assert_eq!(
         row.get::<String, _>("content"),
@@ -313,10 +300,7 @@ async fn messages_position_check_constraint() {
     .execute(db.pool())
     .await;
 
-    assert!(
-        result.is_err(),
-        "invalid position should violate CHECK constraint"
-    );
+    assert!(result.is_err(), "invalid position should violate CHECK constraint");
 }
 
 #[tokio::test]
@@ -333,10 +317,7 @@ async fn messages_status_check_constraint() {
     .execute(db.pool())
     .await;
 
-    assert!(
-        result.is_err(),
-        "invalid status should violate CHECK constraint"
-    );
+    assert!(result.is_err(), "invalid status should violate CHECK constraint");
 }
 
 #[tokio::test]
@@ -442,10 +423,7 @@ async fn cascade_delete_conversation_removes_messages() {
         .fetch_one(db.pool())
         .await
         .unwrap();
-    assert_eq!(
-        count.0, 0,
-        "messages should be cascade-deleted with conversation"
-    );
+    assert_eq!(count.0, 0, "messages should be cascade-deleted with conversation");
 }
 
 // -- Full cascade: users → conversations → messages --
@@ -515,10 +493,7 @@ async fn conversation_row_from_row() {
     assert_eq!(row.name, "FromRow Test");
     assert_eq!(row.r#type, "gemini");
     assert_eq!(row.extra, "{\"workspace\":\"/home\"}");
-    assert_eq!(
-        row.model.as_deref(),
-        Some("{\"providerId\":\"p1\",\"model\":\"m1\"}")
-    );
+    assert_eq!(row.model.as_deref(), Some("{\"providerId\":\"p1\",\"model\":\"m1\"}"));
     assert_eq!(row.status.as_deref(), Some("finished"));
     assert_eq!(row.source.as_deref(), Some("aionui"));
     assert_eq!(row.channel_chat_id.as_deref(), Some("group:42"));

@@ -5,8 +5,7 @@ use aionui_common::PaginatedResult;
 use crate::error::DbError;
 use crate::models::{ConversationArtifactRow, ConversationRow, MessageRow};
 use crate::repository::conversation::{
-    ConversationFilters, ConversationRowUpdate, IConversationRepository, MessageRowUpdate,
-    MessageSearchRow, SortOrder,
+    ConversationFilters, ConversationRowUpdate, IConversationRepository, MessageRowUpdate, MessageSearchRow, SortOrder,
 };
 
 /// SQLite-backed implementation of [`IConversationRepository`].
@@ -98,10 +97,7 @@ impl IConversationRepository for SqliteConversationRepository {
             return Ok(());
         }
 
-        let sql = format!(
-            "UPDATE conversations SET {} WHERE id = ?",
-            set_parts.join(", ")
-        );
+        let sql = format!("UPDATE conversations SET {} WHERE id = ?", set_parts.join(", "));
 
         let mut query = sqlx::query(&sql);
         for bind in &binds {
@@ -217,11 +213,7 @@ impl IConversationRepository for SqliteConversationRepository {
         Ok(row)
     }
 
-    async fn list_by_cron_job(
-        &self,
-        user_id: &str,
-        cron_job_id: &str,
-    ) -> Result<Vec<ConversationRow>, DbError> {
+    async fn list_by_cron_job(&self, user_id: &str, cron_job_id: &str) -> Result<Vec<ConversationRow>, DbError> {
         let rows = sqlx::query_as::<_, ConversationRow>(
             "SELECT * FROM conversations \
              WHERE user_id = ? \
@@ -237,20 +229,14 @@ impl IConversationRepository for SqliteConversationRepository {
         Ok(rows)
     }
 
-    async fn list_associated(
-        &self,
-        user_id: &str,
-        conversation_id: &str,
-    ) -> Result<Vec<ConversationRow>, DbError> {
+    async fn list_associated(&self, user_id: &str, conversation_id: &str) -> Result<Vec<ConversationRow>, DbError> {
         // First get the target conversation's workspace
-        let target = sqlx::query_as::<_, ConversationRow>(
-            "SELECT * FROM conversations WHERE id = ? AND user_id = ?",
-        )
-        .bind(conversation_id)
-        .bind(user_id)
-        .fetch_optional(&self.pool)
-        .await?
-        .ok_or_else(|| DbError::NotFound(format!("Conversation '{conversation_id}' not found")))?;
+        let target = sqlx::query_as::<_, ConversationRow>("SELECT * FROM conversations WHERE id = ? AND user_id = ?")
+            .bind(conversation_id)
+            .bind(user_id)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or_else(|| DbError::NotFound(format!("Conversation '{conversation_id}' not found")))?;
 
         // Extract workspace from extra JSON
         let workspace: Option<String> = serde_json::from_str::<serde_json::Value>(&target.extra)
@@ -476,17 +462,10 @@ impl IConversationRepository for SqliteConversationRepository {
             rows
         };
 
-        Ok(PaginatedResult {
-            items,
-            total,
-            has_more,
-        })
+        Ok(PaginatedResult { items, total, has_more })
     }
 
-    async fn list_artifacts(
-        &self,
-        conversation_id: &str,
-    ) -> Result<Vec<ConversationArtifactRow>, DbError> {
+    async fn list_artifacts(&self, conversation_id: &str) -> Result<Vec<ConversationArtifactRow>, DbError> {
         let rows = sqlx::query_as::<_, ConversationArtifactRow>(
             "SELECT * FROM conversation_artifacts \
              WHERE conversation_id = ? \
@@ -515,10 +494,7 @@ impl IConversationRepository for SqliteConversationRepository {
         Ok(row)
     }
 
-    async fn upsert_artifact(
-        &self,
-        artifact: &ConversationArtifactRow,
-    ) -> Result<ConversationArtifactRow, DbError> {
+    async fn upsert_artifact(&self, artifact: &ConversationArtifactRow) -> Result<ConversationArtifactRow, DbError> {
         sqlx::query(
             "INSERT INTO conversation_artifacts \
                 (id, conversation_id, cron_job_id, kind, status, payload, created_at, updated_at) \
@@ -544,12 +520,7 @@ impl IConversationRepository for SqliteConversationRepository {
 
         self.get_artifact(&artifact.conversation_id, &artifact.id)
             .await?
-            .ok_or_else(|| {
-                DbError::Init(format!(
-                    "upsert artifact did not produce row for id '{}'",
-                    artifact.id
-                ))
-            })
+            .ok_or_else(|| DbError::Init(format!("upsert artifact did not produce row for id '{}'", artifact.id)))
     }
 
     async fn update_artifact_status(
@@ -614,10 +585,7 @@ impl IConversationRepository for SqliteConversationRepository {
         Ok(())
     }
 
-    async fn list_legacy_cron_trigger_messages(
-        &self,
-        conversation_id: &str,
-    ) -> Result<Vec<MessageRow>, DbError> {
+    async fn list_legacy_cron_trigger_messages(&self, conversation_id: &str) -> Result<Vec<MessageRow>, DbError> {
         let rows = sqlx::query_as::<_, MessageRow>(
             "SELECT * FROM messages \
              WHERE conversation_id = ? AND type = 'cron_trigger' \
@@ -674,19 +642,14 @@ fn bind_value_as<'q, T>(
 /// Appends shared filter conditions (source, cron_job_id, pinned) to WHERE
 /// clause parts and bind values. Used by both `list_paginated` and the count
 /// query to keep filter logic in one place.
-fn append_filter_conditions(
-    filters: &ConversationFilters,
-    where_parts: &mut Vec<String>,
-    binds: &mut Vec<BindValue>,
-) {
+fn append_filter_conditions(filters: &ConversationFilters, where_parts: &mut Vec<String>, binds: &mut Vec<BindValue>) {
     if let Some(ref source) = filters.source {
         where_parts.push("c.source = ?".to_string());
         binds.push(BindValue::Str(source.clone()));
     }
     if let Some(ref cron_job_id) = filters.cron_job_id {
         where_parts.push(
-            "(json_extract(c.extra, '$.cronJobId') = ? OR json_extract(c.extra, '$.cron_job_id') = ?)"
-                .to_string(),
+            "(json_extract(c.extra, '$.cronJobId') = ? OR json_extract(c.extra, '$.cron_job_id') = ?)".to_string(),
         );
         binds.push(BindValue::Str(cron_job_id.clone()));
         binds.push(BindValue::Str(cron_job_id.clone()));
@@ -741,9 +704,7 @@ mod tests {
             name: "Test Conversation".to_string(),
             r#type: "gemini".to_string(),
             extra: r#"{"workspace":"/home/user/project"}"#.to_string(),
-            model: Some(
-                r#"{"providerId":"prov_1","model":"claude-sonnet-4-20250514"}"#.to_string(),
-            ),
+            model: Some(r#"{"providerId":"prov_1","model":"claude-sonnet-4-20250514"}"#.to_string()),
             status: Some("pending".to_string()),
             source: Some("aionui".to_string()),
             channel_chat_id: None,
@@ -864,9 +825,7 @@ mod tests {
         repo.create(&conv).await.unwrap();
 
         // Empty update should succeed without error
-        repo.update(&conv.id, &ConversationRowUpdate::default())
-            .await
-            .unwrap();
+        repo.update(&conv.id, &ConversationRowUpdate::default()).await.unwrap();
     }
 
     #[tokio::test]
@@ -891,10 +850,7 @@ mod tests {
         repo.delete(&conv.id).await.unwrap();
 
         // Messages should be gone due to CASCADE
-        let result = repo
-            .get_messages(&conv.id, 1, 50, SortOrder::Desc)
-            .await
-            .unwrap();
+        let result = repo.get_messages(&conv.id, 1, 50, SortOrder::Desc).await.unwrap();
         assert!(result.items.is_empty());
     }
 
@@ -1162,10 +1118,7 @@ mod tests {
         c3.extra = r#"{"cronJobId":"cron_2","workspace":"/r"}"#.to_string();
         repo.create(&c3).await.unwrap();
 
-        let result = repo
-            .list_by_cron_job(SYSTEM_USER_ID, "cron_1")
-            .await
-            .unwrap();
+        let result = repo.list_by_cron_job(SYSTEM_USER_ID, "cron_1").await.unwrap();
         assert_eq!(result.len(), 2);
     }
 
@@ -1205,10 +1158,7 @@ mod tests {
     #[tokio::test]
     async fn list_associated_not_found() {
         let (repo, _db) = setup().await;
-        let err = repo
-            .list_associated(SYSTEM_USER_ID, "no_id")
-            .await
-            .unwrap_err();
+        let err = repo.list_associated(SYSTEM_USER_ID, "no_id").await.unwrap_err();
         assert!(matches!(err, DbError::NotFound(_)));
     }
 
@@ -1223,10 +1173,7 @@ mod tests {
         let msg = sample_message(&conv.id);
         repo.insert_message(&msg).await.unwrap();
 
-        let result = repo
-            .get_messages(&conv.id, 1, 50, SortOrder::Desc)
-            .await
-            .unwrap();
+        let result = repo.get_messages(&conv.id, 1, 50, SortOrder::Desc).await.unwrap();
         assert_eq!(result.items.len(), 1);
         assert_eq!(result.total, 1);
         assert_eq!(result.items[0].id, msg.id);
@@ -1245,10 +1192,7 @@ mod tests {
             repo.insert_message(&msg).await.unwrap();
         }
 
-        let page1 = repo
-            .get_messages(&conv.id, 1, 3, SortOrder::Desc)
-            .await
-            .unwrap();
+        let page1 = repo.get_messages(&conv.id, 1, 3, SortOrder::Desc).await.unwrap();
         assert_eq!(page1.items.len(), 3);
         assert_eq!(page1.total, 10);
         assert!(page1.has_more);
@@ -1269,10 +1213,7 @@ mod tests {
             repo.insert_message(&msg).await.unwrap();
         }
 
-        let result = repo
-            .get_messages(&conv.id, 1, 50, SortOrder::Asc)
-            .await
-            .unwrap();
+        let result = repo.get_messages(&conv.id, 1, 50, SortOrder::Asc).await.unwrap();
         assert!(result.items[0].created_at < result.items[1].created_at);
     }
 
@@ -1295,10 +1236,7 @@ mod tests {
         .await
         .unwrap();
 
-        let result = repo
-            .get_messages(&conv.id, 1, 50, SortOrder::Desc)
-            .await
-            .unwrap();
+        let result = repo.get_messages(&conv.id, 1, 50, SortOrder::Desc).await.unwrap();
         assert_eq!(result.items[0].content, r#"{"content":"Updated"}"#);
     }
 
@@ -1330,14 +1268,9 @@ mod tests {
             repo.insert_message(&msg).await.unwrap();
         }
 
-        repo.delete_messages_by_conversation(&conv.id)
-            .await
-            .unwrap();
+        repo.delete_messages_by_conversation(&conv.id).await.unwrap();
 
-        let result = repo
-            .get_messages(&conv.id, 1, 50, SortOrder::Desc)
-            .await
-            .unwrap();
+        let result = repo.get_messages(&conv.id, 1, 50, SortOrder::Desc).await.unwrap();
         assert!(result.items.is_empty());
         assert_eq!(result.total, 0);
     }
@@ -1381,10 +1314,7 @@ mod tests {
         msg2.content = r#"{"content":"Python 测试"}"#.to_string();
         repo.insert_message(&msg2).await.unwrap();
 
-        let result = repo
-            .search_messages(SYSTEM_USER_ID, "审查", 1, 20)
-            .await
-            .unwrap();
+        let result = repo.search_messages(SYSTEM_USER_ID, "审查", 1, 20).await.unwrap();
         assert_eq!(result.items.len(), 1);
         assert_eq!(result.total, 1);
         assert_eq!(result.items[0].conversation_name, "Test Conversation");
@@ -1421,10 +1351,7 @@ mod tests {
             repo.insert_message(&msg).await.unwrap();
         }
 
-        let result = repo
-            .search_messages(SYSTEM_USER_ID, "keyword", 1, 2)
-            .await
-            .unwrap();
+        let result = repo.search_messages(SYSTEM_USER_ID, "keyword", 1, 2).await.unwrap();
         assert_eq!(result.items.len(), 2);
         assert_eq!(result.total, 5);
         assert!(result.has_more);

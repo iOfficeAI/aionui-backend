@@ -36,9 +36,7 @@ fn default_identity_path() -> PathBuf {
 }
 
 pub fn load_or_create_identity(custom_path: Option<&Path>) -> Result<DeviceIdentity, AppError> {
-    let path = custom_path
-        .map(PathBuf::from)
-        .unwrap_or_else(default_identity_path);
+    let path = custom_path.map(PathBuf::from).unwrap_or_else(default_identity_path);
 
     if let Ok(identity) = load_identity(&path) {
         return Ok(identity);
@@ -52,8 +50,8 @@ pub fn load_or_create_identity(custom_path: Option<&Path>) -> Result<DeviceIdent
 }
 
 fn load_identity(path: &Path) -> Result<DeviceIdentity, AppError> {
-    let content = fs::read_to_string(path)
-        .map_err(|e| AppError::Internal(format!("Failed to read device identity: {e}")))?;
+    let content =
+        fs::read_to_string(path).map_err(|e| AppError::Internal(format!("Failed to read device identity: {e}")))?;
 
     let stored: StoredIdentity = serde_json::from_str(&content)
         .map_err(|e| AppError::Internal(format!("Failed to parse device identity: {e}")))?;
@@ -114,10 +112,7 @@ pub(crate) fn generate_identity() -> DeviceIdentity {
     getrandom::getrandom(&mut secret).expect("Failed to generate random bytes");
     let signing_key = SigningKey::from_bytes(&secret);
     let device_id = derive_device_id(&signing_key.verifying_key());
-    DeviceIdentity {
-        device_id,
-        signing_key,
-    }
+    DeviceIdentity { device_id, signing_key }
 }
 
 fn derive_device_id(verifying_key: &VerifyingKey) -> String {
@@ -211,25 +206,19 @@ const ED25519_PKCS8_PREFIX: [u8; 16] = [
     0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20,
 ];
 
-const ED25519_SPKI_PREFIX: [u8; 12] = [
-    0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00,
-];
+const ED25519_SPKI_PREFIX: [u8; 12] = [0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00];
 
 fn pem_to_signing_key(pem: &str) -> Result<SigningKey, AppError> {
     let der = pem_decode(pem, "PRIVATE KEY")?;
 
-    if der.len() == ED25519_PKCS8_PREFIX.len() + 32
-        && der[..ED25519_PKCS8_PREFIX.len()] == ED25519_PKCS8_PREFIX
-    {
+    if der.len() == ED25519_PKCS8_PREFIX.len() + 32 && der[..ED25519_PKCS8_PREFIX.len()] == ED25519_PKCS8_PREFIX {
         let raw: [u8; 32] = der[ED25519_PKCS8_PREFIX.len()..]
             .try_into()
             .map_err(|_| AppError::Internal("Invalid Ed25519 private key length".into()))?;
         return Ok(SigningKey::from_bytes(&raw));
     }
 
-    Err(AppError::Internal(
-        "Unrecognized Ed25519 PKCS8 format".into(),
-    ))
+    Err(AppError::Internal("Unrecognized Ed25519 PKCS8 format".into()))
 }
 
 fn signing_key_to_pem(key: &SigningKey) -> (String, String) {
@@ -263,15 +252,10 @@ fn pem_decode(pem: &str, label: &str) -> Result<Vec<u8>, AppError> {
     let begin = format!("-----BEGIN {label}-----");
     let end = format!("-----END {label}-----");
 
-    let b64: String = pem
-        .lines()
-        .filter(|line| !line.starts_with("-----"))
-        .collect();
+    let b64: String = pem.lines().filter(|line| !line.starts_with("-----")).collect();
 
     if !pem.contains(&begin) || !pem.contains(&end) {
-        return Err(AppError::Internal(format!(
-            "Invalid PEM: missing {label} markers"
-        )));
+        return Err(AppError::Internal(format!("Invalid PEM: missing {label} markers")));
     }
 
     STANDARD
@@ -295,13 +279,11 @@ mod tests {
     #[test]
     fn sign_and_verify_roundtrip() {
         let identity = generate_identity();
-        let payload =
-            "v2|device123|gateway-client|backend|operator|operator.admin|1700000000000||nonce123";
+        let payload = "v2|device123|gateway-client|backend|operator|operator.admin|1700000000000||nonce123";
         let signature_b64 = sign_payload(&identity.signing_key, payload);
 
         let sig_bytes = URL_SAFE_NO_PAD.decode(&signature_b64).unwrap();
-        let signature =
-            ed25519_dalek::Signature::from_bytes(sig_bytes.as_slice().try_into().unwrap());
+        let signature = ed25519_dalek::Signature::from_bytes(sig_bytes.as_slice().try_into().unwrap());
         identity
             .signing_key
             .verifying_key()
@@ -375,10 +357,7 @@ mod tests {
         let loaded = load_identity(&path).unwrap();
 
         assert_eq!(identity.device_id, loaded.device_id);
-        assert_eq!(
-            identity.signing_key.as_bytes(),
-            loaded.signing_key.as_bytes()
-        );
+        assert_eq!(identity.signing_key.as_bytes(), loaded.signing_key.as_bytes());
     }
 
     #[test]

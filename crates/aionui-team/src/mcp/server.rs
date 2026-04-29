@@ -11,13 +11,12 @@ use crate::scheduler::TeammateManager;
 use crate::types::TeammateRole;
 
 use super::protocol::{
-    INVALID_PARAMS, INVALID_REQUEST, JsonRpcResponse, METHOD_NOT_FOUND, PROTOCOL_VERSION,
-    SERVER_NAME, SERVER_VERSION, read_request, write_response,
+    INVALID_PARAMS, INVALID_REQUEST, JsonRpcResponse, METHOD_NOT_FOUND, PROTOCOL_VERSION, SERVER_NAME, SERVER_VERSION,
+    read_request, write_response,
 };
 use super::tools::{
-    RenameAgentInput, SendMessageInput, ShutdownAgentInput, SpawnAgentInput, TaskCreateInput,
-    TaskUpdateInput, all_tool_descriptors, handle_team_describe_assistant, handle_team_list_models,
-    is_whitelisted_backend,
+    RenameAgentInput, SendMessageInput, ShutdownAgentInput, SpawnAgentInput, TaskCreateInput, TaskUpdateInput,
+    all_tool_descriptors, handle_team_describe_assistant, handle_team_list_models, is_whitelisted_backend,
 };
 
 // ---------------------------------------------------------------------------
@@ -32,10 +31,7 @@ pub struct TeamMcpServer {
 }
 
 impl TeamMcpServer {
-    pub async fn start(
-        auth_token: String,
-        scheduler: Arc<TeammateManager>,
-    ) -> Result<Self, TeamError> {
+    pub async fn start(auth_token: String, scheduler: Arc<TeammateManager>) -> Result<Self, TeamError> {
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
             .map_err(|e| TeamError::InvalidRequest(format!("Failed to bind TCP: {e}")))?;
@@ -61,7 +57,11 @@ impl TeamMcpServer {
         let http_sched = scheduler.clone();
         tokio::spawn(http_mcp_loop(http_listener, http_token, http_sched, shutdown_rx));
 
-        debug!(tcp_port = addr.port(), http_port = http_addr.port(), "Team MCP Server started");
+        debug!(
+            tcp_port = addr.port(),
+            http_port = http_addr.port(),
+            "Team MCP Server started"
+        );
 
         Ok(Self {
             addr,
@@ -164,12 +164,7 @@ async fn handle_connection(stream: TcpStream, auth_token: String, scheduler: Arc
                 InitResult::Response(resp) => resp,
             }
         } else {
-            handle_method(
-                &request,
-                &scheduler,
-                caller_slot_id.as_deref().unwrap_or("unknown"),
-            )
-            .await
+            handle_method(&request, &scheduler, caller_slot_id.as_deref().unwrap_or("unknown")).await
         };
 
         if write_response(&mut writer, &response).await.is_err() {
@@ -274,22 +269,14 @@ async fn handle_tools_call(
     let params = match request.params.as_ref() {
         Some(p) => p,
         None => {
-            return JsonRpcResponse::error(
-                request.id,
-                INVALID_PARAMS,
-                "Missing params for tools/call",
-            );
+            return JsonRpcResponse::error(request.id, INVALID_PARAMS, "Missing params for tools/call");
         }
     };
 
     let tool_name = match params.get("name").and_then(|v| v.as_str()) {
         Some(n) => n,
         None => {
-            return JsonRpcResponse::error(
-                request.id,
-                INVALID_PARAMS,
-                "Missing 'name' in tools/call params",
-            );
+            return JsonRpcResponse::error(request.id, INVALID_PARAMS, "Missing 'name' in tools/call params");
         }
     };
 
@@ -300,14 +287,7 @@ async fn handle_tools_call(
         Err(_) => TeammateRole::Teammate,
     };
 
-    let result = dispatch_tool(
-        tool_name,
-        &arguments,
-        scheduler,
-        caller_slot_id,
-        caller_role,
-    )
-    .await;
+    let result = dispatch_tool(tool_name, &arguments, scheduler, caller_slot_id, caller_role).await;
 
     match result {
         Ok(content) => JsonRpcResponse::success(
@@ -345,9 +325,7 @@ async fn dispatch_tool(
         "team_task_list" => exec_task_list(scheduler).await,
         "team_members" => exec_members(scheduler).await,
         "team_rename_agent" => exec_rename_agent(arguments, scheduler).await,
-        "team_shutdown_agent" => {
-            exec_shutdown_agent(arguments, scheduler, caller_slot_id, caller_role).await
-        }
+        "team_shutdown_agent" => exec_shutdown_agent(arguments, scheduler, caller_slot_id, caller_role).await,
         "team_list_models" => exec_list_models(arguments).await,
         "team_describe_assistant" => exec_describe_assistant(arguments).await,
         _ => Err(format!("Unknown tool: {tool_name}")),
@@ -367,13 +345,8 @@ async fn exec_describe_assistant(args: &Value) -> Result<String, String> {
 // Individual tool handlers
 // ---------------------------------------------------------------------------
 
-async fn exec_send_message(
-    args: &Value,
-    scheduler: &TeammateManager,
-    caller_slot_id: &str,
-) -> Result<String, String> {
-    let input: SendMessageInput =
-        serde_json::from_value(args.clone()).map_err(|e| format!("Invalid params: {e}"))?;
+async fn exec_send_message(args: &Value, scheduler: &TeammateManager, caller_slot_id: &str) -> Result<String, String> {
+    let input: SendMessageInput = serde_json::from_value(args.clone()).map_err(|e| format!("Invalid params: {e}"))?;
 
     let action = crate::scheduler::SchedulerAction::SendMessage {
         to: input.to.clone(),
@@ -395,8 +368,7 @@ async fn exec_spawn_agent(
     if caller_role != TeammateRole::Lead {
         return Err("Only Lead can spawn agents".into());
     }
-    let input: SpawnAgentInput =
-        serde_json::from_value(args.clone()).map_err(|e| format!("Invalid params: {e}"))?;
+    let input: SpawnAgentInput = serde_json::from_value(args.clone()).map_err(|e| format!("Invalid params: {e}"))?;
 
     if !is_whitelisted_backend(&input.backend) {
         return Err(format!(
@@ -419,8 +391,7 @@ async fn exec_spawn_agent(
 }
 
 async fn exec_task_create(args: &Value, scheduler: &TeammateManager) -> Result<String, String> {
-    let input: TaskCreateInput =
-        serde_json::from_value(args.clone()).map_err(|e| format!("Invalid params: {e}"))?;
+    let input: TaskCreateInput = serde_json::from_value(args.clone()).map_err(|e| format!("Invalid params: {e}"))?;
 
     let action = crate::scheduler::SchedulerAction::TaskCreate {
         subject: input.subject.clone(),
@@ -437,8 +408,7 @@ async fn exec_task_create(args: &Value, scheduler: &TeammateManager) -> Result<S
 }
 
 async fn exec_task_update(args: &Value, scheduler: &TeammateManager) -> Result<String, String> {
-    let input: TaskUpdateInput =
-        serde_json::from_value(args.clone()).map_err(|e| format!("Invalid params: {e}"))?;
+    let input: TaskUpdateInput = serde_json::from_value(args.clone()).map_err(|e| format!("Invalid params: {e}"))?;
 
     let action = crate::scheduler::SchedulerAction::TaskUpdate {
         task_id: input.task_id.clone(),
@@ -493,18 +463,14 @@ async fn exec_members(scheduler: &TeammateManager) -> Result<String, String> {
 }
 
 async fn exec_rename_agent(args: &Value, scheduler: &TeammateManager) -> Result<String, String> {
-    let input: RenameAgentInput =
-        serde_json::from_value(args.clone()).map_err(|e| format!("Invalid params: {e}"))?;
+    let input: RenameAgentInput = serde_json::from_value(args.clone()).map_err(|e| format!("Invalid params: {e}"))?;
 
     scheduler
         .rename_agent(&input.slot_id, &input.new_name)
         .await
         .map_err(|e| e.to_string())?;
 
-    Ok(format!(
-        "Agent '{}' renamed to '{}'",
-        input.slot_id, input.new_name
-    ))
+    Ok(format!("Agent '{}' renamed to '{}'", input.slot_id, input.new_name))
 }
 
 async fn exec_shutdown_agent(
@@ -516,8 +482,7 @@ async fn exec_shutdown_agent(
     if caller_role != TeammateRole::Lead {
         return Err("Only Lead can shut down agents".into());
     }
-    let input: ShutdownAgentInput =
-        serde_json::from_value(args.clone()).map_err(|e| format!("Invalid params: {e}"))?;
+    let input: ShutdownAgentInput = serde_json::from_value(args.clone()).map_err(|e| format!("Invalid params: {e}"))?;
 
     let action = crate::scheduler::SchedulerAction::ShutdownAgent {
         slot_id: input.slot_id.clone(),
@@ -528,10 +493,7 @@ async fn exec_shutdown_agent(
         .await
         .map_err(|e| e.to_string())?;
 
-    Ok(format!(
-        "Shutdown request sent to agent '{}'",
-        input.slot_id
-    ))
+    Ok(format!("Shutdown request sent to agent '{}'", input.slot_id))
 }
 
 // ---------------------------------------------------------------------------

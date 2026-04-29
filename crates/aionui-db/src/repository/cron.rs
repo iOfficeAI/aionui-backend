@@ -53,8 +53,7 @@ pub trait ICronRepository: Send + Sync {
     async fn list_enabled(&self) -> Result<Vec<CronJobRow>, DbError>;
 
     /// Returns all cron jobs for a given conversation.
-    async fn list_by_conversation(&self, conversation_id: &str)
-    -> Result<Vec<CronJobRow>, DbError>;
+    async fn list_by_conversation(&self, conversation_id: &str) -> Result<Vec<CronJobRow>, DbError>;
 
     /// Deletes all cron jobs associated with a conversation.
     /// Returns the number of deleted rows.

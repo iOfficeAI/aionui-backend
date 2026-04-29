@@ -86,20 +86,23 @@ impl CliAgentProcess {
             ))
         })?;
 
-        let pid = child.id().ok_or_else(|| {
-            AppError::Internal("Failed to obtain PID from spawned process".into())
-        })?;
+        let pid = child
+            .id()
+            .ok_or_else(|| AppError::Internal("Failed to obtain PID from spawned process".into()))?;
         debug!(pid, command = %config.command.display(), "CLI process spawned");
 
-        let stdout = child.stdout.take().ok_or_else(|| {
-            AppError::Internal("Failed to capture stdout from child process".into())
-        })?;
-        let stderr = child.stderr.take().ok_or_else(|| {
-            AppError::Internal("Failed to capture stderr from child process".into())
-        })?;
-        let stdin = child.stdin.take().ok_or_else(|| {
-            AppError::Internal("Failed to capture stdin for child process".into())
-        })?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| AppError::Internal("Failed to capture stdout from child process".into()))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| AppError::Internal("Failed to capture stderr from child process".into()))?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| AppError::Internal("Failed to capture stdin for child process".into()))?;
 
         let (event_tx, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
         // Pre-subscribe before spawning background tasks to guarantee no events are lost
@@ -216,20 +219,23 @@ impl CliAgentProcess {
             ))
         })?;
 
-        let pid = child.id().ok_or_else(|| {
-            AppError::Internal("Failed to obtain PID from spawned process".into())
-        })?;
+        let pid = child
+            .id()
+            .ok_or_else(|| AppError::Internal("Failed to obtain PID from spawned process".into()))?;
         debug!(pid, command = %config.command.display(), "CLI process spawned (SDK mode)");
 
-        let stdout = child.stdout.take().ok_or_else(|| {
-            AppError::Internal("Failed to capture stdout from child process".into())
-        })?;
-        let stderr = child.stderr.take().ok_or_else(|| {
-            AppError::Internal("Failed to capture stderr from child process".into())
-        })?;
-        let stdin = child.stdin.take().ok_or_else(|| {
-            AppError::Internal("Failed to capture stdin for child process".into())
-        })?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| AppError::Internal("Failed to capture stdout from child process".into()))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| AppError::Internal("Failed to capture stderr from child process".into()))?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| AppError::Internal("Failed to capture stdin for child process".into()))?;
 
         let (event_tx, _) = broadcast::channel(EVENT_CHANNEL_CAPACITY);
         let (exit_tx, exit_rx) = watch::channel(None);
@@ -304,12 +310,12 @@ impl CliAgentProcess {
     /// by [`take_stdio`](Self::take_stdio).
     pub async fn send(&self, message: &serde_json::Value) -> Result<(), AppError> {
         let mut guard = self.stdin.lock().await;
-        let stdin = guard.as_mut().ok_or_else(|| {
-            AppError::Internal("Cannot send: stdin is closed (process exited or taken)".into())
-        })?;
+        let stdin = guard
+            .as_mut()
+            .ok_or_else(|| AppError::Internal("Cannot send: stdin is closed (process exited or taken)".into()))?;
 
-        let mut buf = serde_json::to_vec(message)
-            .map_err(|e| AppError::Internal(format!("Failed to serialize message: {e}")))?;
+        let mut buf =
+            serde_json::to_vec(message).map_err(|e| AppError::Internal(format!("Failed to serialize message: {e}")))?;
         buf.push(b'\n');
 
         stdin.write_all(&buf).await.map_err(|e| {
@@ -442,9 +448,7 @@ fn force_kill(pid: u32) -> Result<(), AppError> {
             }
             Err(e) => {
                 error!(pid, error = %e, "Failed to execute kill command");
-                Err(AppError::Internal(format!(
-                    "Failed to kill process {pid}: {e}"
-                )))
+                Err(AppError::Internal(format!("Failed to kill process {pid}: {e}")))
             }
         }
     }
@@ -597,9 +601,7 @@ mod tests {
 
         proc.kill(Duration::from_millis(100)).await.unwrap();
 
-        timeout(Duration::from_secs(5), proc.wait_for_exit())
-            .await
-            .unwrap();
+        timeout(Duration::from_secs(5), proc.wait_for_exit()).await.unwrap();
         assert!(!proc.is_running());
         assert!(proc.exit_status().is_some());
     }
@@ -623,9 +625,7 @@ mod tests {
         let result = proc.kill(Duration::from_millis(100)).await;
         assert!(result.is_ok());
 
-        timeout(Duration::from_secs(5), proc.wait_for_exit())
-            .await
-            .unwrap();
+        timeout(Duration::from_secs(5), proc.wait_for_exit()).await.unwrap();
         assert!(!proc.is_running());
     }
 
@@ -633,10 +633,7 @@ mod tests {
     async fn spawn_with_env_and_cwd() {
         let config = CommandSpec {
             command: "sh".into(),
-            args: vec![
-                "-c".into(),
-                "echo \"{\\\"val\\\":\\\"$MY_TEST_VAR\\\"}\"".into(),
-            ],
+            args: vec!["-c".into(), "echo \"{\\\"val\\\":\\\"$MY_TEST_VAR\\\"}\"".into()],
             env: vec![EnvVar {
                 name: "MY_TEST_VAR".into(),
                 value: "hello_env".into(),
@@ -721,10 +718,7 @@ mod tests {
         assert!(stdio.is_some(), "First take_stdio should succeed");
 
         let stdio_again = proc.take_stdio().await;
-        assert!(
-            stdio_again.is_none(),
-            "Second take_stdio should return None"
-        );
+        assert!(stdio_again.is_none(), "Second take_stdio should return None");
 
         proc.kill(Duration::from_millis(100)).await.unwrap();
     }
@@ -734,9 +728,7 @@ mod tests {
         let config = simple_script_config("echo 'error line 1' >&2 && echo 'error line 2' >&2");
         let proc = CliAgentProcess::spawn(config).await.unwrap();
 
-        timeout(Duration::from_secs(5), proc.wait_for_exit())
-            .await
-            .unwrap();
+        timeout(Duration::from_secs(5), proc.wait_for_exit()).await.unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let stderr = proc.take_stderr().await;
@@ -749,9 +741,7 @@ mod tests {
         let config = simple_script_config("echo 'hello' >&2");
         let proc = CliAgentProcess::spawn(config).await.unwrap();
 
-        timeout(Duration::from_secs(5), proc.wait_for_exit())
-            .await
-            .unwrap();
+        timeout(Duration::from_secs(5), proc.wait_for_exit()).await.unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let first = proc.take_stderr().await;

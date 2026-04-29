@@ -5,14 +5,11 @@
 
 use std::path::Path;
 
-use aionui_extension::startup_materialize::{
-    materialize_embedded_builtin_skills, materialize_if_needed,
-};
+use aionui_extension::startup_materialize::{materialize_embedded_builtin_skills, materialize_if_needed};
 use include_dir::{Dir, include_dir};
 use tempfile::TempDir;
 
-static FIXTURE_CORPUS: Dir<'static> =
-    include_dir!("$CARGO_MANIFEST_DIR/tests/fixtures/builtin-skills-fixture");
+static FIXTURE_CORPUS: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/tests/fixtures/builtin-skills-fixture");
 
 fn read_version(target: &Path) -> Option<String> {
     std::fs::read_to_string(target.join(".version")).ok()
@@ -45,14 +42,8 @@ async fn materialize_overwrites_existing_target() {
         .await
         .unwrap();
 
-    assert!(
-        !target.join("junk.txt").exists(),
-        "stale file should be gone"
-    );
-    assert!(
-        !target.join("stale-dir").exists(),
-        "stale dir should be gone"
-    );
+    assert!(!target.join("junk.txt").exists(), "stale file should be gone");
+    assert!(!target.join("stale-dir").exists(), "stale dir should be gone");
     assert_eq!(read_version(&target).as_deref(), Some("1.2.3"));
 }
 

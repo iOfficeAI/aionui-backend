@@ -18,10 +18,9 @@ use crate::registry_helpers::{
 use crate::resolvers::{resolve_all_contributions, resolve_i18n_for_all};
 use crate::state::ExtensionStateStore;
 use crate::types::{
-    ExtensionLifecyclePayload, ExtensionState, ExtensionSystemEvent, LoadedExtension,
-    ResolvedAcpAdapter, ResolvedAgent, ResolvedAssistant, ResolvedChannelPlugin,
-    ResolvedContributions, ResolvedModelProvider, ResolvedSettingsTab, ResolvedSkill,
-    ResolvedTheme, WebuiContribution,
+    ExtensionLifecyclePayload, ExtensionState, ExtensionSystemEvent, LoadedExtension, ResolvedAcpAdapter,
+    ResolvedAgent, ResolvedAssistant, ResolvedChannelPlugin, ResolvedContributions, ResolvedModelProvider,
+    ResolvedSettingsTab, ResolvedSkill, ResolvedTheme, WebuiContribution,
 };
 
 // Re-export ExtensionSummary from registry_helpers so that
@@ -62,11 +61,7 @@ impl ExtensionRegistry {
     /// - `state_store`: persists enabled/disabled states across restarts.
     /// - `broadcaster`: pushes WebSocket events to connected clients.
     /// - `app_version`: current application version for engine compatibility.
-    pub fn new(
-        state_store: ExtensionStateStore,
-        broadcaster: Arc<dyn EventBroadcaster>,
-        app_version: String,
-    ) -> Self {
+    pub fn new(state_store: ExtensionStateStore, broadcaster: Arc<dyn EventBroadcaster>, app_version: String) -> Self {
         Self {
             inner: Arc::new(RwLock::new(RegistryInner {
                 extensions: Vec::new(),
@@ -108,10 +103,7 @@ impl ExtensionRegistry {
     /// 5. Run lifecycle hooks (onInstall if needed, then onActivate)
     /// 6. Resolve all contributions
     /// 7. Persist updated states
-    pub async fn initialize_with_scan_paths(
-        &self,
-        scan_paths: Vec<ScanPath>,
-    ) -> Result<(), ExtensionError> {
+    pub async fn initialize_with_scan_paths(&self, scan_paths: Vec<ScanPath>) -> Result<(), ExtensionError> {
         info!("initializing extension registry");
         debug!(count = scan_paths.len(), "resolved scan paths");
 
@@ -142,10 +134,7 @@ impl ExtensionRegistry {
         }
 
         if !dep_result.issues.is_empty() {
-            warn!(
-                issues = dep_result.issues.len(),
-                "dependency validation found issues"
-            );
+            warn!(issues = dep_result.issues.len(), "dependency validation found issues");
         }
 
         info!("extension registry initialized");
@@ -248,11 +237,7 @@ impl ExtensionRegistry {
     /// Optionally records a reason (logged for auditing). Updates state,
     /// re-resolves contributions, persists, and broadcasts
     /// `extensions.stateChanged`.
-    pub async fn disable_extension(
-        &self,
-        name: &str,
-        reason: Option<&str>,
-    ) -> Result<(), ExtensionError> {
+    pub async fn disable_extension(&self, name: &str, reason: Option<&str>) -> Result<(), ExtensionError> {
         let state = {
             let mut guard = self.inner.write().await;
 
@@ -302,11 +287,7 @@ impl ExtensionRegistry {
     /// Look up a single loaded extension by name.
     pub async fn get_extension_by_name(&self, name: &str) -> Option<LoadedExtension> {
         let guard = self.inner.read().await;
-        guard
-            .extensions
-            .iter()
-            .find(|e| e.manifest.name == name)
-            .cloned()
+        guard.extensions.iter().find(|e| e.manifest.name == name).cloned()
     }
 
     /// Snapshot of all resolved contributions.
@@ -334,12 +315,7 @@ impl ExtensionRegistry {
     /// Lookup a single extension-contributed assistant by id.
     pub async fn get_assistant_by_id(&self, id: &str) -> Option<ResolvedAssistant> {
         let guard = self.inner.read().await;
-        guard
-            .contributions
-            .assistants
-            .iter()
-            .find(|a| a.id == id)
-            .cloned()
+        guard.contributions.assistants.iter().find(|a| a.id == id).cloned()
     }
 
     pub async fn get_acp_adapters(&self) -> Vec<ResolvedAcpAdapter> {
@@ -383,10 +359,7 @@ impl ExtensionRegistry {
     }
 
     /// Resolve i18n data for a given locale across all enabled extensions.
-    pub async fn get_i18n_for_locale(
-        &self,
-        locale: &str,
-    ) -> HashMap<String, HashMap<String, String>> {
+    pub async fn get_i18n_for_locale(&self, locale: &str) -> HashMap<String, HashMap<String, String>> {
         let guard = self.inner.read().await;
         resolve_i18n_for_all(&guard.extensions, locale)
     }
@@ -404,10 +377,7 @@ impl ExtensionRegistry {
 
 impl ExtensionRegistry {
     fn broadcast_state_changed(&self, name: &str, enabled: bool) {
-        let event = WebSocketMessage::new(
-            "extensions.stateChanged",
-            json!({ "name": name, "enabled": enabled }),
-        );
+        let event = WebSocketMessage::new("extensions.stateChanged", json!({ "name": name, "enabled": enabled }));
         self.broadcaster.broadcast(event);
     }
 
@@ -463,8 +433,7 @@ impl ExtensionRegistry {
 
                 if needs_install_hook(&ext.manifest.version, persisted_version)
                     && let Some(hook_path) = resolve_hook_path(hooks, HookKind::OnInstall)
-                    && let Err(e) =
-                        execute_hook(ext_dir, hook_path, HookKind::OnInstall, &ext_name).await
+                    && let Err(e) = execute_hook(ext_dir, hook_path, HookKind::OnInstall, &ext_name).await
                 {
                     warn!(
                         extension = %ext_name,
@@ -475,8 +444,7 @@ impl ExtensionRegistry {
 
                 // Run onActivate
                 if let Some(hook_path) = resolve_hook_path(hooks, HookKind::OnActivate)
-                    && let Err(e) =
-                        execute_hook(ext_dir, hook_path, HookKind::OnActivate, &ext_name).await
+                    && let Err(e) = execute_hook(ext_dir, hook_path, HookKind::OnActivate, &ext_name).await
                 {
                     warn!(
                         extension = %ext_name,
@@ -492,11 +460,7 @@ impl ExtensionRegistry {
                 ext.state.installed_at = Some(now);
             }
 
-            self.broadcast_lifecycle_event(
-                &ext_name,
-                ExtensionSystemEvent::ExtensionActivated,
-                None,
-            );
+            self.broadcast_lifecycle_event(&ext_name, ExtensionSystemEvent::ExtensionActivated, None);
         }
 
         extensions
@@ -545,11 +509,7 @@ mod tests {
         }
     }
 
-    fn make_registry() -> (
-        ExtensionRegistry,
-        ExtensionStateStore,
-        Arc<BroadcastEventBus>,
-    ) {
+    fn make_registry() -> (ExtensionRegistry, ExtensionStateStore, Arc<BroadcastEventBus>) {
         let tmp = tempfile::TempDir::new().unwrap();
         let store = ExtensionStateStore::new(tmp.path().join("states.json"));
         let bus = Arc::new(BroadcastEventBus::new(64));

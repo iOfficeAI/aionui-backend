@@ -24,16 +24,10 @@ pub enum ShellError {
 impl From<ShellError> for AppError {
     fn from(err: ShellError) -> Self {
         match err {
-            ShellError::FileNotFound(path) => {
-                AppError::BadRequest(format!("file not found: {path}"))
-            }
-            ShellError::DirectoryNotFound(path) => {
-                AppError::BadRequest(format!("directory not found: {path}"))
-            }
+            ShellError::FileNotFound(path) => AppError::BadRequest(format!("file not found: {path}")),
+            ShellError::DirectoryNotFound(path) => AppError::BadRequest(format!("directory not found: {path}")),
             ShellError::InvalidUrl(msg) => AppError::BadRequest(format!("invalid URL: {msg}")),
-            ShellError::ToolNotInstalled(tool) => {
-                AppError::BadRequest(format!("tool not installed: {tool}"))
-            }
+            ShellError::ToolNotInstalled(tool) => AppError::BadRequest(format!("tool not installed: {tool}")),
             ShellError::CommandFailed(msg) => AppError::Internal(format!("command failed: {msg}")),
             ShellError::Io(e) => AppError::Internal(format!("IO error: {e}")),
         }
@@ -81,9 +75,9 @@ impl SttError {
 impl From<SttError> for AppError {
     fn from(err: SttError) -> Self {
         match &err {
-            SttError::Disabled
-            | SttError::OpenaiNotConfigured
-            | SttError::DeepgramNotConfigured => AppError::BadRequest(err.to_string()),
+            SttError::Disabled | SttError::OpenaiNotConfigured | SttError::DeepgramNotConfigured => {
+                AppError::BadRequest(err.to_string())
+            }
             SttError::RequestFailed(_) => AppError::BadGateway(err.to_string()),
             SttError::Unknown(_) => AppError::Internal(err.to_string()),
         }
@@ -141,10 +135,7 @@ mod tests {
             ShellError::DirectoryNotFound("/dir".into()).to_string(),
             "directory not found: /dir"
         );
-        assert_eq!(
-            ShellError::InvalidUrl("bad".into()).to_string(),
-            "invalid URL: bad"
-        );
+        assert_eq!(ShellError::InvalidUrl("bad".into()).to_string(), "invalid URL: bad");
         assert_eq!(
             ShellError::ToolNotInstalled("code".into()).to_string(),
             "tool not installed: code"
@@ -188,18 +179,12 @@ mod tests {
     #[test]
     fn stt_error_codes() {
         assert_eq!(SttError::Disabled.error_code(), "STT_DISABLED");
-        assert_eq!(
-            SttError::OpenaiNotConfigured.error_code(),
-            "STT_OPENAI_NOT_CONFIGURED"
-        );
+        assert_eq!(SttError::OpenaiNotConfigured.error_code(), "STT_OPENAI_NOT_CONFIGURED");
         assert_eq!(
             SttError::DeepgramNotConfigured.error_code(),
             "STT_DEEPGRAM_NOT_CONFIGURED"
         );
-        assert_eq!(
-            SttError::RequestFailed("x".into()).error_code(),
-            "STT_REQUEST_FAILED"
-        );
+        assert_eq!(SttError::RequestFailed("x".into()).error_code(), "STT_REQUEST_FAILED");
         assert_eq!(SttError::Unknown("x".into()).error_code(), "STT_UNKNOWN");
     }
 
@@ -227,9 +212,6 @@ mod tests {
             SttError::RequestFailed("timeout".into()).to_string(),
             "STT request failed: timeout"
         );
-        assert_eq!(
-            SttError::Unknown("oops".into()).to_string(),
-            "STT unknown error: oops"
-        );
+        assert_eq!(SttError::Unknown("oops".into()).to_string(), "STT unknown error: oops");
     }
 }

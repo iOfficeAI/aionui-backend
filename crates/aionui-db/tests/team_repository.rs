@@ -14,8 +14,7 @@ use std::sync::Arc;
 use aionui_common::now_ms;
 use aionui_db::models::{MailboxMessageRow, TeamRow, TeamTaskRow};
 use aionui_db::{
-    DbError, ITeamRepository, SqliteTeamRepository, UpdateTaskParams, UpdateTeamParams,
-    init_database_memory,
+    DbError, ITeamRepository, SqliteTeamRepository, UpdateTaskParams, UpdateTeamParams, init_database_memory,
 };
 
 async fn repo() -> (Arc<dyn ITeamRepository>, aionui_db::Database) {
@@ -40,13 +39,7 @@ fn make_team(id: &str, name: &str) -> TeamRow {
     }
 }
 
-fn make_mailbox_msg(
-    id: &str,
-    team_id: &str,
-    to: &str,
-    from: &str,
-    msg_type: &str,
-) -> MailboxMessageRow {
+fn make_mailbox_msg(id: &str, team_id: &str, to: &str, from: &str, msg_type: &str) -> MailboxMessageRow {
     MailboxMessageRow {
         id: id.into(),
         team_id: team_id.into(),
@@ -121,9 +114,7 @@ async fn list_teams_multiple() {
 #[tokio::test]
 async fn update_team_name() {
     let (repo, _db) = repo().await;
-    repo.create_team(&make_team("t1", "Old Name"))
-        .await
-        .unwrap();
+    repo.create_team(&make_team("t1", "Old Name")).await.unwrap();
 
     repo.update_team(
         "t1",
@@ -564,12 +555,8 @@ async fn delete_tasks_by_team() {
     repo.create_team(&make_team("t1", "Team1")).await.unwrap();
     repo.create_team(&make_team("t2", "Team2")).await.unwrap();
 
-    repo.create_task(&make_task("tk1", "t1", "T1 Task"))
-        .await
-        .unwrap();
-    repo.create_task(&make_task("tk2", "t2", "T2 Task"))
-        .await
-        .unwrap();
+    repo.create_task(&make_task("tk1", "t1", "T1 Task")).await.unwrap();
+    repo.create_task(&make_task("tk2", "t2", "T2 Task")).await.unwrap();
 
     repo.delete_tasks_by_team("t1").await.unwrap();
 
@@ -653,10 +640,7 @@ async fn task_blocked_by_blocks_bidirectional_consistency() {
     let a_blocks: Vec<String> = serde_json::from_str(&a.blocks).unwrap();
     let b_blocked_by: Vec<String> = serde_json::from_str(&b.blocked_by).unwrap();
 
-    assert!(
-        a_blocks.contains(&"tkB".to_string()),
-        "A.blocks should contain B"
-    );
+    assert!(a_blocks.contains(&"tkB".to_string()), "A.blocks should contain B");
     assert!(
         b_blocked_by.contains(&"tkA".to_string()),
         "B.blockedBy should contain A"

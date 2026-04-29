@@ -104,10 +104,7 @@ async fn try_init_file(path: &Path) -> Result<Database, DbError> {
 }
 
 async fn run_migrations(pool: &SqlitePool) -> Result<(), DbError> {
-    sqlx::migrate!()
-        .run(pool)
-        .await
-        .map_err(DbError::Migration)?;
+    sqlx::migrate!().run(pool).await.map_err(DbError::Migration)?;
     ensure_schema_columns(pool).await
 }
 
@@ -125,20 +122,16 @@ async fn ensure_schema_columns(pool: &SqlitePool) -> Result<(), DbError> {
     ];
 
     for &(table, column, col_def) in expected {
-        let exists: bool =
-            sqlx::query_scalar("SELECT COUNT(*) > 0 FROM pragma_table_info(?) WHERE name = ?")
-                .bind(table)
-                .bind(column)
-                .fetch_one(pool)
-                .await
-                .map_err(DbError::Query)?;
+        let exists: bool = sqlx::query_scalar("SELECT COUNT(*) > 0 FROM pragma_table_info(?) WHERE name = ?")
+            .bind(table)
+            .bind(column)
+            .fetch_one(pool)
+            .await
+            .map_err(DbError::Query)?;
 
         if !exists {
             let sql = format!("ALTER TABLE {table} ADD COLUMN {column} {col_def}");
-            sqlx::query(&sql)
-                .execute(pool)
-                .await
-                .map_err(DbError::Query)?;
+            sqlx::query(&sql).execute(pool).await.map_err(DbError::Query)?;
             info!("Added missing column {table}.{column}");
         }
     }

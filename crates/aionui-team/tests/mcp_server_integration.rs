@@ -84,20 +84,13 @@ async fn setup() -> TestEnv {
         broadcaster,
     ));
 
-    let server = TeamMcpServer::start("test-token-123".into(), scheduler)
-        .await
-        .unwrap();
+    let server = TeamMcpServer::start("test-token-123".into(), scheduler).await.unwrap();
 
-    TestEnv {
-        server,
-        _repo: repo,
-    }
+    TestEnv { server, _repo: repo }
 }
 
 async fn connect_and_init(port: u16, token: &str, slot_id: &str) -> TcpStream {
-    let mut stream = TcpStream::connect(format!("127.0.0.1:{port}"))
-        .await
-        .unwrap();
+    let mut stream = TcpStream::connect(format!("127.0.0.1:{port}")).await.unwrap();
 
     let init_req = json!({
         "jsonrpc": "2.0",
@@ -143,10 +136,7 @@ async fn call_tool(stream: &mut TcpStream, id: u64, tool: &str, args: Value) -> 
 }
 
 fn extract_text(resp: &Value) -> String {
-    resp["result"]["content"][0]["text"]
-        .as_str()
-        .unwrap_or("")
-        .to_string()
+    resp["result"]["content"][0]["text"].as_str().unwrap_or("").to_string()
 }
 
 fn is_error_response(resp: &Value) -> bool {
@@ -417,13 +407,7 @@ async fn ttc2_create_task_with_dependency() {
     let env = setup().await;
     let mut stream = connect_and_init(env.server.port(), "test-token-123", "lead-1").await;
 
-    call_tool(
-        &mut stream,
-        2,
-        "team_task_create",
-        json!({"subject": "Task A"}),
-    )
-    .await;
+    call_tool(&mut stream, 2, "team_task_create", json!({"subject": "Task A"})).await;
 
     let list_resp = call_tool(&mut stream, 3, "team_task_list", json!({})).await;
     let tasks: Vec<Value> = serde_json::from_str(&extract_text(&list_resp)).unwrap();
@@ -444,8 +428,7 @@ async fn ttc2_create_task_with_dependency() {
     assert_eq!(tasks2.len(), 2);
 
     let task_b = tasks2.iter().find(|t| t["subject"] == "Task B").unwrap();
-    let blocked_by: Vec<String> =
-        serde_json::from_value(task_b["blocked_by"].clone()).unwrap_or_default();
+    let blocked_by: Vec<String> = serde_json::from_value(task_b["blocked_by"].clone()).unwrap_or_default();
     assert!(blocked_by.contains(&task_a_id.to_string()));
 
     env.server.stop();
@@ -471,13 +454,7 @@ async fn ttl1_task_list_after_create() {
     let env = setup().await;
     let mut stream = connect_and_init(env.server.port(), "test-token-123", "lead-1").await;
 
-    call_tool(
-        &mut stream,
-        2,
-        "team_task_create",
-        json!({"subject": "Task A"}),
-    )
-    .await;
+    call_tool(&mut stream, 2, "team_task_create", json!({"subject": "Task A"})).await;
 
     let resp = call_tool(&mut stream, 3, "team_task_list", json!({})).await;
     let text = extract_text(&resp);
@@ -497,13 +474,7 @@ async fn ttu1_update_task_status() {
     let env = setup().await;
     let mut stream = connect_and_init(env.server.port(), "test-token-123", "lead-1").await;
 
-    call_tool(
-        &mut stream,
-        2,
-        "team_task_create",
-        json!({"subject": "Task A"}),
-    )
-    .await;
+    call_tool(&mut stream, 2, "team_task_create", json!({"subject": "Task A"})).await;
 
     let list_resp = call_tool(&mut stream, 3, "team_task_list", json!({})).await;
     let tasks: Vec<Value> = serde_json::from_str(&extract_text(&list_resp)).unwrap();
@@ -560,10 +531,7 @@ async fn tm1_list_all_members() {
     let members: Vec<Value> = serde_json::from_str(&text).unwrap();
     assert_eq!(members.len(), 2);
 
-    let names: Vec<&str> = members
-        .iter()
-        .map(|m| m["name"].as_str().unwrap())
-        .collect();
+    let names: Vec<&str> = members.iter().map(|m| m["name"].as_str().unwrap()).collect();
     assert!(names.contains(&"Leader"));
     assert!(names.contains(&"Worker"));
 
@@ -641,13 +609,7 @@ async fn tsa4_non_lead_cannot_shutdown() {
     let env = setup().await;
     let mut stream = connect_and_init(env.server.port(), "test-token-123", "worker-1").await;
 
-    let resp = call_tool(
-        &mut stream,
-        2,
-        "team_shutdown_agent",
-        json!({"slot_id": "lead-1"}),
-    )
-    .await;
+    let resp = call_tool(&mut stream, 2, "team_shutdown_agent", json!({"slot_id": "lead-1"})).await;
 
     assert!(is_error_response(&resp));
     let text = extract_text(&resp);
@@ -691,12 +653,7 @@ async fn non_initialize_first_request_rejected() {
     });
     send_request(&mut stream, &req).await;
     let resp = read_response(&mut stream).await;
-    assert!(
-        resp["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("initialize")
-    );
+    assert!(resp["error"]["message"].as_str().unwrap().contains("initialize"));
 
     env.server.stop();
 }
@@ -737,10 +694,7 @@ async fn sb1_bridge_config_generation() {
 
     let spec = TeamMcpStdioServerSpec::from_config("/bin/aionui-backend", &config);
     let env_map: std::collections::HashMap<_, _> = spec.env.iter().cloned().collect();
-    assert_eq!(
-        env_map[TeamMcpStdioConfig::ENV_PORT],
-        env.server.port().to_string()
-    );
+    assert_eq!(env_map[TeamMcpStdioConfig::ENV_PORT], env.server.port().to_string());
     assert_eq!(env_map[TeamMcpStdioConfig::ENV_TOKEN], "test-token-123");
     assert_eq!(env_map[TeamMcpStdioConfig::ENV_SLOT_ID], "lead-1");
 

@@ -39,10 +39,7 @@ pub struct McpSyncService {
 }
 
 impl McpSyncService {
-    pub fn new(
-        repo: Arc<dyn IMcpServerRepository>,
-        adapters: Vec<Arc<dyn McpAgentAdapter>>,
-    ) -> Self {
+    pub fn new(repo: Arc<dyn IMcpServerRepository>, adapters: Vec<Arc<dyn McpAgentAdapter>>) -> Self {
         Self {
             repo,
             adapters: Arc::new(adapters),
@@ -119,10 +116,7 @@ impl McpSyncService {
     }
 
     /// Remove the named MCP servers from all installed Agent CLIs.
-    pub async fn remove_from_agents(
-        &self,
-        server_names: &[String],
-    ) -> Result<McpSyncResult, McpError> {
+    pub async fn remove_from_agents(&self, server_names: &[String]) -> Result<McpSyncResult, McpError> {
         let _guard = self.service_lock.lock().await;
 
         info!(names = ?server_names, "removing MCP servers from agents");
@@ -131,9 +125,7 @@ impl McpSyncService {
         for adapter in self.adapters.iter() {
             let _agent_guard = self.agent_lock(adapter.source()).await;
 
-            let result = self
-                .remove_from_adapter(adapter.as_ref(), server_names)
-                .await;
+            let result = self.remove_from_adapter(adapter.as_ref(), server_names).await;
             agent_results.push(result);
         }
 
@@ -171,11 +163,7 @@ impl McpSyncService {
     }
 
     /// Sync servers to a single adapter.  Returns the per-agent result.
-    async fn sync_adapter(
-        &self,
-        adapter: &dyn McpAgentAdapter,
-        servers: &[McpServer],
-    ) -> McpAgentSyncResult {
+    async fn sync_adapter(&self, adapter: &dyn McpAgentAdapter, servers: &[McpServer]) -> McpAgentSyncResult {
         let source = adapter.source();
 
         // Check if installed
@@ -232,10 +220,7 @@ impl McpSyncService {
                 }
             }
 
-            if let Err(e) = adapter
-                .install_server(&server.name, &server.transport)
-                .await
-            {
+            if let Err(e) = adapter.install_server(&server.name, &server.transport).await {
                 errors.push(format!("install '{}': {e}", server.name));
             }
         }
@@ -256,11 +241,7 @@ impl McpSyncService {
     }
 
     /// Remove named servers from a single adapter.
-    async fn remove_from_adapter(
-        &self,
-        adapter: &dyn McpAgentAdapter,
-        names: &[String],
-    ) -> McpAgentSyncResult {
+    async fn remove_from_adapter(&self, adapter: &dyn McpAgentAdapter, names: &[String]) -> McpAgentSyncResult {
         let source = adapter.source();
 
         match adapter.is_installed().await {
@@ -403,15 +384,9 @@ mod tests {
             Ok(self.servers.lock().unwrap().clone())
         }
 
-        async fn install_server(
-            &self,
-            name: &str,
-            transport: &McpServerTransport,
-        ) -> Result<(), McpError> {
+        async fn install_server(&self, name: &str, transport: &McpServerTransport) -> Result<(), McpError> {
             if self.install_fail {
-                return Err(McpError::AgentOperationFailed(
-                    "mock install failure".into(),
-                ));
+                return Err(McpError::AgentOperationFailed("mock install failure".into()));
             }
             let mut servers = self.servers.lock().unwrap();
             servers.retain(|s| s.name != name);
@@ -481,18 +456,11 @@ mod tests {
             Ok(servers.iter().find(|s| s.name == name).cloned())
         }
 
-        async fn create(
-            &self,
-            _params: CreateMcpServerParams<'_>,
-        ) -> Result<McpServerRow, DbError> {
+        async fn create(&self, _params: CreateMcpServerParams<'_>) -> Result<McpServerRow, DbError> {
             unimplemented!("not needed for sync tests")
         }
 
-        async fn update(
-            &self,
-            _id: &str,
-            _params: UpdateMcpServerParams<'_>,
-        ) -> Result<McpServerRow, DbError> {
+        async fn update(&self, _id: &str, _params: UpdateMcpServerParams<'_>) -> Result<McpServerRow, DbError> {
             unimplemented!("not needed for sync tests")
         }
 
@@ -500,10 +468,7 @@ mod tests {
             unimplemented!("not needed for sync tests")
         }
 
-        async fn batch_upsert(
-            &self,
-            _params_list: &[CreateMcpServerParams<'_>],
-        ) -> Result<Vec<McpServerRow>, DbError> {
+        async fn batch_upsert(&self, _params_list: &[CreateMcpServerParams<'_>]) -> Result<Vec<McpServerRow>, DbError> {
             unimplemented!("not needed for sync tests")
         }
 
@@ -538,10 +503,7 @@ mod tests {
         }
     }
 
-    fn make_service(
-        rows: Vec<McpServerRow>,
-        adapters: Vec<Arc<dyn McpAgentAdapter>>,
-    ) -> McpSyncService {
+    fn make_service(rows: Vec<McpServerRow>, adapters: Vec<Arc<dyn McpAgentAdapter>>) -> McpSyncService {
         let repo = Arc::new(MockRepo::new(rows));
         McpSyncService::new(repo, adapters)
     }
@@ -607,12 +569,13 @@ mod tests {
     #[tokio::test]
     async fn sync_skips_identical_server() {
         let transport = stdio_transport();
-        let adapter: Arc<MockAdapter> = Arc::new(
-            MockAdapter::new(McpSource::Claude, true).with_existing(vec![DetectedServer {
-                name: "test-srv".into(),
-                transport: transport.clone(),
-            }]),
-        );
+        let adapter: Arc<MockAdapter> =
+            Arc::new(
+                MockAdapter::new(McpSource::Claude, true).with_existing(vec![DetectedServer {
+                    name: "test-srv".into(),
+                    transport: transport.clone(),
+                }]),
+            );
 
         let row = make_row(
             "mcp_1",
@@ -633,12 +596,13 @@ mod tests {
     #[tokio::test]
     async fn sync_replaces_changed_transport() {
         let old_transport = stdio_transport();
-        let adapter: Arc<MockAdapter> = Arc::new(
-            MockAdapter::new(McpSource::Claude, true).with_existing(vec![DetectedServer {
-                name: "test-srv".into(),
-                transport: old_transport,
-            }]),
-        );
+        let adapter: Arc<MockAdapter> =
+            Arc::new(
+                MockAdapter::new(McpSource::Claude, true).with_existing(vec![DetectedServer {
+                    name: "test-srv".into(),
+                    transport: old_transport,
+                }]),
+            );
 
         // Same name but now HTTP transport
         let row = make_row(
@@ -661,12 +625,7 @@ mod tests {
     async fn sync_skips_not_installed_agent() {
         let adapter: Arc<MockAdapter> = Arc::new(MockAdapter::new(McpSource::Gemini, false));
 
-        let row = make_row(
-            "mcp_1",
-            "test-srv",
-            "stdio",
-            r#"{"command":"npx","args":[],"env":{}}"#,
-        );
+        let row = make_row("mcp_1", "test-srv", "stdio", r#"{"command":"npx","args":[],"env":{}}"#);
 
         let svc = make_service(vec![row], vec![adapter as Arc<dyn McpAgentAdapter>]);
         let result = svc.sync_to_agents(&["mcp_1".into()]).await.unwrap();
@@ -677,15 +636,9 @@ mod tests {
 
     #[tokio::test]
     async fn sync_reports_partial_failure() {
-        let adapter: Arc<MockAdapter> =
-            Arc::new(MockAdapter::new(McpSource::Claude, true).with_install_fail());
+        let adapter: Arc<MockAdapter> = Arc::new(MockAdapter::new(McpSource::Claude, true).with_install_fail());
 
-        let row = make_row(
-            "mcp_1",
-            "fail-srv",
-            "stdio",
-            r#"{"command":"npx","args":[],"env":{}}"#,
-        );
+        let row = make_row("mcp_1", "fail-srv", "stdio", r#"{"command":"npx","args":[],"env":{}}"#);
 
         let svc = make_service(vec![row], vec![adapter as Arc<dyn McpAgentAdapter>]);
         let result = svc.sync_to_agents(&["mcp_1".into()]).await.unwrap();
@@ -710,10 +663,7 @@ mod tests {
         let adapter: Arc<dyn McpAgentAdapter> = Arc::new(MockAdapter::new(McpSource::Claude, true));
 
         let svc = make_service(vec![], vec![adapter]);
-        let result = svc
-            .sync_to_agents(&["nonexistent_id".into()])
-            .await
-            .unwrap();
+        let result = svc.sync_to_agents(&["nonexistent_id".into()]).await.unwrap();
 
         // No servers loaded → nothing to sync → success
         assert!(result.success);
@@ -723,12 +673,13 @@ mod tests {
 
     #[tokio::test]
     async fn remove_succeeds() {
-        let adapter: Arc<MockAdapter> = Arc::new(
-            MockAdapter::new(McpSource::Claude, true).with_existing(vec![DetectedServer {
-                name: "srv1".into(),
-                transport: stdio_transport(),
-            }]),
-        );
+        let adapter: Arc<MockAdapter> =
+            Arc::new(
+                MockAdapter::new(McpSource::Claude, true).with_existing(vec![DetectedServer {
+                    name: "srv1".into(),
+                    transport: stdio_transport(),
+                }]),
+            );
 
         let svc = make_service(vec![], vec![adapter.clone() as Arc<dyn McpAgentAdapter>]);
         let result = svc.remove_from_agents(&["srv1".into()]).await.unwrap();
@@ -742,18 +693,14 @@ mod tests {
         let adapter: Arc<dyn McpAgentAdapter> = Arc::new(MockAdapter::new(McpSource::Claude, true));
 
         let svc = make_service(vec![], vec![adapter]);
-        let result = svc
-            .remove_from_agents(&["no-such-srv".into()])
-            .await
-            .unwrap();
+        let result = svc.remove_from_agents(&["no-such-srv".into()]).await.unwrap();
 
         assert!(result.success);
     }
 
     #[tokio::test]
     async fn remove_reports_failure() {
-        let adapter: Arc<dyn McpAgentAdapter> =
-            Arc::new(MockAdapter::new(McpSource::Claude, true).with_remove_fail());
+        let adapter: Arc<dyn McpAgentAdapter> = Arc::new(MockAdapter::new(McpSource::Claude, true).with_remove_fail());
 
         let svc = make_service(vec![], vec![adapter]);
         let result = svc.remove_from_agents(&["some-srv".into()]).await.unwrap();
@@ -764,8 +711,7 @@ mod tests {
 
     #[tokio::test]
     async fn remove_skips_not_installed() {
-        let adapter: Arc<dyn McpAgentAdapter> =
-            Arc::new(MockAdapter::new(McpSource::Gemini, false));
+        let adapter: Arc<dyn McpAgentAdapter> = Arc::new(MockAdapter::new(McpSource::Gemini, false));
 
         let svc = make_service(vec![], vec![adapter]);
         let result = svc.remove_from_agents(&["srv".into()]).await.unwrap();
@@ -788,19 +734,12 @@ mod tests {
 
     #[tokio::test]
     async fn sync_multiple_adapters_mixed_results() {
-        let ok_adapter: Arc<dyn McpAgentAdapter> =
-            Arc::new(MockAdapter::new(McpSource::Claude, true));
+        let ok_adapter: Arc<dyn McpAgentAdapter> = Arc::new(MockAdapter::new(McpSource::Claude, true));
         let fail_adapter: Arc<dyn McpAgentAdapter> =
             Arc::new(MockAdapter::new(McpSource::Gemini, true).with_install_fail());
-        let skip_adapter: Arc<dyn McpAgentAdapter> =
-            Arc::new(MockAdapter::new(McpSource::Qwen, false));
+        let skip_adapter: Arc<dyn McpAgentAdapter> = Arc::new(MockAdapter::new(McpSource::Qwen, false));
 
-        let row = make_row(
-            "mcp_1",
-            "srv",
-            "stdio",
-            r#"{"command":"npx","args":[],"env":{}}"#,
-        );
+        let row = make_row("mcp_1", "srv", "stdio", r#"{"command":"npx","args":[],"env":{}}"#);
 
         let svc = make_service(vec![row], vec![ok_adapter, fail_adapter, skip_adapter]);
         let result = svc.sync_to_agents(&["mcp_1".into()]).await.unwrap();

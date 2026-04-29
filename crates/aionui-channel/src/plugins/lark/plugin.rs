@@ -11,16 +11,12 @@ use crate::constants::{LARK_EVENT_DEDUP_TTL, LARK_MESSAGE_LIMIT};
 use crate::error::ChannelError;
 use crate::plugin::{ChannelPlugin, PluginCallbacks};
 use crate::types::{
-    ActionCategory, ActionContext, BotInfo, MessageContentType, PluginConfig, PluginStatus,
-    PluginType, UnifiedAction, UnifiedAttachment, UnifiedIncomingMessage, UnifiedMessageContent,
-    UnifiedOutgoingMessage, UnifiedUser,
+    ActionCategory, ActionContext, BotInfo, MessageContentType, PluginConfig, PluginStatus, PluginType, UnifiedAction,
+    UnifiedAttachment, UnifiedIncomingMessage, UnifiedMessageContent, UnifiedOutgoingMessage, UnifiedUser,
 };
 
 use super::api::LarkApi;
-use super::types::{
-    BotMenuEvent, CardActionEvent, MessageEvent, WsFrame, build_interactive_card,
-    parse_lark_callback,
-};
+use super::types::{BotMenuEvent, CardActionEvent, MessageEvent, WsFrame, build_interactive_card, parse_lark_callback};
 
 /// Maximum reconnect attempts before giving up.
 const MAX_RECONNECT_ATTEMPTS: u32 = 10;
@@ -71,11 +67,7 @@ impl LarkPlugin {
 
 #[async_trait::async_trait]
 impl ChannelPlugin for LarkPlugin {
-    async fn initialize(
-        &mut self,
-        config: PluginConfig,
-        callbacks: PluginCallbacks,
-    ) -> Result<(), ChannelError> {
+    async fn initialize(&mut self, config: PluginConfig, callbacks: PluginCallbacks) -> Result<(), ChannelError> {
         self.status = PluginStatus::Initializing;
 
         let app_id = config
@@ -149,11 +141,7 @@ impl ChannelPlugin for LarkPlugin {
 
         // Spawn the dedup cache cleanup task
         let dedup_for_cleanup = dedup_cache;
-        let mut cleanup_shutdown = self
-            .shutdown_tx
-            .as_ref()
-            .expect("shutdown_tx just set")
-            .subscribe();
+        let mut cleanup_shutdown = self.shutdown_tx.as_ref().expect("shutdown_tx just set").subscribe();
         self.cleanup_handle = Some(tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -199,11 +187,7 @@ impl ChannelPlugin for LarkPlugin {
         Ok(())
     }
 
-    async fn send_message(
-        &self,
-        chat_id: &str,
-        message: UnifiedOutgoingMessage,
-    ) -> Result<String, ChannelError> {
+    async fn send_message(&self, chat_id: &str, message: UnifiedOutgoingMessage) -> Result<String, ChannelError> {
         let api = self
             .api
             .as_ref()
@@ -297,15 +281,7 @@ async fn ws_loop(
 
         debug!(url = %ws_url, "Connecting to Lark WebSocket");
 
-        match connect_and_listen(
-            &ws_url,
-            &message_tx,
-            &confirm_tx,
-            &dedup_cache,
-            &mut shutdown_rx,
-        )
-        .await
-        {
+        match connect_and_listen(&ws_url, &message_tx, &confirm_tx, &dedup_cache, &mut shutdown_rx).await {
             Ok(()) => {
                 // Clean shutdown
                 debug!("Lark WS connection closed cleanly");
@@ -457,10 +433,7 @@ async fn handle_ws_text(
 // ---------------------------------------------------------------------------
 
 /// Handle an `im.message.receive_v1` event.
-async fn handle_message_event(
-    event_data: serde_json::Value,
-    message_tx: &mpsc::Sender<UnifiedIncomingMessage>,
-) {
+async fn handle_message_event(event_data: serde_json::Value, message_tx: &mpsc::Sender<UnifiedIncomingMessage>) {
     let evt: MessageEvent = match serde_json::from_value(event_data) {
         Ok(e) => e,
         Err(e) => {
@@ -597,10 +570,7 @@ async fn handle_card_action(
 }
 
 /// Handle an `application.bot.menu_v6` event.
-async fn handle_bot_menu_event(
-    event_data: serde_json::Value,
-    message_tx: &mpsc::Sender<UnifiedIncomingMessage>,
-) {
+async fn handle_bot_menu_event(event_data: serde_json::Value, message_tx: &mpsc::Sender<UnifiedIncomingMessage>) {
     let evt: BotMenuEvent = match serde_json::from_value(event_data) {
         Ok(e) => e,
         Err(e) => {
@@ -690,11 +660,7 @@ fn extract_message_content(
                 file_size: None,
                 url: None,
             }];
-            (
-                MessageContentType::Document,
-                String::new(),
-                Some(attachments),
-            )
+            (MessageContentType::Document, String::new(), Some(attachments))
         }
         "audio" => {
             let file_key = serde_json::from_str::<super::types::AudioContent>(content_json)
@@ -760,9 +726,7 @@ fn truncate_message(text: &str, limit: usize) -> String {
 
 /// Calculate exponential backoff delay, capped at the maximum.
 fn backoff_delay(attempt: u32) -> Duration {
-    let delay_secs = 2u64
-        .saturating_pow(attempt)
-        .min(MAX_RECONNECT_DELAY.as_secs());
+    let delay_secs = 2u64.saturating_pow(attempt).min(MAX_RECONNECT_DELAY.as_secs());
     Duration::from_secs(delay_secs)
 }
 
@@ -850,8 +814,7 @@ mod tests {
             },
             name: "Bot".into(),
         }];
-        let (ct, text, _) =
-            extract_message_content("text", r#"{"text":"@_user_1 Hello bot"}"#, Some(&mentions));
+        let (ct, text, _) = extract_message_content("text", r#"{"text":"@_user_1 Hello bot"}"#, Some(&mentions));
         assert_eq!(ct, MessageContentType::Text);
         assert_eq!(text, "Hello bot");
     }
@@ -866,11 +829,7 @@ mod tests {
 
     #[test]
     fn extract_file_content() {
-        let (ct, _, att) = extract_message_content(
-            "file",
-            r#"{"file_key":"file_123","file_name":"doc.pdf"}"#,
-            None,
-        );
+        let (ct, _, att) = extract_message_content("file", r#"{"file_key":"file_123","file_name":"doc.pdf"}"#, None);
         assert_eq!(ct, MessageContentType::Document);
         let atts = att.unwrap();
         assert_eq!(atts[0].file_id.as_deref(), Some("file_123"));

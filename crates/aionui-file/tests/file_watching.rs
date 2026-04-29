@@ -75,10 +75,7 @@ async fn start_watch_and_detect_change() {
         "expected fileWatch.fileChanged event, got: {events:?}"
     );
 
-    let ev = events
-        .iter()
-        .find(|e| e.name == "fileWatch.fileChanged")
-        .unwrap();
+    let ev = events.iter().find(|e| e.name == "fileWatch.fileChanged").unwrap();
     assert!(ev.data["file_path"].as_str().is_some());
     assert!(ev.data["event_type"].as_str().is_some());
 }
@@ -103,10 +100,7 @@ async fn stop_watch_stops_events() {
     settle().await;
 
     let events = recorder.take_events();
-    assert!(
-        events.is_empty(),
-        "expected no events after stop, got: {events:?}"
-    );
+    assert!(events.is_empty(), "expected no events after stop, got: {events:?}");
 }
 
 #[tokio::test]
@@ -130,10 +124,7 @@ async fn stop_all_watches_clears_file_watches() {
     settle().await;
 
     let events = recorder.take_events();
-    assert!(
-        events.is_empty(),
-        "expected no events after stop_all, got: {events:?}"
-    );
+    assert!(events.is_empty(), "expected no events after stop_all, got: {events:?}");
 }
 
 #[tokio::test]
@@ -164,9 +155,7 @@ async fn watch_nonexistent_file_returns_error() {
 async fn office_watch_detects_docx() {
     let dir = tempfile::tempdir().unwrap();
     let (svc, recorder) = make_service();
-    svc.start_office_watch(dir.path().to_str().unwrap())
-        .await
-        .unwrap();
+    svc.start_office_watch(dir.path().to_str().unwrap()).await.unwrap();
     settle().await;
 
     // Create a .docx file.
@@ -175,9 +164,7 @@ async fn office_watch_detects_docx() {
 
     let events = recorder.take_events();
     assert!(
-        events
-            .iter()
-            .any(|e| e.name == "workspaceOfficeWatch.fileAdded"),
+        events.iter().any(|e| e.name == "workspaceOfficeWatch.fileAdded"),
         "expected workspaceOfficeWatch.fileAdded event, got: {events:?}"
     );
 }
@@ -186,9 +173,7 @@ async fn office_watch_detects_docx() {
 async fn office_watch_detects_xlsx() {
     let dir = tempfile::tempdir().unwrap();
     let (svc, recorder) = make_service();
-    svc.start_office_watch(dir.path().to_str().unwrap())
-        .await
-        .unwrap();
+    svc.start_office_watch(dir.path().to_str().unwrap()).await.unwrap();
     settle().await;
 
     std::fs::write(dir.path().join("data.xlsx"), "fake xlsx").unwrap();
@@ -196,9 +181,7 @@ async fn office_watch_detects_xlsx() {
 
     let events = recorder.take_events();
     assert!(
-        events
-            .iter()
-            .any(|e| e.name == "workspaceOfficeWatch.fileAdded"),
+        events.iter().any(|e| e.name == "workspaceOfficeWatch.fileAdded"),
         "expected fileAdded for .xlsx, got: {events:?}"
     );
 }
@@ -207,9 +190,7 @@ async fn office_watch_detects_xlsx() {
 async fn office_watch_detects_pptx() {
     let dir = tempfile::tempdir().unwrap();
     let (svc, recorder) = make_service();
-    svc.start_office_watch(dir.path().to_str().unwrap())
-        .await
-        .unwrap();
+    svc.start_office_watch(dir.path().to_str().unwrap()).await.unwrap();
     settle().await;
 
     std::fs::write(dir.path().join("slides.pptx"), "fake pptx").unwrap();
@@ -217,9 +198,7 @@ async fn office_watch_detects_pptx() {
 
     let events = recorder.take_events();
     assert!(
-        events
-            .iter()
-            .any(|e| e.name == "workspaceOfficeWatch.fileAdded"),
+        events.iter().any(|e| e.name == "workspaceOfficeWatch.fileAdded"),
         "expected fileAdded for .pptx, got: {events:?}"
     );
 }
@@ -228,9 +207,7 @@ async fn office_watch_detects_pptx() {
 async fn office_watch_ignores_non_office_files() {
     let dir = tempfile::tempdir().unwrap();
     let (svc, recorder) = make_service();
-    svc.start_office_watch(dir.path().to_str().unwrap())
-        .await
-        .unwrap();
+    svc.start_office_watch(dir.path().to_str().unwrap()).await.unwrap();
     settle().await;
 
     // Drain any setup events.
@@ -290,25 +267,19 @@ async fn idempotent_office_watch() {
 async fn office_watch_event_has_correct_fields() {
     let dir = tempfile::tempdir().unwrap();
     let (svc, recorder) = make_service();
-    svc.start_office_watch(dir.path().to_str().unwrap())
-        .await
-        .unwrap();
+    svc.start_office_watch(dir.path().to_str().unwrap()).await.unwrap();
     settle().await;
 
     std::fs::write(dir.path().join("check.docx"), "content").unwrap();
     settle().await;
 
     let events = recorder.take_events();
-    let ev = events
-        .iter()
-        .find(|e| e.name == "workspaceOfficeWatch.fileAdded");
+    let ev = events.iter().find(|e| e.name == "workspaceOfficeWatch.fileAdded");
     assert!(ev.is_some(), "expected fileAdded event, got: {events:?}");
 
     let data = &ev.unwrap().data;
     assert!(
-        data["file_path"]
-            .as_str()
-            .is_some_and(|p| p.ends_with("check.docx")),
+        data["file_path"].as_str().is_some_and(|p| p.ends_with("check.docx")),
         "file_path should end with check.docx: {data:?}"
     );
     assert!(

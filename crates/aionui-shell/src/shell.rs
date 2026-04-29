@@ -25,19 +25,13 @@ impl ShellService {
     pub async fn show_item_in_folder(&self, file_path: &str) -> Result<(), ShellError> {
         let path = validate_path_exists(file_path)?;
         if cfg!(target_os = "macos") {
-            self.opener
-                .run_command("open", &["-R", &path.to_string_lossy()])
-                .await
+            self.opener.run_command("open", &["-R", &path.to_string_lossy()]).await
         } else if cfg!(target_os = "windows") {
             let parent = path.parent().unwrap_or(&path);
-            self.opener
-                .run_command("explorer", &[&parent.to_string_lossy()])
-                .await
+            self.opener.run_command("explorer", &[&parent.to_string_lossy()]).await
         } else {
             let parent = path.parent().unwrap_or(&path);
-            self.opener
-                .run_command("xdg-open", &[&parent.to_string_lossy()])
-                .await
+            self.opener.run_command("xdg-open", &[&parent.to_string_lossy()]).await
         }
     }
 
@@ -53,11 +47,7 @@ impl ShellService {
         }
     }
 
-    pub async fn open_folder_with(
-        &self,
-        folder_path: &str,
-        tool: ToolType,
-    ) -> Result<(), ShellError> {
+    pub async fn open_folder_with(&self, folder_path: &str, tool: ToolType) -> Result<(), ShellError> {
         let path = validate_directory_exists(folder_path)?;
         match tool {
             ToolType::Vscode => self.open_folder_vscode(&path).await,
@@ -81,23 +71,16 @@ impl ShellService {
         if !self.detect_vscode() {
             return Err(ShellError::ToolNotInstalled("vscode".to_owned()));
         }
-        self.opener
-            .run_command("code", &[&path.to_string_lossy()])
-            .await
+        self.opener.run_command("code", &[&path.to_string_lossy()]).await
     }
 
     async fn open_folder_terminal(&self, path: &Path) -> Result<(), ShellError> {
         let path_str = path.to_string_lossy();
         if cfg!(target_os = "macos") {
-            self.opener
-                .run_command("open", &["-a", "Terminal", &path_str])
-                .await
+            self.opener.run_command("open", &["-a", "Terminal", &path_str]).await
         } else if cfg!(target_os = "windows") {
             self.opener
-                .run_command(
-                    "cmd",
-                    &["/c", "start", "cmd", "/K", &format!("cd /d {path_str}")],
-                )
+                .run_command("cmd", &["/c", "start", "cmd", "/K", &format!("cd /d {path_str}")])
                 .await
         } else {
             self.try_linux_terminal(&path_str).await
@@ -343,9 +326,7 @@ mod tests {
     #[tokio::test]
     async fn open_folder_with_fails_for_missing_dir() {
         let svc = ShellService::new(Arc::new(NoopSystemOpener));
-        let result = svc
-            .open_folder_with("/nonexistent/dir", ToolType::Explorer)
-            .await;
+        let result = svc.open_folder_with("/nonexistent/dir", ToolType::Explorer).await;
         assert!(matches!(result, Err(ShellError::DirectoryNotFound(_))));
     }
 

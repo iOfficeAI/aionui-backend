@@ -2,8 +2,7 @@
 
 use crate::error::DbError;
 use crate::models::{
-    AssistantOverrideRow, AssistantRow, CreateAssistantParams, UpdateAssistantParams,
-    UpsertOverrideParams,
+    AssistantOverrideRow, AssistantRow, CreateAssistantParams, UpdateAssistantParams, UpsertOverrideParams,
 };
 
 /// CRUD access for user-authored assistant rows.
@@ -23,11 +22,7 @@ pub trait IAssistantRepository: Send + Sync {
 
     /// Partial update of an existing assistant row. Returns `Ok(None)` if
     /// no row matches.
-    async fn update(
-        &self,
-        id: &str,
-        params: &UpdateAssistantParams<'_>,
-    ) -> Result<Option<AssistantRow>, DbError>;
+    async fn update(&self, id: &str, params: &UpdateAssistantParams<'_>) -> Result<Option<AssistantRow>, DbError>;
 
     /// Delete an assistant row by id. Returns `true` if a row was removed.
     async fn delete(&self, id: &str) -> Result<bool, DbError>;
@@ -48,10 +43,7 @@ pub trait IAssistantOverrideRepository: Send + Sync {
     async fn get_all(&self) -> Result<Vec<AssistantOverrideRow>, DbError>;
 
     /// Insert or update the override row for an assistant.
-    async fn upsert(
-        &self,
-        params: &UpsertOverrideParams<'_>,
-    ) -> Result<AssistantOverrideRow, DbError>;
+    async fn upsert(&self, params: &UpsertOverrideParams<'_>) -> Result<AssistantOverrideRow, DbError>;
 
     /// Delete the override row for an assistant. Returns `true` if a row was
     /// removed.

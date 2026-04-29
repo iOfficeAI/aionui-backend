@@ -47,11 +47,7 @@ fn write_hub_index(hub_dir: &std::path::Path, extensions: &[serde_json::Value]) 
         "schema_version": 1,
         "extensions": extensions,
     });
-    std::fs::write(
-        hub_dir.join("index.json"),
-        serde_json::to_vec_pretty(&index).unwrap(),
-    )
-    .unwrap();
+    std::fs::write(hub_dir.join("index.json"), serde_json::to_vec_pretty(&index).unwrap()).unwrap();
 }
 
 fn write_extension_manifest(ext_dir: &std::path::Path, name: &str, version: &str) {
@@ -222,10 +218,7 @@ async fn hm5_check_updates_detects_newer_version() {
         path: h.hub_dir.path().to_path_buf(),
         source: aionui_extension::types::ExtensionSource::Env,
     }];
-    h.registry
-        .initialize_with_scan_paths(scan_paths)
-        .await
-        .unwrap();
+    h.registry.initialize_with_scan_paths(scan_paths).await.unwrap();
 
     // Index has a newer version.
     write_hub_index(
@@ -361,10 +354,7 @@ async fn index_merge_shows_update_available() {
         path: h.hub_dir.path().to_path_buf(),
         source: aionui_extension::types::ExtensionSource::Env,
     }];
-    h.registry
-        .initialize_with_scan_paths(scan_paths)
-        .await
-        .unwrap();
+    h.registry.initialize_with_scan_paths(scan_paths).await.unwrap();
 
     // Index advertises v2.0.0.
     write_hub_index(
@@ -391,10 +381,7 @@ async fn index_merge_shows_installed_when_same_version() {
         path: h.hub_dir.path().to_path_buf(),
         source: aionui_extension::types::ExtensionSource::Env,
     }];
-    h.registry
-        .initialize_with_scan_paths(scan_paths)
-        .await
-        .unwrap();
+    h.registry.initialize_with_scan_paths(scan_paths).await.unwrap();
 
     write_hub_index(
         h.hub_dir.path(),

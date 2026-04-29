@@ -26,8 +26,7 @@ use tracing::{error, warn};
 /// Assets compiled into the binary at build time. Paths are relative to
 /// this embedded root, matching the on-disk layout under
 /// `crates/aionui-app/assets/builtin-assistants/`.
-static BUILTIN_ASSETS: Dir<'_> =
-    include_dir!("$CARGO_MANIFEST_DIR/../aionui-app/assets/builtin-assistants");
+static BUILTIN_ASSETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../aionui-app/assets/builtin-assistants");
 
 /// Single built-in assistant entry, loaded from `assistants.json`.
 #[derive(Debug, Clone, Deserialize)]
@@ -142,11 +141,7 @@ impl BuiltinAssistantRegistry {
         let content = match std::fs::read_to_string(&manifest_path) {
             Ok(c) => c,
             Err(e) => {
-                warn!(
-                    "Built-in manifest missing at {}: {}",
-                    manifest_path.display(),
-                    e
-                );
+                warn!("Built-in manifest missing at {}: {}", manifest_path.display(), e);
                 return Self::with_assistants(HashMap::new(), Source::Disk(assets_dir));
             }
         };
@@ -239,11 +234,7 @@ impl Default for BuiltinAssistantRegistry {
 
 fn parse_manifest_bytes(bytes: &[u8]) -> HashMap<String, BuiltinAssistant> {
     match serde_json::from_slice::<BuiltinManifest>(bytes) {
-        Ok(m) => m
-            .assistants
-            .into_iter()
-            .map(|a| (a.id.clone(), a))
-            .collect(),
+        Ok(m) => m.assistants.into_iter().map(|a| (a.id.clone(), a)).collect(),
         Err(e) => {
             error!("Embedded built-in manifest parse failed: {e}");
             HashMap::new()
@@ -253,11 +244,7 @@ fn parse_manifest_bytes(bytes: &[u8]) -> HashMap<String, BuiltinAssistant> {
 
 fn parse_manifest_str(content: &str) -> HashMap<String, BuiltinAssistant> {
     match serde_json::from_str::<BuiltinManifest>(content) {
-        Ok(m) => m
-            .assistants
-            .into_iter()
-            .map(|a| (a.id.clone(), a))
-            .collect(),
+        Ok(m) => m.assistants.into_iter().map(|a| (a.id.clone(), a)).collect(),
         Err(e) => {
             error!("Built-in manifest parse failed: {e}");
             HashMap::new()
@@ -291,10 +278,7 @@ mod tests {
     #[test]
     fn load_embedded_has_expected_builtins() {
         let reg = BuiltinAssistantRegistry::load_embedded();
-        assert!(
-            !reg.is_empty(),
-            "embedded registry should contain the shipped presets"
-        );
+        assert!(!reg.is_empty(), "embedded registry should contain the shipped presets");
         // Sanity-check a couple of known ids from the committed manifest.
         assert!(reg.has("word-creator"));
         assert!(reg.has("cowork"));

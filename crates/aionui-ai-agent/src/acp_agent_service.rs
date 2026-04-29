@@ -289,10 +289,7 @@ async fn per_conversation_consumer(
                 // is needed for later resume-via-`session/load`. No
                 // debounce here; the cost is a single write.
                 if let AgentStreamEvent::SessionAssigned(data) = &event {
-                    match repo
-                        .update_session_id(&conversation_id, &data.session_id)
-                        .await
-                    {
+                    match repo.update_session_id(&conversation_id, &data.session_id).await {
                         Ok(true) => {}
                         Ok(false) => {
                             debug!(
@@ -327,11 +324,7 @@ async fn per_conversation_consumer(
     }
 }
 
-async fn flush(
-    repo: &Arc<dyn IAcpSessionRepository>,
-    conversation_id: &str,
-    pending: &mut PendingUpdate,
-) {
+async fn flush(repo: &Arc<dyn IAcpSessionRepository>, conversation_id: &str, pending: &mut PendingUpdate) {
     if pending.is_empty() {
         return;
     }
@@ -339,10 +332,7 @@ async fn flush(
     match repo.save_runtime_state(conversation_id, &params).await {
         Ok(true) => {}
         Ok(false) => {
-            debug!(
-                conversation_id,
-                "session sync: acp_session row missing; update dropped"
-            );
+            debug!(conversation_id, "session sync: acp_session row missing; update dropped");
         }
         Err(err) => {
             warn!(
@@ -360,9 +350,7 @@ mod tests {
     use super::*;
     use crate::agent_manager::{AgentManagerHandle, IAgentManager};
     use crate::stream_event::FinishEventData;
-    use aionui_common::{
-        AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, TimestampMs,
-    };
+    use aionui_common::{AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, TimestampMs};
     use aionui_db::{CreateAcpSessionParams, SqliteAcpSessionRepository, init_database_memory};
     use serde_json::json;
     use tokio::sync::broadcast;
@@ -434,8 +422,7 @@ mod tests {
 
     async fn setup() -> (Arc<AcpAgentService>, Arc<dyn IAcpSessionRepository>) {
         let db = init_database_memory().await.unwrap();
-        let repo: Arc<dyn IAcpSessionRepository> =
-            Arc::new(SqliteAcpSessionRepository::new(db.pool().clone()));
+        let repo: Arc<dyn IAcpSessionRepository> = Arc::new(SqliteAcpSessionRepository::new(db.pool().clone()));
         repo.create(&CreateAcpSessionParams {
             conversation_id: "conv-1",
             agent_backend: "claude",
@@ -516,9 +503,7 @@ mod tests {
         let (mgr, tx) = StubManager::new();
         svc.attach("conv-1".into(), mgr as AgentManagerHandle).await;
 
-        let _ = tx.send(AgentStreamEvent::Finish(FinishEventData {
-            session_id: None,
-        }));
+        let _ = tx.send(AgentStreamEvent::Finish(FinishEventData { session_id: None }));
         sleep(Duration::from_millis(600)).await;
 
         let state = repo.load_runtime_state("conv-1").await.unwrap().unwrap();

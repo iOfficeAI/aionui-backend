@@ -6,9 +6,8 @@
 //! - MessageMiddleware pipeline end-to-end
 
 use aionui_ai_agent::{
-    CronCommand, CronCommandResult, CronCreateParams, CronUpdateParams, ICronService,
-    MessageMiddleware, detect_cron_commands, has_cron_commands, strip_cron_commands,
-    strip_think_tags,
+    CronCommand, CronCommandResult, CronCreateParams, CronUpdateParams, ICronService, MessageMiddleware,
+    detect_cron_commands, has_cron_commands, strip_cron_commands, strip_think_tags,
 };
 use async_trait::async_trait;
 
@@ -142,12 +141,8 @@ fn detect_no_commands_in_normal_text() {
 
 #[test]
 fn has_cron_detects_all_types() {
-    assert!(has_cron_commands(
-        "[CRON_CREATE]\nschedule: *\n[/CRON_CREATE]"
-    ));
-    assert!(has_cron_commands(
-        "[CRON_UPDATE: job-1]\nschedule: *\n[/CRON_UPDATE]"
-    ));
+    assert!(has_cron_commands("[CRON_CREATE]\nschedule: *\n[/CRON_CREATE]"));
+    assert!(has_cron_commands("[CRON_UPDATE: job-1]\nschedule: *\n[/CRON_UPDATE]"));
     assert!(has_cron_commands("[CRON_LIST]"));
     assert!(has_cron_commands("[CRON_DELETE: x]"));
     assert!(!has_cron_commands("nothing here"));
@@ -202,43 +197,24 @@ struct TrackingCronService;
 
 #[async_trait]
 impl ICronService for TrackingCronService {
-    async fn create_job(
-        &self,
-        _user_id: &str,
-        _conversation_id: &str,
-        params: &CronCreateParams,
-    ) -> CronCommandResult {
+    async fn create_job(&self, _user_id: &str, _conversation_id: &str, params: &CronCreateParams) -> CronCommandResult {
         CronCommandResult {
             success: true,
-            message: format!(
-                "Job '{}' created with schedule '{}'",
-                params.name, params.schedule
-            ),
+            message: format!("Job '{}' created with schedule '{}'", params.name, params.schedule),
         }
     }
 
-    async fn update_job(
-        &self,
-        _user_id: &str,
-        conversation_id: &str,
-        params: &CronUpdateParams,
-    ) -> CronCommandResult {
+    async fn update_job(&self, _user_id: &str, conversation_id: &str, params: &CronUpdateParams) -> CronCommandResult {
         CronCommandResult {
             success: true,
-            message: format!(
-                "Job '{}' updated in conversation '{}'",
-                params.job_id, conversation_id
-            ),
+            message: format!("Job '{}' updated in conversation '{}'", params.job_id, conversation_id),
         }
     }
 
     async fn list_jobs(&self, _user_id: &str, conversation_id: &str) -> CronCommandResult {
         CronCommandResult {
             success: true,
-            message: format!(
-                "Active jobs for '{}': daily-check (0 9 * * *)",
-                conversation_id
-            ),
+            message: format!("Active jobs for '{}': daily-check (0 9 * * *)", conversation_id),
         }
     }
 

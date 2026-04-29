@@ -50,15 +50,11 @@ async fn connect_bearer(
     token: &str,
 ) -> (
     futures_util::stream::SplitSink<
-        tokio_tungstenite::WebSocketStream<
-            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-        >,
+        tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
         tungstenite::Message,
     >,
     futures_util::stream::SplitStream<
-        tokio_tungstenite::WebSocketStream<
-            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-        >,
+        tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
     >,
 ) {
     let url = format!("ws://{addr}/ws");
@@ -68,10 +64,7 @@ async fn connect_bearer(
         .header("Connection", "Upgrade")
         .header("Upgrade", "websocket")
         .header("Sec-WebSocket-Version", "13")
-        .header(
-            "Sec-WebSocket-Key",
-            tungstenite::handshake::client::generate_key(),
-        )
+        .header("Sec-WebSocket-Key", tungstenite::handshake::client::generate_key())
         .header("Authorization", format!("Bearer {token}"))
         .body(())
         .unwrap();
@@ -86,15 +79,11 @@ async fn connect_cookie(
     token: &str,
 ) -> (
     futures_util::stream::SplitSink<
-        tokio_tungstenite::WebSocketStream<
-            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-        >,
+        tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
         tungstenite::Message,
     >,
     futures_util::stream::SplitStream<
-        tokio_tungstenite::WebSocketStream<
-            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-        >,
+        tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
     >,
 ) {
     let url = format!("ws://{addr}/ws");
@@ -104,10 +93,7 @@ async fn connect_cookie(
         .header("Connection", "Upgrade")
         .header("Upgrade", "websocket")
         .header("Sec-WebSocket-Version", "13")
-        .header(
-            "Sec-WebSocket-Key",
-            tungstenite::handshake::client::generate_key(),
-        )
+        .header("Sec-WebSocket-Key", tungstenite::handshake::client::generate_key())
         .header("Cookie", format!("aionui-session={token}"))
         .body(())
         .unwrap();
@@ -122,15 +108,11 @@ async fn connect_protocol(
     token: &str,
 ) -> (
     futures_util::stream::SplitSink<
-        tokio_tungstenite::WebSocketStream<
-            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-        >,
+        tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
         tungstenite::Message,
     >,
     futures_util::stream::SplitStream<
-        tokio_tungstenite::WebSocketStream<
-            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-        >,
+        tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
     >,
 ) {
     let url = format!("ws://{addr}/ws");
@@ -140,10 +122,7 @@ async fn connect_protocol(
         .header("Connection", "Upgrade")
         .header("Upgrade", "websocket")
         .header("Sec-WebSocket-Version", "13")
-        .header(
-            "Sec-WebSocket-Key",
-            tungstenite::handshake::client::generate_key(),
-        )
+        .header("Sec-WebSocket-Key", tungstenite::handshake::client::generate_key())
         .header("Sec-WebSocket-Protocol", token)
         .body(())
         .unwrap();
@@ -298,10 +277,7 @@ async fn t3_1_valid_json_message_accepted() {
     // No error response expected — verify with a short timeout
     let timeout_result = tokio::time::timeout(Duration::from_millis(200), _rx.into_future()).await;
     // Timeout (no response) is expected for valid messages routed to NoopMessageRouter
-    assert!(
-        timeout_result.is_err(),
-        "valid message should not generate a response"
-    );
+    assert!(timeout_result.is_err(), "valid message should not generate a response");
 }
 
 #[tokio::test]
@@ -379,10 +355,7 @@ async fn t4_2_unicast_reaches_only_target() {
     assert_eq!(received["name"], "unicast-test");
 
     let timeout_result = tokio::time::timeout(Duration::from_millis(200), rx2.next()).await;
-    assert!(
-        timeout_result.is_err(),
-        "rx2 should not receive the unicast"
-    );
+    assert!(timeout_result.is_err(), "rx2 should not receive the unicast");
 }
 
 #[tokio::test]
@@ -426,10 +399,7 @@ async fn t5_1_pong_does_not_generate_response() {
     tx.send(send_json(&pong.to_string())).await.unwrap();
 
     let timeout_result = tokio::time::timeout(Duration::from_millis(200), rx.next()).await;
-    assert!(
-        timeout_result.is_err(),
-        "pong should not generate a response"
-    );
+    assert!(timeout_result.is_err(), "pong should not generate a response");
 }
 
 #[tokio::test]
@@ -522,9 +492,7 @@ async fn t7_1_multiple_concurrent_connections() {
     for _ in 0..10 {
         let addr = app.addr;
         let tok = token.clone();
-        handles.push(tokio::spawn(
-            async move { connect_bearer(addr, &tok).await },
-        ));
+        handles.push(tokio::spawn(async move { connect_bearer(addr, &tok).await }));
     }
 
     let mut connections = Vec::new();

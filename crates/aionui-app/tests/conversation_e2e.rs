@@ -6,10 +6,7 @@ use axum::http::StatusCode;
 use serde_json::json;
 use tower::ServiceExt;
 
-use common::{
-    body_json, build_app, delete_with_token, get_request, get_with_token, json_with_token,
-    setup_and_login,
-};
+use common::{body_json, build_app, delete_with_token, get_request, get_with_token, json_with_token, setup_and_login};
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
@@ -38,13 +35,7 @@ async fn t1_1_create_conversation_success() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
-    let req = json_with_token(
-        "POST",
-        "/api/conversations",
-        create_body("Code Review"),
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("POST", "/api/conversations", create_body("Code Review"), &token, &csrf);
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
 
@@ -172,10 +163,7 @@ async fn t2_1_list_empty() {
     let (mut app, services) = build_app().await;
     let (token, _csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
-    let resp = app
-        .oneshot(get_with_token("/api/conversations", &token))
-        .await
-        .unwrap();
+    let resp = app.oneshot(get_with_token("/api/conversations", &token)).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
     let json = body_json(resp).await;
@@ -200,10 +188,7 @@ async fn t2_2_list_basic() {
         app.clone().oneshot(req).await.unwrap();
     }
 
-    let resp = app
-        .oneshot(get_with_token("/api/conversations", &token))
-        .await
-        .unwrap();
+    let resp = app.oneshot(get_with_token("/api/conversations", &token)).await.unwrap();
     let json = body_json(resp).await;
     assert_eq!(json["data"]["items"].as_array().unwrap().len(), 3);
 }
@@ -272,13 +257,7 @@ async fn t2_4_list_source_filter() {
 
     // Create 2 aionui + 1 telegram
     for _ in 0..2 {
-        let req = json_with_token(
-            "POST",
-            "/api/conversations",
-            create_body("Aionui Conv"),
-            &token,
-            &csrf,
-        );
+        let req = json_with_token("POST", "/api/conversations", create_body("Aionui Conv"), &token, &csrf);
         app.clone().oneshot(req).await.unwrap();
     }
 
@@ -308,22 +287,10 @@ async fn t2_5_list_pinned_filter() {
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
     // Create 2 conversations
-    let req = json_with_token(
-        "POST",
-        "/api/conversations",
-        create_body("Unpinned"),
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("POST", "/api/conversations", create_body("Unpinned"), &token, &csrf);
     app.clone().oneshot(req).await.unwrap();
 
-    let req = json_with_token(
-        "POST",
-        "/api/conversations",
-        create_body("Will Pin"),
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("POST", "/api/conversations", create_body("Will Pin"), &token, &csrf);
     let resp = app.clone().oneshot(req).await.unwrap();
     let json = body_json(resp).await;
     let pinned_id = json["data"]["id"].as_str().unwrap().to_owned();
@@ -351,10 +318,7 @@ async fn t2_5_list_pinned_filter() {
 #[tokio::test]
 async fn t2_6_list_requires_auth() {
     let (app, _services) = build_app().await;
-    let resp = app
-        .oneshot(get_request("/api/conversations"))
-        .await
-        .unwrap();
+    let resp = app.oneshot(get_request("/api/conversations")).await.unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
 }
 
@@ -365,13 +329,7 @@ async fn t3_1_get_existing() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
-    let req = json_with_token(
-        "POST",
-        "/api/conversations",
-        create_body("My Conv"),
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("POST", "/api/conversations", create_body("My Conv"), &token, &csrf);
     let resp = app.clone().oneshot(req).await.unwrap();
     let json = body_json(resp).await;
     let id = json["data"]["id"].as_str().unwrap().to_owned();
@@ -401,10 +359,7 @@ async fn t3_2_get_not_found() {
 #[tokio::test]
 async fn t3_3_get_requires_auth() {
     let (app, _services) = build_app().await;
-    let resp = app
-        .oneshot(get_request("/api/conversations/some-id"))
-        .await
-        .unwrap();
+    let resp = app.oneshot(get_request("/api/conversations/some-id")).await.unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
 }
 
@@ -415,13 +370,7 @@ async fn t4_1_update_name() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
-    let req = json_with_token(
-        "POST",
-        "/api/conversations",
-        create_body("Original"),
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("POST", "/api/conversations", create_body("Original"), &token, &csrf);
     let resp = app.clone().oneshot(req).await.unwrap();
     let json = body_json(resp).await;
     let id = json["data"]["id"].as_str().unwrap().to_owned();
@@ -447,13 +396,7 @@ async fn t4_2_update_pin_and_unpin() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
-    let req = json_with_token(
-        "POST",
-        "/api/conversations",
-        create_body("Pin Test"),
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("POST", "/api/conversations", create_body("Pin Test"), &token, &csrf);
     let resp = app.clone().oneshot(req).await.unwrap();
     let json = body_json(resp).await;
     let id = json["data"]["id"].as_str().unwrap().to_owned();
@@ -518,13 +461,7 @@ async fn t4_4_update_model() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
-    let req = json_with_token(
-        "POST",
-        "/api/conversations",
-        create_body("Model Test"),
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("POST", "/api/conversations", create_body("Model Test"), &token, &csrf);
     let resp = app.clone().oneshot(req).await.unwrap();
     let json = body_json(resp).await;
     let id = json["data"]["id"].as_str().unwrap().to_owned();
@@ -561,10 +498,7 @@ async fn t4_5_update_not_found() {
 #[tokio::test]
 async fn t4_6_update_requires_auth() {
     let (app, _services) = build_app().await;
-    let resp = app
-        .oneshot(get_request("/api/conversations/some-id"))
-        .await
-        .unwrap();
+    let resp = app.oneshot(get_request("/api/conversations/some-id")).await.unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
 }
 
@@ -575,24 +509,14 @@ async fn t5_1_delete_conversation() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
-    let req = json_with_token(
-        "POST",
-        "/api/conversations",
-        create_body("To Delete"),
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("POST", "/api/conversations", create_body("To Delete"), &token, &csrf);
     let resp = app.clone().oneshot(req).await.unwrap();
     let json = body_json(resp).await;
     let id = json["data"]["id"].as_str().unwrap().to_owned();
 
     let resp = app
         .clone()
-        .oneshot(delete_with_token(
-            &format!("/api/conversations/{id}"),
-            &token,
-            &csrf,
-        ))
+        .oneshot(delete_with_token(&format!("/api/conversations/{id}"), &token, &csrf))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -611,11 +535,7 @@ async fn t5_2_delete_not_found() {
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
     let resp = app
-        .oneshot(delete_with_token(
-            "/api/conversations/non-existent-id",
-            &token,
-            &csrf,
-        ))
+        .oneshot(delete_with_token("/api/conversations/non-existent-id", &token, &csrf))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
@@ -659,13 +579,7 @@ async fn t6_1_clone_from_source() {
             "extra": { "newKey": "value" }
         }
     });
-    let req = json_with_token(
-        "POST",
-        "/api/conversations/clone",
-        clone_body,
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("POST", "/api/conversations/clone", clone_body, &token, &csrf);
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
 
@@ -691,13 +605,7 @@ async fn t6_2_clone_without_source() {
             "extra": {}
         }
     });
-    let req = json_with_token(
-        "POST",
-        "/api/conversations/clone",
-        clone_body,
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("POST", "/api/conversations/clone", clone_body, &token, &csrf);
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
 
@@ -719,13 +627,7 @@ async fn t6_3_clone_source_not_found() {
             "extra": {}
         }
     });
-    let req = json_with_token(
-        "POST",
-        "/api/conversations/clone",
-        clone_body,
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("POST", "/api/conversations/clone", clone_body, &token, &csrf);
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
@@ -751,13 +653,7 @@ async fn t7_1_reset_conversation() {
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
     // Create conversation
-    let req = json_with_token(
-        "POST",
-        "/api/conversations",
-        create_body("Reset Test"),
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("POST", "/api/conversations", create_body("Reset Test"), &token, &csrf);
     let resp = app.clone().oneshot(req).await.unwrap();
     let json = body_json(resp).await;
     let id = json["data"]["id"].as_str().unwrap().to_owned();
@@ -793,10 +689,7 @@ async fn t7_1_reset_conversation() {
     // Verify messages cleared
     let resp = app
         .clone()
-        .oneshot(get_with_token(
-            &format!("/api/conversations/{id}/messages"),
-            &token,
-        ))
+        .oneshot(get_with_token(&format!("/api/conversations/{id}/messages"), &token))
         .await
         .unwrap();
     let json = body_json(resp).await;
@@ -863,10 +756,7 @@ async fn t10_1_associated_same_workspace() {
     app.clone().oneshot(req).await.unwrap();
 
     let resp = app
-        .oneshot(get_with_token(
-            &format!("/api/conversations/{id_a}/associated"),
-            &token,
-        ))
+        .oneshot(get_with_token(&format!("/api/conversations/{id_a}/associated"), &token))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -888,10 +778,7 @@ async fn t10_2_associated_none() {
     let id = json["data"]["id"].as_str().unwrap().to_owned();
 
     let resp = app
-        .oneshot(get_with_token(
-            &format!("/api/conversations/{id}/associated"),
-            &token,
-        ))
+        .oneshot(get_with_token(&format!("/api/conversations/{id}/associated"), &token))
         .await
         .unwrap();
     let json = body_json(resp).await;
@@ -904,10 +791,7 @@ async fn t10_3_associated_not_found() {
     let (token, _csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
     let resp = app
-        .oneshot(get_with_token(
-            "/api/conversations/non-existent-id/associated",
-            &token,
-        ))
+        .oneshot(get_with_token("/api/conversations/non-existent-id/associated", &token))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
@@ -931,13 +815,7 @@ async fn t12_1_long_name() {
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
     let long_name = "A".repeat(1000);
-    let req = json_with_token(
-        "POST",
-        "/api/conversations",
-        create_body(&long_name),
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("POST", "/api/conversations", create_body(&long_name), &token, &csrf);
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
     let json = body_json(resp).await;
@@ -1042,11 +920,7 @@ async fn full_conversation_lifecycle() {
     // Delete
     let resp = app
         .clone()
-        .oneshot(delete_with_token(
-            &format!("/api/conversations/{id}"),
-            &token,
-            &csrf,
-        ))
+        .oneshot(delete_with_token(&format!("/api/conversations/{id}"), &token, &csrf))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);

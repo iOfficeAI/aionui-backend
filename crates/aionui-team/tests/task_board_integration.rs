@@ -38,10 +38,7 @@ async fn tk1_create_task_no_dependencies() {
 #[tokio::test]
 async fn tk2_create_task_with_single_dependency() {
     let (board, _db) = setup().await;
-    let task_a = board
-        .create_task("t1", "Task A", None, None, &[])
-        .await
-        .unwrap();
+    let task_a = board.create_task("t1", "Task A", None, None, &[]).await.unwrap();
     let task_b = board
         .create_task("t1", "Task B", None, None, std::slice::from_ref(&task_a.id))
         .await
@@ -74,9 +71,7 @@ async fn tk3_create_task_with_multiple_dependencies() {
 #[tokio::test]
 async fn tk4_create_task_nonexistent_dependency_fails() {
     let (board, _db) = setup().await;
-    let result = board
-        .create_task("t1", "X", None, None, &["nonexistent".into()])
-        .await;
+    let result = board.create_task("t1", "X", None, None, &["nonexistent".into()]).await;
     assert!(result.is_err());
 }
 
@@ -85,10 +80,7 @@ async fn tk4_create_task_nonexistent_dependency_fails() {
 #[tokio::test]
 async fn tu1_update_status_pending_to_in_progress() {
     let (board, _db) = setup().await;
-    let task = board
-        .create_task("t1", "Work", None, None, &[])
-        .await
-        .unwrap();
+    let task = board.create_task("t1", "Work", None, None, &[]).await.unwrap();
     let updated = board
         .update_task(
             "t1",
@@ -132,10 +124,7 @@ async fn tu2_update_status_to_completed_triggers_unblock() {
 #[tokio::test]
 async fn tu3_update_description() {
     let (board, _db) = setup().await;
-    let task = board
-        .create_task("t1", "Work", None, None, &[])
-        .await
-        .unwrap();
+    let task = board.create_task("t1", "Work", None, None, &[]).await.unwrap();
     let updated = board
         .update_task(
             "t1",
@@ -153,10 +142,7 @@ async fn tu3_update_description() {
 #[tokio::test]
 async fn tu4_update_owner() {
     let (board, _db) = setup().await;
-    let task = board
-        .create_task("t1", "Work", None, None, &[])
-        .await
-        .unwrap();
+    let task = board.create_task("t1", "Work", None, None, &[]).await.unwrap();
     let updated = board
         .update_task(
             "t1",
@@ -174,9 +160,7 @@ async fn tu4_update_owner() {
 #[tokio::test]
 async fn tu5_update_nonexistent_task_fails() {
     let (board, _db) = setup().await;
-    let result = board
-        .update_task("t1", "nonexistent", &TaskUpdate::default())
-        .await;
+    let result = board.update_task("t1", "nonexistent", &TaskUpdate::default()).await;
     assert!(result.is_err());
 }
 
@@ -270,10 +254,7 @@ async fn cu3_partial_unblock_preserves_other_deps() {
 #[tokio::test]
 async fn cu4_complete_no_downstream_is_noop() {
     let (board, _db) = setup().await;
-    let task = board
-        .create_task("t1", "Solo", None, None, &[])
-        .await
-        .unwrap();
+    let task = board.create_task("t1", "Solo", None, None, &[]).await.unwrap();
     let updated = board
         .update_task(
             "t1",

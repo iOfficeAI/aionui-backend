@@ -46,11 +46,7 @@ impl McpAgentAdapter for InMemoryAdapter {
         Ok(self.servers.lock().unwrap().clone())
     }
 
-    async fn install_server(
-        &self,
-        name: &str,
-        transport: &McpServerTransport,
-    ) -> Result<(), McpError> {
+    async fn install_server(&self, name: &str, transport: &McpServerTransport) -> Result<(), McpError> {
         if !self.installed {
             return Err(McpError::AgentNotInstalled(format!("{:?}", self.source)));
         }
@@ -186,10 +182,7 @@ async fn multiple_adapters_independent() {
         env: HashMap::new(),
     };
 
-    claude
-        .install_server("shared-server", &transport)
-        .await
-        .unwrap();
+    claude.install_server("shared-server", &transport).await.unwrap();
 
     // Claude has the server, Gemini does not
     assert_eq!(claude.detect_existing().await.unwrap().len(), 1);

@@ -36,8 +36,7 @@ fn make_text_message(user_id: &str, chat_id: &str, text: &str) -> UnifiedIncomin
 async fn unauthorized_user_gets_pairing_response() {
     let db = aionui_db::init_database_memory().await.unwrap();
     let pool = db.pool().clone();
-    let repo: Arc<dyn aionui_db::IChannelRepository> =
-        Arc::new(aionui_db::SqliteChannelRepository::new(pool.clone()));
+    let repo: Arc<dyn aionui_db::IChannelRepository> = Arc::new(aionui_db::SqliteChannelRepository::new(pool.clone()));
     let bus = Arc::new(aionui_realtime::BroadcastEventBus::new(64));
 
     let pref_repo: Arc<dyn aionui_db::IClientPreferenceRepository> =
@@ -46,12 +45,7 @@ async fn unauthorized_user_gets_pairing_response() {
 
     let pairing = Arc::new(PairingService::new(repo.clone(), bus));
     let session_mgr = Arc::new(SessionManager::new(repo));
-    let executor = Arc::new(ActionExecutor::new(
-        pairing,
-        Arc::clone(&session_mgr),
-        settings,
-        "acp",
-    ));
+    let executor = Arc::new(ActionExecutor::new(pairing, Arc::clone(&session_mgr), settings, "acp"));
 
     let msg = make_text_message("unknown_user", "chat_1", "hello");
     let result = executor.handle_incoming_message(&msg).await.unwrap();

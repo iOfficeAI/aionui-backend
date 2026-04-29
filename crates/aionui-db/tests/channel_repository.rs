@@ -7,10 +7,7 @@
 use std::sync::Arc;
 
 use aionui_db::models::{AssistantSessionRow, AssistantUserRow, ChannelPluginRow, PairingCodeRow};
-use aionui_db::{
-    DbError, IChannelRepository, SqliteChannelRepository, UpdatePluginStatusParams,
-    init_database_memory,
-};
+use aionui_db::{DbError, IChannelRepository, SqliteChannelRepository, UpdatePluginStatusParams, init_database_memory};
 
 async fn repo() -> (Arc<dyn IChannelRepository>, aionui_db::Database) {
     let db = init_database_memory().await.unwrap();
@@ -83,12 +80,8 @@ async fn plugin_full_lifecycle() {
     assert!(repo.get_all_plugins().await.unwrap().is_empty());
 
     // Create two plugins.
-    repo.upsert_plugin(&make_plugin("tg-1", "telegram"))
-        .await
-        .unwrap();
-    repo.upsert_plugin(&make_plugin("lark-1", "lark"))
-        .await
-        .unwrap();
+    repo.upsert_plugin(&make_plugin("tg-1", "telegram")).await.unwrap();
+    repo.upsert_plugin(&make_plugin("lark-1", "lark")).await.unwrap();
     assert_eq!(repo.get_all_plugins().await.unwrap().len(), 2);
 
     // Update status.
@@ -117,9 +110,7 @@ async fn plugin_full_lifecycle() {
 #[tokio::test]
 async fn dc3_duplicate_platform_user_rejected() {
     let (repo, _db) = repo().await;
-    repo.create_user(&make_user("u1", "tg_100", "telegram"))
-        .await
-        .unwrap();
+    repo.create_user(&make_user("u1", "tg_100", "telegram")).await.unwrap();
 
     // Same platform_user_id + platform_type with different id.
     let dup = make_user("u2", "tg_100", "telegram");
@@ -132,9 +123,7 @@ async fn dc3_duplicate_platform_user_rejected() {
 #[tokio::test]
 async fn dc1_delete_user_cascades_sessions() {
     let (repo, _db) = repo().await;
-    repo.create_user(&make_user("u1", "tg_1", "telegram"))
-        .await
-        .unwrap();
+    repo.create_user(&make_user("u1", "tg_1", "telegram")).await.unwrap();
 
     // Create two sessions for the user.
     repo.get_or_create_session("u1", "chat-a", &make_session("s1", "u1", "chat-a"))
@@ -155,9 +144,7 @@ async fn dc1_delete_user_cascades_sessions() {
 #[tokio::test]
 async fn pc1_same_user_different_chat_ids() {
     let (repo, _db) = repo().await;
-    repo.create_user(&make_user("u1", "tg_1", "telegram"))
-        .await
-        .unwrap();
+    repo.create_user(&make_user("u1", "tg_1", "telegram")).await.unwrap();
 
     let s1 = repo
         .get_or_create_session("u1", "chat-a", &make_session("s1", "u1", "chat-a"))
@@ -177,12 +164,8 @@ async fn pc1_same_user_different_chat_ids() {
 #[tokio::test]
 async fn pc2_different_users_same_chat_id() {
     let (repo, _db) = repo().await;
-    repo.create_user(&make_user("u1", "tg_1", "telegram"))
-        .await
-        .unwrap();
-    repo.create_user(&make_user("u2", "tg_2", "telegram"))
-        .await
-        .unwrap();
+    repo.create_user(&make_user("u1", "tg_1", "telegram")).await.unwrap();
+    repo.create_user(&make_user("u2", "tg_2", "telegram")).await.unwrap();
 
     let s1 = repo
         .get_or_create_session("u1", "chat-x", &make_session("s1", "u1", "chat-x"))
@@ -201,9 +184,7 @@ async fn pc2_different_users_same_chat_id() {
 #[tokio::test]
 async fn pc3_same_user_same_chat_reuses_session() {
     let (repo, _db) = repo().await;
-    repo.create_user(&make_user("u1", "tg_1", "telegram"))
-        .await
-        .unwrap();
+    repo.create_user(&make_user("u1", "tg_1", "telegram")).await.unwrap();
 
     let s1 = repo
         .get_or_create_session("u1", "chat-a", &make_session("s1", "u1", "chat-a"))
@@ -271,31 +252,19 @@ async fn pairing_approve_and_reject() {
         .await
         .unwrap();
 
-    repo.update_pairing_status("100001", "approved")
-        .await
-        .unwrap();
-    repo.update_pairing_status("100002", "rejected")
-        .await
-        .unwrap();
+    repo.update_pairing_status("100001", "approved").await.unwrap();
+    repo.update_pairing_status("100002", "rejected").await.unwrap();
 
     // Neither should appear in pending list.
     let pending = repo.get_pending_pairings().await.unwrap();
     assert!(pending.is_empty());
 
     assert_eq!(
-        repo.get_pairing_by_code("100001")
-            .await
-            .unwrap()
-            .unwrap()
-            .status,
+        repo.get_pairing_by_code("100001").await.unwrap().unwrap().status,
         "approved"
     );
     assert_eq!(
-        repo.get_pairing_by_code("100002")
-            .await
-            .unwrap()
-            .unwrap()
-            .status,
+        repo.get_pairing_by_code("100002").await.unwrap().unwrap().status,
         "rejected"
     );
 }

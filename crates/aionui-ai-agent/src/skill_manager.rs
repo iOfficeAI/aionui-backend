@@ -99,8 +99,7 @@ impl AcpSkillManager {
                         enabled_skills.is_some_and(|en| en.iter().any(|n| n == &item.name))
                     }
                 }
-                aionui_extension::SkillSource::Custom
-                | aionui_extension::SkillSource::Extension => {
+                aionui_extension::SkillSource::Custom | aionui_extension::SkillSource::Extension => {
                     enabled_skills.is_some_and(|en| en.iter().any(|n| n == &item.name))
                 }
             };
@@ -357,10 +356,7 @@ pub fn prepare_first_message_with_skills_index(
 /// Unlike [`build_system_instructions`] which injects full skill bodies,
 /// this variant injects only the skill index (name + description) and
 /// the `[LOAD_SKILL]` protocol, allowing the agent to request full content on demand.
-pub fn build_system_instructions_with_skills_index(
-    base_instructions: &str,
-    skills: &[SkillIndex],
-) -> String {
+pub fn build_system_instructions_with_skills_index(base_instructions: &str, skills: &[SkillIndex]) -> String {
     let index_text = build_skills_index_text(skills);
     if index_text.is_empty() {
         return base_instructions.to_string();
@@ -372,11 +368,7 @@ pub fn build_system_instructions_with_skills_index(
 /// Prepare the first message with full skill content (for Gemini).
 ///
 /// Prepends `[Assistant Rules]` block with complete skill bodies.
-pub fn prepare_first_message(
-    content: &str,
-    skills: &[SkillDefinition],
-    preset_context: Option<&str>,
-) -> String {
+pub fn prepare_first_message(content: &str, skills: &[SkillDefinition], preset_context: Option<&str>) -> String {
     let mut parts = Vec::new();
     let has_rules = !skills.is_empty() || preset_context.is_some();
 
@@ -431,10 +423,7 @@ mod tests {
     #[tokio::test]
     async fn new_accepts_skill_paths() {
         let tmp = TempDir::new().unwrap();
-        let paths = std::sync::Arc::new(aionui_extension::resolve_skill_paths(
-            tmp.path(),
-            tmp.path(),
-        ));
+        let paths = std::sync::Arc::new(aionui_extension::resolve_skill_paths(tmp.path(), tmp.path()));
         let mgr = AcpSkillManager::new(paths.clone());
         assert!(!mgr.is_discovered().await);
     }
@@ -450,10 +439,7 @@ mod tests {
             body: None,
         };
         assert_eq!(def.source, aionui_extension::SkillSource::Builtin);
-        assert_eq!(
-            def.relative_location.as_deref(),
-            Some("auto-inject/x/SKILL.md")
-        );
+        assert_eq!(def.relative_location.as_deref(), Some("auto-inject/x/SKILL.md"));
     }
 
     // Frontmatter parsing tests live in aionui-extension (covers

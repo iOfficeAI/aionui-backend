@@ -117,10 +117,7 @@ pub(super) async fn run_stdio_protocol(
 }
 
 /// Write a JSON-RPC message as a newline-delimited line to stdin.
-async fn write_jsonrpc_line<T: Serialize>(
-    stdin: &mut tokio::process::ChildStdin,
-    msg: &T,
-) -> std::io::Result<()> {
+async fn write_jsonrpc_line<T: Serialize>(stdin: &mut tokio::process::ChildStdin, msg: &T) -> std::io::Result<()> {
     let json = serde_json::to_string(msg).map_err(std::io::Error::other)?;
     stdin.write_all(json.as_bytes()).await?;
     stdin.write_all(b"\n").await?;
@@ -131,9 +128,7 @@ async fn write_jsonrpc_line<T: Serialize>(
 ///
 /// Skips server notifications (messages without an `id` field) and
 /// non-JSON lines (e.g. logging output).
-async fn read_jsonrpc_response(
-    reader: &mut BufReader<tokio::process::ChildStdout>,
-) -> Result<JsonRpcResponse, String> {
+async fn read_jsonrpc_response(reader: &mut BufReader<tokio::process::ChildStdout>) -> Result<JsonRpcResponse, String> {
     let mut line = String::new();
     loop {
         line.clear();
@@ -229,8 +224,8 @@ pub(super) async fn wait_for_jsonrpc_response(
     loop {
         match event_rx.recv().await {
             Some(event) if event.event_type == "message" => {
-                let resp: JsonRpcResponse = serde_json::from_str(&event.data)
-                    .map_err(|e| format!("Invalid JSON-RPC in SSE: {e}"))?;
+                let resp: JsonRpcResponse =
+                    serde_json::from_str(&event.data).map_err(|e| format!("Invalid JSON-RPC in SSE: {e}"))?;
                 if resp.id.is_some() {
                     return Ok(resp);
                 }
@@ -271,19 +266,14 @@ pub(super) fn build_http_headers(headers: &HashMap<String, String>) -> reqwest::
 ///
 /// Handles both `application/json` and `text/event-stream` content types
 /// (Streamable HTTP servers may respond with either).
-pub(super) async fn parse_http_response(
-    resp: reqwest::Response,
-) -> Result<JsonRpcResponse, String> {
+pub(super) async fn parse_http_response(resp: reqwest::Response) -> Result<JsonRpcResponse, String> {
     let is_sse = resp
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
         .is_some_and(|ct| ct.contains("text/event-stream"));
 
-    let body = resp
-        .text()
-        .await
-        .map_err(|e| format!("Failed to read response: {e}"))?;
+    let body = resp.text().await.map_err(|e| format!("Failed to read response: {e}"))?;
 
     if is_sse {
         extract_jsonrpc_from_sse(&body)
@@ -384,10 +374,7 @@ pub(super) fn error_result(msg: String) -> McpConnectionTestResult {
 }
 
 pub(super) fn timeout_result(duration: Duration) -> McpConnectionTestResult {
-    error_result(format!(
-        "Connection test timed out after {}s",
-        duration.as_secs()
-    ))
+    error_result(format!("Connection test timed out after {}s", duration.as_secs()))
 }
 
 pub(super) fn spawn_error_result(command: &str, error: &std::io::Error) -> McpConnectionTestResult {
@@ -400,10 +387,7 @@ pub(super) fn spawn_error_result(command: &str, error: &std::io::Error) -> McpCo
 }
 
 pub(super) fn rpc_error_result(method: &str, err: &JsonRpcError) -> McpConnectionTestResult {
-    error_result(format!(
-        "{method} error: {} (code {})",
-        err.message, err.code
-    ))
+    error_result(format!("{method} error: {} (code {})", err.message, err.code))
 }
 
 pub(super) fn auth_result(headers: &reqwest::header::HeaderMap) -> McpConnectionTestResult {
@@ -454,8 +438,7 @@ mod tests {
 
     #[test]
     fn parse_sse_event_with_json_data() {
-        let mut buf =
-            "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n\n".to_string();
+        let mut buf = "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n\n".to_string();
         let event = parse_next_sse_event(&mut buf).unwrap();
         assert_eq!(event.event_type, "message");
         assert!(event.data.contains("jsonrpc"));
@@ -685,10 +668,7 @@ mod tests {
         map.insert("Authorization".into(), "Bearer tok".into());
         map.insert("X-Custom".into(), "val".into());
         let headers = build_http_headers(&map);
-        assert_eq!(
-            headers.get("authorization").unwrap().to_str().unwrap(),
-            "Bearer tok"
-        );
+        assert_eq!(headers.get("authorization").unwrap().to_str().unwrap(), "Bearer tok");
         assert_eq!(headers.get("x-custom").unwrap().to_str().unwrap(), "val");
     }
 
@@ -709,7 +689,8 @@ mod tests {
 
     #[test]
     fn extract_jsonrpc_skips_notifications() {
-        let body = "data: {\"jsonrpc\":\"2.0\",\"method\":\"log\"}\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n";
+        let body =
+            "data: {\"jsonrpc\":\"2.0\",\"method\":\"log\"}\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n";
         let resp = extract_jsonrpc_from_sse(body).unwrap();
         assert_eq!(resp.id, Some(1));
     }

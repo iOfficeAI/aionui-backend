@@ -51,11 +51,7 @@ pub trait ITeamRepository: Send + Sync {
 
     /// Atomically reads all unread messages for `to_agent_id` in a team
     /// and marks them as read. Uses `BEGIN IMMEDIATE` for atomicity.
-    async fn read_unread_and_mark(
-        &self,
-        team_id: &str,
-        to_agent_id: &str,
-    ) -> Result<Vec<MailboxMessageRow>, DbError>;
+    async fn read_unread_and_mark(&self, team_id: &str, to_agent_id: &str) -> Result<Vec<MailboxMessageRow>, DbError>;
 
     /// Returns message history for an agent, optionally limited.
     /// Messages are ordered by `created_at` ascending.
@@ -75,11 +71,7 @@ pub trait ITeamRepository: Send + Sync {
     async fn create_task(&self, row: &TeamTaskRow) -> Result<(), DbError>;
 
     /// Finds a task by exact id within a team.
-    async fn find_task_by_id(
-        &self,
-        team_id: &str,
-        task_id: &str,
-    ) -> Result<Option<TeamTaskRow>, DbError>;
+    async fn find_task_by_id(&self, team_id: &str, task_id: &str) -> Result<Option<TeamTaskRow>, DbError>;
 
     /// Updates a task by id with the provided fields.
     /// Returns `DbError::NotFound` if absent.
@@ -94,11 +86,7 @@ pub trait ITeamRepository: Send + Sync {
 
     /// Removes `unblocked_task_id` from the `blocked_by` JSON array of `task_id`.
     /// This is a transactional JSON array removal operation.
-    async fn remove_from_blocked_by(
-        &self,
-        task_id: &str,
-        unblocked_task_id: &str,
-    ) -> Result<(), DbError>;
+    async fn remove_from_blocked_by(&self, task_id: &str, unblocked_task_id: &str) -> Result<(), DbError>;
 
     /// Deletes all tasks belonging to a team.
     async fn delete_tasks_by_team(&self, team_id: &str) -> Result<(), DbError>;

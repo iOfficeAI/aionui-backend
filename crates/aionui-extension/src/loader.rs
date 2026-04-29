@@ -190,10 +190,7 @@ fn load_single_extension(
 /// incompatible with the supported [`EXTENSION_API_VERSION`] are also excluded.
 ///
 /// Incompatible extensions are logged as warnings but do not cause errors.
-pub fn filter_by_engine_compatibility(
-    extensions: Vec<LoadedExtension>,
-    app_version: &str,
-) -> Vec<LoadedExtension> {
+pub fn filter_by_engine_compatibility(extensions: Vec<LoadedExtension>, app_version: &str) -> Vec<LoadedExtension> {
     let Ok(app_ver) = semver::Version::parse(app_version) else {
         warn!(
             app_version = %app_version,
@@ -279,9 +276,7 @@ fn is_api_version_compatible(ext: &LoadedExtension) -> bool {
 // ---------------------------------------------------------------------------
 
 fn is_e2e_test_mode() -> bool {
-    std::env::var("AIONUI_E2E_TEST")
-        .map(|v| v == "1")
-        .unwrap_or(false)
+    std::env::var("AIONUI_E2E_TEST").map(|v| v == "1").unwrap_or(false)
 }
 
 // ---------------------------------------------------------------------------
@@ -538,12 +533,7 @@ mod tests {
 
     #[test]
     fn filter_removes_invalid_engine_requirement() {
-        let exts = vec![make_loaded_ext(
-            "ext-a",
-            "1.0.0",
-            Some("not-valid-semver-req"),
-            None,
-        )];
+        let exts = vec![make_loaded_ext("ext-a", "1.0.0", Some("not-valid-semver-req"), None)];
         let filtered = filter_by_engine_compatibility(exts, "1.0.0");
         assert!(filtered.is_empty());
     }
@@ -578,8 +568,7 @@ mod tests {
         assert!(
             paths
                 .iter()
-                .any(|sp| sp.path.as_path() == Path::new("/tmp/test-exts")
-                    && sp.source == ExtensionSource::Env)
+                .any(|sp| sp.path.as_path() == Path::new("/tmp/test-exts") && sp.source == ExtensionSource::Env)
         );
     }
 
@@ -587,11 +576,7 @@ mod tests {
     fn resolve_scan_paths_e2e_mode_only_env() {
         let paths = resolve_scan_paths_inner(Some("/tmp/e2e-exts"), true);
         assert!(paths.iter().all(|sp| sp.source == ExtensionSource::Env));
-        assert!(
-            paths
-                .iter()
-                .any(|sp| sp.path.as_path() == Path::new("/tmp/e2e-exts"))
-        );
+        assert!(paths.iter().any(|sp| sp.path.as_path() == Path::new("/tmp/e2e-exts")));
     }
 
     #[test]
@@ -601,8 +586,7 @@ mod tests {
         assert!(
             paths
                 .iter()
-                .any(|sp| sp.source == ExtensionSource::Local
-                    || sp.source == ExtensionSource::Appdata)
+                .any(|sp| sp.source == ExtensionSource::Local || sp.source == ExtensionSource::Appdata)
         );
     }
 

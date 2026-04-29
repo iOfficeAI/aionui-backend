@@ -114,10 +114,7 @@ fn openai_to_anthropic_request(openai: &Value) -> Value {
         .and_then(|v| v.as_str())
         .unwrap_or("claude-sonnet-4-20250514");
 
-    let max_tokens = openai
-        .get("max_tokens")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(4096);
+    let max_tokens = openai.get("max_tokens").and_then(|v| v.as_u64()).unwrap_or(4096);
 
     let mut result = json!({
         "model": model,
@@ -392,9 +389,7 @@ mod tests {
         });
 
         let openai = anthropic_to_openai_response(&anthropic);
-        let tool_calls = openai["choices"][0]["message"]["tool_calls"]
-            .as_array()
-            .unwrap();
+        let tool_calls = openai["choices"][0]["message"]["tool_calls"].as_array().unwrap();
         assert_eq!(tool_calls.len(), 1);
         assert_eq!(tool_calls[0]["id"], "toolu_abc123");
         assert_eq!(tool_calls[0]["function"]["name"], "get_weather");
@@ -418,13 +413,8 @@ mod tests {
         });
 
         let openai = anthropic_to_openai_response(&anthropic);
-        assert_eq!(
-            openai["choices"][0]["message"]["content"],
-            "I'll check the weather."
-        );
-        let tool_calls = openai["choices"][0]["message"]["tool_calls"]
-            .as_array()
-            .unwrap();
+        assert_eq!(openai["choices"][0]["message"]["content"], "I'll check the weather.");
+        let tool_calls = openai["choices"][0]["message"]["tool_calls"].as_array().unwrap();
         assert_eq!(tool_calls.len(), 1);
         assert_eq!(tool_calls[0]["function"]["name"], "get_weather");
     }

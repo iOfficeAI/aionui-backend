@@ -125,9 +125,7 @@ impl TeamSession {
 
         let first_message = if needs_role_prompt {
             let role_prompt = match agent.role {
-                TeammateRole::Lead => {
-                    build_lead_prompt(&self.team.name, &self.scheduler.list_agents().await)
-                }
+                TeammateRole::Lead => build_lead_prompt(&self.team.name, &self.scheduler.list_agents().await),
                 TeammateRole::Teammate => build_teammate_prompt(&agent, &self.team.name),
             };
             format!("{role_prompt}\n\n{wake_body}")
@@ -149,11 +147,7 @@ impl TeamSession {
     /// trailing message for scheduler directives). Returns the leader slot_id
     /// that the caller should re-wake, if any; D7b wires that return value
     /// into the wake path. `is_error` is reserved for future status handling.
-    pub async fn on_agent_finish(
-        &self,
-        conversation_id: &str,
-        is_error: bool,
-    ) -> Result<Option<String>, TeamError> {
+    pub async fn on_agent_finish(&self, conversation_id: &str, is_error: bool) -> Result<Option<String>, TeamError> {
         // Dedup: skip if another finish event already claimed this conversation
         // within the 5-second window (W4-D19a).
         if !self.scheduler.begin_finalize(conversation_id) {
@@ -166,17 +160,11 @@ impl TeamSession {
                 .into_iter()
                 .find(|a| a.conversation_id == conversation_id)
                 .map(|a| a.slot_id)
-                .ok_or_else(|| {
-                    TeamError::AgentNotFound(format!(
-                        "no agent with conversation_id={conversation_id}"
-                    ))
-                })?
+                .ok_or_else(|| TeamError::AgentNotFound(format!("no agent with conversation_id={conversation_id}")))?
         };
 
         if is_error {
-            self.scheduler
-                .set_status(&slot_id, TeammateStatus::Error)
-                .await?;
+            self.scheduler.set_status(&slot_id, TeammateStatus::Error).await?;
         }
 
         let wake_target = self.scheduler.finalize_turn(&slot_id, &[]).await?;
@@ -197,11 +185,7 @@ impl TeamSession {
     /// semantics — see backend-audit §3.5 #46): the mailbox row is already
     /// persisted, so surfacing an error to the HTTP caller would invite a
     /// retry that double-writes the message.
-    pub async fn send_message(
-        &self,
-        content: &str,
-        files: Option<Vec<String>>,
-    ) -> Result<(), TeamError> {
+    pub async fn send_message(&self, content: &str, files: Option<Vec<String>>) -> Result<(), TeamError> {
         let lead_slot_id = self
             .scheduler
             .find_lead_slot_id()
@@ -250,9 +234,7 @@ impl TeamSession {
             )
             .await?;
 
-        self.scheduler
-            .set_status(slot_id, TeammateStatus::Working)
-            .await?;
+        self.scheduler.set_status(slot_id, TeammateStatus::Working).await?;
 
         self.try_wake(slot_id, files).await;
         Ok(())
@@ -350,9 +332,7 @@ mod tests {
     use aionui_ai_agent::stream_event::AgentStreamEvent;
     use aionui_ai_agent::types::BuildTaskOptions;
     use aionui_api_types::{AgentModeResponse, WebSocketMessage};
-    use aionui_common::{
-        AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, TimestampMs, now_ms,
-    };
+    use aionui_common::{AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, TimestampMs, now_ms};
     use std::any::Any;
     use std::sync::{Arc, Mutex};
     use tokio::sync::broadcast;
@@ -376,11 +356,7 @@ mod tests {
     }
 
     impl RecordingAgent {
-        fn new(
-            conversation_id: &str,
-            sent: Arc<Mutex<Vec<SendMessageData>>>,
-            fail_with: Option<String>,
-        ) -> Self {
+        fn new(conversation_id: &str, sent: Arc<Mutex<Vec<SendMessageData>>>, fail_with: Option<String>) -> Self {
             let (event_tx, _) = broadcast::channel(4);
             Self {
                 conversation_id: conversation_id.into(),
@@ -481,11 +457,7 @@ mod tests {
         ) -> Result<AgentManagerHandle, AppError> {
             panic!("get_or_build_task should not be called in D7b tests")
         }
-        fn kill(
-            &self,
-            _conversation_id: &str,
-            _reason: Option<AgentKillReason>,
-        ) -> Result<(), AppError> {
+        fn kill(&self, _conversation_id: &str, _reason: Option<AgentKillReason>) -> Result<(), AppError> {
             Ok(())
         }
         fn clear(&self) {}
@@ -504,18 +476,11 @@ mod tests {
     fn task_manager_with_agents(
         conv_ids: &[&str],
         fail_with: Option<String>,
-    ) -> (
-        Arc<dyn IWorkerTaskManager>,
-        Arc<Mutex<Vec<SendMessageData>>>,
-    ) {
+    ) -> (Arc<dyn IWorkerTaskManager>, Arc<Mutex<Vec<SendMessageData>>>) {
         let sent: Arc<Mutex<Vec<SendMessageData>>> = Arc::new(Mutex::new(Vec::new()));
         let stub = StubTaskManager::new();
         for conv_id in conv_ids {
-            let agent: AgentManagerHandle = Arc::new(RecordingAgent::new(
-                conv_id,
-                sent.clone(),
-                fail_with.clone(),
-            ));
+            let agent: AgentManagerHandle = Arc::new(RecordingAgent::new(conv_id, sent.clone(), fail_with.clone()));
             stub.insert(conv_id, agent);
         }
         (Arc::new(stub), sent)
@@ -565,15 +530,9 @@ mod tests {
     async fn start_session() -> TeamSession {
         let repo: Arc<dyn ITeamRepository> = Arc::new(MockTeamRepo::new());
         let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(NullBroadcaster);
-        TeamSession::start(
-            make_team(),
-            repo,
-            broadcaster,
-            backend_path(),
-            empty_task_manager(),
-        )
-        .await
-        .unwrap()
+        TeamSession::start(make_team(), repo, broadcaster, backend_path(), empty_task_manager())
+            .await
+            .unwrap()
     }
 
     #[tokio::test]
@@ -601,11 +560,7 @@ mod tests {
         assert_eq!(spec.name, "aionui-team-t1");
         assert_eq!(spec.command, "/tmp/aionui-backend-test");
         assert_eq!(spec.args, vec!["mcp-bridge".to_string()]);
-        assert!(
-            spec.env
-                .iter()
-                .any(|(k, v)| k == "TEAM_AGENT_SLOT_ID" && v == "lead-1")
-        );
+        assert!(spec.env.iter().any(|(k, v)| k == "TEAM_AGENT_SLOT_ID" && v == "lead-1"));
         session.stop();
     }
 
@@ -614,15 +569,9 @@ mod tests {
         let repo = Arc::new(MockTeamRepo::new());
         let repo_dyn: Arc<dyn ITeamRepository> = repo.clone();
         let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(NullBroadcaster);
-        let session = TeamSession::start(
-            make_team(),
-            repo_dyn,
-            broadcaster,
-            backend_path(),
-            empty_task_manager(),
-        )
-        .await
-        .unwrap();
+        let session = TeamSession::start(make_team(), repo_dyn, broadcaster, backend_path(), empty_task_manager())
+            .await
+            .unwrap();
         session.send_message("Hello team", None).await.unwrap();
 
         let state = repo.state.lock().unwrap();
@@ -638,15 +587,9 @@ mod tests {
         let repo = Arc::new(MockTeamRepo::new());
         let repo_dyn: Arc<dyn ITeamRepository> = repo.clone();
         let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(NullBroadcaster);
-        let session = TeamSession::start(
-            make_team(),
-            repo_dyn,
-            broadcaster,
-            backend_path(),
-            empty_task_manager(),
-        )
-        .await
-        .unwrap();
+        let session = TeamSession::start(make_team(), repo_dyn, broadcaster, backend_path(), empty_task_manager())
+            .await
+            .unwrap();
         session
             .send_message_to_agent("worker-1", "Do this task", None)
             .await
@@ -662,9 +605,7 @@ mod tests {
     #[tokio::test]
     async fn send_message_to_unknown_agent_returns_error() {
         let session = start_session().await;
-        let result = session
-            .send_message_to_agent("nonexistent", "Hello", None)
-            .await;
+        let result = session.send_message_to_agent("nonexistent", "Hello", None).await;
         assert!(result.is_err());
         session.stop();
     }
@@ -700,10 +641,7 @@ mod tests {
     #[tokio::test]
     async fn rename_agent_in_session() {
         let session = start_session().await;
-        session
-            .rename_agent("worker-1", "Senior Worker")
-            .await
-            .unwrap();
+        session.rename_agent("worker-1", "Senior Worker").await.unwrap();
 
         let agent = session.scheduler.get_agent("worker-1").await.unwrap();
         assert_eq!(agent.name, "Senior Worker");
@@ -729,22 +667,11 @@ mod tests {
         // detection, so write directly to the mailbox instead.
         session
             .mailbox
-            .write(
-                "t1",
-                "lead-1",
-                "user",
-                MailboxMessageType::Message,
-                "kick off",
-                None,
-            )
+            .write("t1", "lead-1", "user", MailboxMessageType::Message, "kick off", None)
             .await
             .unwrap();
 
-        let input = session
-            .compute_wake_input("lead-1")
-            .await
-            .unwrap()
-            .expect("WakeInput");
+        let input = session.compute_wake_input("lead-1").await.unwrap().expect("WakeInput");
 
         assert_eq!(input.conversation_id, "c1");
         assert!(input.should_send);
@@ -762,14 +689,7 @@ mod tests {
         let session = start_session().await;
         session
             .mailbox
-            .write(
-                "t1",
-                "worker-1",
-                "user",
-                MailboxMessageType::Message,
-                "do X",
-                None,
-            )
+            .write("t1", "worker-1", "user", MailboxMessageType::Message, "do X", None)
             .await
             .unwrap();
 
@@ -800,22 +720,11 @@ mod tests {
             .unwrap();
         session
             .mailbox
-            .write(
-                "t1",
-                "lead-1",
-                "user",
-                MailboxMessageType::Message,
-                "follow-up",
-                None,
-            )
+            .write("t1", "lead-1", "user", MailboxMessageType::Message, "follow-up", None)
             .await
             .unwrap();
 
-        let input = session
-            .compute_wake_input("lead-1")
-            .await
-            .unwrap()
-            .expect("WakeInput");
+        let input = session.compute_wake_input("lead-1").await.unwrap().expect("WakeInput");
 
         assert!(input.should_send);
         assert!(
@@ -831,11 +740,7 @@ mod tests {
     async fn compute_wake_input_empty_mailbox_should_not_send() {
         let session = start_session().await;
 
-        let input = session
-            .compute_wake_input("lead-1")
-            .await
-            .unwrap()
-            .expect("WakeInput");
+        let input = session.compute_wake_input("lead-1").await.unwrap().expect("WakeInput");
 
         assert!(!input.should_send);
         session.stop();
@@ -886,21 +791,13 @@ mod tests {
 
     // -- D7b wake-path tests -------------------------------------------------
 
-    async fn start_session_with(
-        task_manager: Arc<dyn IWorkerTaskManager>,
-    ) -> (TeamSession, Arc<MockTeamRepo>) {
+    async fn start_session_with(task_manager: Arc<dyn IWorkerTaskManager>) -> (TeamSession, Arc<MockTeamRepo>) {
         let repo = Arc::new(MockTeamRepo::new());
         let repo_dyn: Arc<dyn ITeamRepository> = repo.clone();
         let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(NullBroadcaster);
-        let session = TeamSession::start(
-            make_team(),
-            repo_dyn,
-            broadcaster,
-            backend_path(),
-            task_manager,
-        )
-        .await
-        .unwrap();
+        let session = TeamSession::start(make_team(), repo_dyn, broadcaster, backend_path(), task_manager)
+            .await
+            .unwrap();
         (session, repo)
     }
 
@@ -910,10 +807,7 @@ mod tests {
         let (session, _repo) = start_session_with(task_manager).await;
 
         session
-            .send_message(
-                "Hello",
-                Some(vec!["/tmp/a.txt".into(), "/tmp/b.txt".into()]),
-            )
+            .send_message("Hello", Some(vec!["/tmp/a.txt".into(), "/tmp/b.txt".into()]))
             .await
             .unwrap();
 

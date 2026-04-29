@@ -14,12 +14,11 @@ use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use aionui_db::{
-    SqliteClientPreferenceRepository, SqliteProviderRepository, SqliteSettingsRepository,
-    init_database_memory,
+    SqliteClientPreferenceRepository, SqliteProviderRepository, SqliteSettingsRepository, init_database_memory,
 };
 use aionui_system::{
-    ClientPrefService, ModelFetchService, ProtocolDetectionService, ProviderService,
-    SettingsService, SystemRouterState, VersionCheckService, system_routes,
+    ClientPrefService, ModelFetchService, ProtocolDetectionService, ProviderService, SettingsService,
+    SystemRouterState, VersionCheckService, system_routes,
 };
 
 // ---------------------------------------------------------------------------
@@ -32,12 +31,8 @@ fn build_state(db: &aionui_db::Database) -> SystemRouterState {
     let provider_repo = Arc::new(SqliteProviderRepository::new(db.pool().clone()));
     let http_client = reqwest::Client::new();
     SystemRouterState {
-        settings_service: SettingsService::new(Arc::new(SqliteSettingsRepository::new(
-            db.pool().clone(),
-        ))),
-        client_pref_service: ClientPrefService::new(Arc::new(
-            SqliteClientPreferenceRepository::new(db.pool().clone()),
-        )),
+        settings_service: SettingsService::new(Arc::new(SqliteSettingsRepository::new(db.pool().clone()))),
+        client_pref_service: ClientPrefService::new(Arc::new(SqliteClientPreferenceRepository::new(db.pool().clone()))),
         provider_service: ProviderService::new(provider_repo.clone(), TEST_KEY),
         model_fetch_service: ModelFetchService::new(provider_repo, TEST_KEY, http_client.clone()),
         protocol_detection_service: ProtocolDetectionService::new(http_client.clone()),
@@ -96,11 +91,7 @@ async fn detect_protocol_empty_base_url() {
 #[tokio::test]
 async fn detect_protocol_empty_api_key() {
     let router = setup().await;
-    let (status, _) = detect(
-        &router,
-        json!({"base_url": "https://example.com", "api_key": "  "}),
-    )
-    .await;
+    let (status, _) = detect(&router, json!({"base_url": "https://example.com", "api_key": "  "})).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 

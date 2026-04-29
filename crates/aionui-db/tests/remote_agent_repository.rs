@@ -6,8 +6,8 @@
 use std::sync::Arc;
 
 use aionui_db::{
-    CreateRemoteAgentParams, DbError, IRemoteAgentRepository, SqliteRemoteAgentRepository,
-    UpdateRemoteAgentParams, init_database_memory,
+    CreateRemoteAgentParams, DbError, IRemoteAgentRepository, SqliteRemoteAgentRepository, UpdateRemoteAgentParams,
+    init_database_memory,
 };
 
 async fn repo() -> (Arc<dyn IRemoteAgentRepository>, aionui_db::Database) {
@@ -78,10 +78,7 @@ async fn create_openclaw_agent_includes_device_fields() {
     assert_eq!(agent.protocol, "openClaw");
     assert_eq!(agent.device_id.as_deref(), Some("dev-abc-123"));
     assert_eq!(agent.device_public_key.as_deref(), Some("enc_ed25519_pub"));
-    assert_eq!(
-        agent.device_private_key.as_deref(),
-        Some("enc_ed25519_priv")
-    );
+    assert_eq!(agent.device_private_key.as_deref(), Some("enc_ed25519_priv"));
     assert_eq!(agent.device_token.as_deref(), Some("enc_device_tok"));
 }
 
@@ -269,9 +266,7 @@ async fn update_status_to_connected_with_timestamp() {
     let created = r.create(bearer_params()).await.unwrap();
 
     let ts = aionui_common::now_ms();
-    r.update_status(&created.id, "connected", Some(ts))
-        .await
-        .unwrap();
+    r.update_status(&created.id, "connected", Some(ts)).await.unwrap();
 
     let found = r.find_by_id(&created.id).await.unwrap().unwrap();
     assert_eq!(found.status, "connected");

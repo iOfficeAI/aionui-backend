@@ -3,9 +3,7 @@ use sqlx::SqlitePool;
 
 use crate::error::DbError;
 use crate::models::McpServerRow;
-use crate::repository::mcp_server::{
-    CreateMcpServerParams, IMcpServerRepository, UpdateMcpServerParams,
-};
+use crate::repository::mcp_server::{CreateMcpServerParams, IMcpServerRepository, UpdateMcpServerParams};
 
 /// SQLite-backed implementation of [`IMcpServerRepository`].
 #[derive(Clone, Debug)]
@@ -22,10 +20,9 @@ impl SqliteMcpServerRepository {
 #[async_trait::async_trait]
 impl IMcpServerRepository for SqliteMcpServerRepository {
     async fn list(&self) -> Result<Vec<McpServerRow>, DbError> {
-        let rows =
-            sqlx::query_as::<_, McpServerRow>("SELECT * FROM mcp_servers ORDER BY created_at ASC")
-                .fetch_all(&self.pool)
-                .await?;
+        let rows = sqlx::query_as::<_, McpServerRow>("SELECT * FROM mcp_servers ORDER BY created_at ASC")
+            .fetch_all(&self.pool)
+            .await?;
 
         Ok(rows)
     }
@@ -99,11 +96,7 @@ impl IMcpServerRepository for SqliteMcpServerRepository {
         })
     }
 
-    async fn update(
-        &self,
-        id: &str,
-        params: UpdateMcpServerParams<'_>,
-    ) -> Result<McpServerRow, DbError> {
+    async fn update(&self, id: &str, params: UpdateMcpServerParams<'_>) -> Result<McpServerRow, DbError> {
         let existing = self
             .find_by_id(id)
             .await?
@@ -153,10 +146,7 @@ impl IMcpServerRepository for SqliteMcpServerRepository {
         Ok(())
     }
 
-    async fn batch_upsert(
-        &self,
-        servers: &[CreateMcpServerParams<'_>],
-    ) -> Result<Vec<McpServerRow>, DbError> {
+    async fn batch_upsert(&self, servers: &[CreateMcpServerParams<'_>]) -> Result<Vec<McpServerRow>, DbError> {
         let mut results = Vec::with_capacity(servers.len());
 
         for params in servers {
@@ -182,12 +172,7 @@ impl IMcpServerRepository for SqliteMcpServerRepository {
         Ok(results)
     }
 
-    async fn update_status(
-        &self,
-        id: &str,
-        status: &str,
-        last_connected: Option<TimestampMs>,
-    ) -> Result<(), DbError> {
+    async fn update_status(&self, id: &str, status: &str, last_connected: Option<TimestampMs>) -> Result<(), DbError> {
         let now = aionui_common::now_ms();
 
         let result = sqlx::query(
@@ -233,14 +218,9 @@ fn merge_update(existing: McpServerRow, params: UpdateMcpServerParams<'_>) -> Mc
     McpServerRow {
         id: existing.id,
         name: params.name.unwrap_or(&existing.name).to_string(),
-        description: params
-            .description
-            .map_or(existing.description, |v| v.map(String::from)),
+        description: params.description.map_or(existing.description, |v| v.map(String::from)),
         enabled: params.enabled.unwrap_or(existing.enabled),
-        transport_type: params
-            .transport_type
-            .unwrap_or(&existing.transport_type)
-            .to_string(),
+        transport_type: params.transport_type.unwrap_or(&existing.transport_type).to_string(),
         transport_config: params
             .transport_config
             .unwrap_or(&existing.transport_config)
@@ -498,9 +478,7 @@ mod tests {
         let created = repo.create(stdio_params()).await.unwrap();
 
         let ts = aionui_common::now_ms();
-        repo.update_status(&created.id, "connected", Some(ts))
-            .await
-            .unwrap();
+        repo.update_status(&created.id, "connected", Some(ts)).await.unwrap();
 
         let found = repo.find_by_id(&created.id).await.unwrap().unwrap();
         assert_eq!(found.status, "connected");
@@ -513,13 +491,9 @@ mod tests {
         let created = repo.create(stdio_params()).await.unwrap();
 
         let ts = aionui_common::now_ms();
-        repo.update_status(&created.id, "connected", Some(ts))
-            .await
-            .unwrap();
+        repo.update_status(&created.id, "connected", Some(ts)).await.unwrap();
 
-        repo.update_status(&created.id, "error", None)
-            .await
-            .unwrap();
+        repo.update_status(&created.id, "error", None).await.unwrap();
 
         let found = repo.find_by_id(&created.id).await.unwrap().unwrap();
         assert_eq!(found.status, "error");
@@ -529,10 +503,7 @@ mod tests {
     #[tokio::test]
     async fn update_status_nonexistent_returns_not_found() {
         let (repo, _db) = setup().await;
-        let err = repo
-            .update_status("no_id", "connected", None)
-            .await
-            .unwrap_err();
+        let err = repo.update_status("no_id", "connected", None).await.unwrap_err();
         assert!(matches!(err, DbError::NotFound(_)));
     }
 
@@ -543,9 +514,7 @@ mod tests {
         assert!(created.tools.is_none());
 
         let tools_json = r#"[{"name":"read_file","description":"Read a file"}]"#;
-        repo.update_tools(&created.id, Some(tools_json))
-            .await
-            .unwrap();
+        repo.update_tools(&created.id, Some(tools_json)).await.unwrap();
 
         let found = repo.find_by_id(&created.id).await.unwrap().unwrap();
         assert_eq!(found.tools.as_deref(), Some(tools_json));

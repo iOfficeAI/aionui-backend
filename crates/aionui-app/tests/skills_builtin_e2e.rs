@@ -50,19 +50,14 @@ async fn fixture_embedded() -> Fixture {
 
     // Materialize the embedded corpus onto the temp data dir so the
     // per-test router can read it just like production would.
-    aionui_extension::materialize_if_needed(
-        &data_dir,
-        aionui_extension::builtin_skills_corpus(),
-        "test-fixture",
-    )
-    .await
-    .expect("failed to materialize embedded builtin skills for test fixture");
+    aionui_extension::materialize_if_needed(&data_dir, aionui_extension::builtin_skills_corpus(), "test-fixture")
+        .await
+        .expect("failed to materialize embedded builtin skills for test fixture");
 
     let db = init_database_memory().await.unwrap();
-    let services =
-        aionui_app::AppServices::from_database_with_data_dir(db, "data".to_string(), false)
-            .await
-            .unwrap();
+    let services = aionui_app::AppServices::from_database_with_data_dir(db, "data".to_string(), false)
+        .await
+        .unwrap();
     let (mut states, _): (ModuleStates, _) = build_module_states(&services).await;
 
     // Replace the skill state with a deterministic one rooted at tmp.
@@ -77,8 +72,7 @@ async fn fixture_embedded() -> Fixture {
         assistant_rules_dir: data_dir.join("assistant-rules"),
         assistant_skills_dir: data_dir.join("assistant-skills"),
     };
-    let ext_paths_mgr =
-        Arc::new(ExternalPathsManager::with_file(data_dir.join("paths.json")).await);
+    let ext_paths_mgr = Arc::new(ExternalPathsManager::with_file(data_dir.join("paths.json")).await);
     states.skill = SkillRouterState {
         skill_paths,
         external_paths_manager: ext_paths_mgr,
@@ -126,11 +120,7 @@ async fn builtin_auto_lists_entries_from_embedded_corpus() {
     let json = body_json(resp).await;
     assert_eq!(json["success"], true);
     let arr = json["data"].as_array().unwrap();
-    assert!(
-        arr.len() >= 4,
-        "expected ≥4 auto-inject entries, got {}",
-        arr.len()
-    );
+    assert!(arr.len() >= 4, "expected ≥4 auto-inject entries, got {}", arr.len());
     for item in arr {
         assert!(item["name"].is_string());
         assert!(item["description"].is_string());
@@ -216,12 +206,7 @@ async fn builtin_skill_missing_file_returns_empty_string() {
 async fn builtin_skill_rejects_traversal() {
     let fx = fixture_embedded().await;
 
-    for bad in [
-        "../etc/passwd",
-        "/etc/passwd",
-        "auto-inject/../../escape",
-        "",
-    ] {
+    for bad in ["../etc/passwd", "/etc/passwd", "auto-inject/../../escape", ""] {
         let resp = fx
             .app
             .clone()
@@ -330,10 +315,7 @@ async fn materialize_for_agent_returns_source_path_for_auto_inject_skill() {
     assert_eq!(skills[0]["name"], "cron");
     let source_path = skills[0]["source_path"].as_str().unwrap();
     let path = std::path::Path::new(source_path);
-    assert!(
-        path.is_absolute(),
-        "source_path must be absolute: {source_path}"
-    );
+    assert!(path.is_absolute(), "source_path must be absolute: {source_path}");
     assert!(path.is_dir(), "source_path must exist: {source_path}");
     assert!(
         path.join("SKILL.md").exists(),

@@ -4,8 +4,8 @@ use axum::routing::post;
 use axum::{Json, Router};
 
 use aionui_api_types::{
-    ApiResponse, CheckToolInstalledRequest, CheckToolInstalledResponse, OpenExternalRequest,
-    OpenFileRequest, OpenFolderWithRequest, ShowItemInFolderRequest, SpeechToTextConfig,
+    ApiResponse, CheckToolInstalledRequest, CheckToolInstalledResponse, OpenExternalRequest, OpenFileRequest,
+    OpenFolderWithRequest, ShowItemInFolderRequest, SpeechToTextConfig,
 };
 use aionui_common::AppError;
 
@@ -17,10 +17,7 @@ pub fn shell_routes(state: ShellRouterState) -> Router {
         .route("/api/shell/open-file", post(open_file))
         .route("/api/shell/show-item-in-folder", post(show_item_in_folder))
         .route("/api/shell/open-external", post(open_external))
-        .route(
-            "/api/shell/check-tool-installed",
-            post(check_tool_installed),
-        )
+        .route("/api/shell/check-tool-installed", post(check_tool_installed))
         .route("/api/shell/open-folder-with", post(open_folder_with))
         .route("/api/stt", post(speech_to_text))
         .with_state(state)
@@ -40,10 +37,7 @@ async fn show_item_in_folder(
     body: Result<Json<ShowItemInFolderRequest>, axum::extract::rejection::JsonRejection>,
 ) -> Result<Json<ApiResponse<()>>, AppError> {
     let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
-    state
-        .shell_service
-        .show_item_in_folder(&req.file_path)
-        .await?;
+    state.shell_service.show_item_in_folder(&req.file_path).await?;
     Ok(Json(ApiResponse::success()))
 }
 
@@ -62,9 +56,7 @@ async fn check_tool_installed(
 ) -> Result<Json<ApiResponse<CheckToolInstalledResponse>>, AppError> {
     let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
     let installed = state.shell_service.check_tool_installed(req.tool).await;
-    Ok(Json(ApiResponse::ok(CheckToolInstalledResponse {
-        installed,
-    })))
+    Ok(Json(ApiResponse::ok(CheckToolInstalledResponse { installed })))
 }
 
 async fn open_folder_with(
@@ -72,10 +64,7 @@ async fn open_folder_with(
     body: Result<Json<OpenFolderWithRequest>, axum::extract::rejection::JsonRejection>,
 ) -> Result<Json<ApiResponse<()>>, AppError> {
     let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
-    state
-        .shell_service
-        .open_folder_with(&req.folder_path, req.tool)
-        .await?;
+    state.shell_service.open_folder_with(&req.folder_path, req.tool).await?;
     Ok(Json(ApiResponse::success()))
 }
 
@@ -109,21 +98,26 @@ async fn extract_stt_multipart(mut multipart: Multipart) -> Result<SttMultipartF
                 );
             }
             "fileName" => {
-                file_name =
-                    Some(field.text().await.map_err(|e| {
-                        AppError::BadRequest(format!("failed to read fileName: {e}"))
-                    })?);
+                file_name = Some(
+                    field
+                        .text()
+                        .await
+                        .map_err(|e| AppError::BadRequest(format!("failed to read fileName: {e}")))?,
+                );
             }
             "mimeType" => {
-                mime_type =
-                    Some(field.text().await.map_err(|e| {
-                        AppError::BadRequest(format!("failed to read mimeType: {e}"))
-                    })?);
+                mime_type = Some(
+                    field
+                        .text()
+                        .await
+                        .map_err(|e| AppError::BadRequest(format!("failed to read mimeType: {e}")))?,
+                );
             }
             "languageHint" => {
-                let text = field.text().await.map_err(|e| {
-                    AppError::BadRequest(format!("failed to read languageHint: {e}"))
-                })?;
+                let text = field
+                    .text()
+                    .await
+                    .map_err(|e| AppError::BadRequest(format!("failed to read languageHint: {e}")))?;
                 if !text.is_empty() {
                     language_hint = Some(text);
                 }
@@ -132,12 +126,9 @@ async fn extract_stt_multipart(mut multipart: Multipart) -> Result<SttMultipartF
         }
     }
 
-    let file_data =
-        file_data.ok_or_else(|| AppError::BadRequest("missing 'file' field".to_owned()))?;
-    let file_name =
-        file_name.ok_or_else(|| AppError::BadRequest("missing 'fileName' field".to_owned()))?;
-    let mime_type =
-        mime_type.ok_or_else(|| AppError::BadRequest("missing 'mimeType' field".to_owned()))?;
+    let file_data = file_data.ok_or_else(|| AppError::BadRequest("missing 'file' field".to_owned()))?;
+    let file_name = file_name.ok_or_else(|| AppError::BadRequest("missing 'fileName' field".to_owned()))?;
+    let mime_type = mime_type.ok_or_else(|| AppError::BadRequest("missing 'mimeType' field".to_owned()))?;
 
     Ok(SttMultipartFields {
         file_data,
@@ -206,8 +197,7 @@ async fn speech_to_text(
 }
 
 fn stt_error_response(err: &SttError) -> (StatusCode, Json<serde_json::Value>) {
-    let status =
-        StatusCode::from_u16(err.status_code()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    let status = StatusCode::from_u16(err.status_code()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
     let body = serde_json::json!({
         "success": false,
         "error": err.to_string(),
@@ -343,9 +333,7 @@ mod tests {
             .method("POST")
             .uri("/api/shell/open-folder-with")
             .header("content-type", "application/json")
-            .body(Body::from(
-                r#"{"folderPath":"/nonexistent/dir","tool":"explorer"}"#,
-            ))
+            .body(Body::from(r#"{"folderPath":"/nonexistent/dir","tool":"explorer"}"#))
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);

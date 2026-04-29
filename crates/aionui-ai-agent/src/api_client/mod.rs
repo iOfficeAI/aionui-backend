@@ -57,12 +57,7 @@ impl LlmClient {
 /// | `USE_OPENAI` / default | OpenAI | `OPENAI_API_KEY` |
 /// | `USE_GEMINI` / `USE_VERTEX_AI` | Gemini | `GEMINI_API_KEY` |
 /// | `USE_ANTHROPIC` | Anthropic | `ANTHROPIC_API_KEY` |
-pub fn create_rotating_client(
-    auth_type: &str,
-    api_key: &str,
-    base_url: &str,
-    options: ClientOptions,
-) -> LlmClient {
+pub fn create_rotating_client(auth_type: &str, api_key: &str, base_url: &str, options: ClientOptions) -> LlmClient {
     match auth_type {
         "USE_GEMINI" | "USE_VERTEX_AI" => {
             let km = Arc::new(ApiKeyManager::new(api_key, Some("GEMINI_API_KEY".into())));
@@ -74,10 +69,7 @@ pub fn create_rotating_client(
             ))
         }
         "USE_ANTHROPIC" => {
-            let km = Arc::new(ApiKeyManager::new(
-                api_key,
-                Some("ANTHROPIC_API_KEY".into()),
-            ));
+            let km = Arc::new(ApiKeyManager::new(api_key, Some("ANTHROPIC_API_KEY".into())));
             LlmClient::Anthropic(AnthropicRotatingClient::new(
                 km,
                 base_url,
@@ -115,12 +107,7 @@ mod tests {
 
     #[test]
     fn factory_creates_openai_for_unknown() {
-        let client = create_rotating_client(
-            "UNKNOWN",
-            "sk-test",
-            "https://custom.api.com",
-            ClientOptions::default(),
-        );
+        let client = create_rotating_client("UNKNOWN", "sk-test", "https://custom.api.com", ClientOptions::default());
         assert!(matches!(client, LlmClient::OpenAI(_)));
     }
 

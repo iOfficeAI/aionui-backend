@@ -2,9 +2,7 @@ use std::sync::Arc;
 
 use aionui_common::{AppError, FileChangeOperation};
 
-use crate::types::{
-    CompareResult, CopyResult, DirOrFile, FileMetadata, SnapshotInfo, WorkspaceFlatFile, ZipEntry,
-};
+use crate::types::{CompareResult, CopyResult, DirOrFile, FileMetadata, SnapshotInfo, WorkspaceFlatFile, ZipEntry};
 
 /// Core file operations: directory browsing, file read/write, management,
 /// image processing, and ZIP packaging.
@@ -132,11 +130,7 @@ pub trait ISnapshotService: Send + Sync {
 
     /// Get the baseline (HEAD) content of a file.
     /// Returns `None` for new/untracked files.
-    async fn get_baseline_content(
-        &self,
-        workspace: &str,
-        file_path: &str,
-    ) -> Result<Option<String>, AppError>;
+    async fn get_baseline_content(&self, workspace: &str, file_path: &str) -> Result<Option<String>, AppError>;
 
     /// Stage a single file (git-repo mode only).
     async fn stage_file(&self, workspace: &str, file_path: &str) -> Result<(), AppError>;

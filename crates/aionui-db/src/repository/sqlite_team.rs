@@ -129,20 +129,14 @@ impl ITeamRepository for SqliteTeamRepository {
         Ok(())
     }
 
-    async fn read_unread_and_mark(
-        &self,
-        team_id: &str,
-        to_agent_id: &str,
-    ) -> Result<Vec<MailboxMessageRow>, DbError> {
+    async fn read_unread_and_mark(&self, team_id: &str, to_agent_id: &str) -> Result<Vec<MailboxMessageRow>, DbError> {
         // Use BEGIN IMMEDIATE for atomicity: prevents concurrent readers
         // from seeing the same unread messages.
         let mut tx = self.pool.begin().await?;
 
         // SQLite does not support RETURNING on UPDATE, so we use a
         // two-step approach within the same IMMEDIATE transaction.
-        sqlx::query("PRAGMA read_uncommitted = false")
-            .execute(&mut *tx)
-            .await?;
+        sqlx::query("PRAGMA read_uncommitted = false").execute(&mut *tx).await?;
 
         let rows = sqlx::query_as::<_, MailboxMessageRow>(
             "SELECT id, team_id, to_agent_id, from_agent_id, \
@@ -240,18 +234,12 @@ impl ITeamRepository for SqliteTeamRepository {
         Ok(())
     }
 
-    async fn find_task_by_id(
-        &self,
-        team_id: &str,
-        task_id: &str,
-    ) -> Result<Option<TeamTaskRow>, DbError> {
-        let row = sqlx::query_as::<_, TeamTaskRow>(
-            "SELECT * FROM team_tasks WHERE team_id = ? AND id = ?",
-        )
-        .bind(team_id)
-        .bind(task_id)
-        .fetch_optional(&self.pool)
-        .await?;
+    async fn find_task_by_id(&self, team_id: &str, task_id: &str) -> Result<Option<TeamTaskRow>, DbError> {
+        let row = sqlx::query_as::<_, TeamTaskRow>("SELECT * FROM team_tasks WHERE team_id = ? AND id = ?")
+            .bind(team_id)
+            .bind(task_id)
+            .fetch_optional(&self.pool)
+            .await?;
         Ok(row)
     }
 
@@ -278,10 +266,7 @@ impl ITeamRepository for SqliteTeamRepository {
         }
 
         set_clauses.push("updated_at = ?");
-        let sql = format!(
-            "UPDATE team_tasks SET {} WHERE id = ?",
-            set_clauses.join(", ")
-        );
+        let sql = format!("UPDATE team_tasks SET {} WHERE id = ?", set_clauses.join(", "));
 
         let mut query = sqlx::query(&sql);
         if let Some(ref status) = params.status {
@@ -310,12 +295,11 @@ impl ITeamRepository for SqliteTeamRepository {
     }
 
     async fn list_tasks(&self, team_id: &str) -> Result<Vec<TeamTaskRow>, DbError> {
-        let rows = sqlx::query_as::<_, TeamTaskRow>(
-            "SELECT * FROM team_tasks WHERE team_id = ? ORDER BY created_at ASC",
-        )
-        .bind(team_id)
-        .fetch_all(&self.pool)
-        .await?;
+        let rows =
+            sqlx::query_as::<_, TeamTaskRow>("SELECT * FROM team_tasks WHERE team_id = ? ORDER BY created_at ASC")
+                .bind(team_id)
+                .fetch_all(&self.pool)
+                .await?;
         Ok(rows)
     }
 
@@ -346,11 +330,7 @@ impl ITeamRepository for SqliteTeamRepository {
         Ok(())
     }
 
-    async fn remove_from_blocked_by(
-        &self,
-        task_id: &str,
-        unblocked_task_id: &str,
-    ) -> Result<(), DbError> {
+    async fn remove_from_blocked_by(&self, task_id: &str, unblocked_task_id: &str) -> Result<(), DbError> {
         // Read current blocked_by, remove, and write back within a transaction.
         let mut tx = self.pool.begin().await?;
 
@@ -362,8 +342,7 @@ impl ITeamRepository for SqliteTeamRepository {
 
         let mut blocked_by: Vec<String> = serde_json::from_str(&row.blocked_by).unwrap_or_default();
         blocked_by.retain(|id| id != unblocked_task_id);
-        let new_blocked_by =
-            serde_json::to_string(&blocked_by).unwrap_or_else(|_| "[]".to_string());
+        let new_blocked_by = serde_json::to_string(&blocked_by).unwrap_or_else(|_| "[]".to_string());
 
         sqlx::query("UPDATE team_tasks SET blocked_by = ?, updated_at = ? WHERE id = ?")
             .bind(&new_blocked_by)

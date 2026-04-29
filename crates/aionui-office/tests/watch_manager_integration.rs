@@ -96,12 +96,7 @@ impl TestBroadcaster {
     }
 
     fn event_names(&self) -> Vec<String> {
-        self.events
-            .lock()
-            .unwrap()
-            .iter()
-            .map(|e| e.name.clone())
-            .collect()
+        self.events.lock().unwrap().iter().map(|e| e.name.clone()).collect()
     }
 
     fn event_states(&self) -> Vec<String> {

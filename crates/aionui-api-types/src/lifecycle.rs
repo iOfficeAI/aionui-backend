@@ -164,10 +164,7 @@ mod tests {
         assert_eq!(json["latest"]["version"], "2.0.0");
         assert_eq!(json["latest"]["html_url"].as_str().unwrap().len() > 0, true);
         assert_eq!(json["latest"]["assets"].as_array().unwrap().len(), 1);
-        assert_eq!(
-            json["latest"]["assets"][0]["name"],
-            "aionui-2.0.0-darwin-arm64.dmg"
-        );
+        assert_eq!(json["latest"]["assets"][0]["name"], "aionui-2.0.0-darwin-arm64.dmg");
         assert_eq!(json["latest"]["assets"][0]["size"], 85_000_000_u64);
     }
 

@@ -11,8 +11,7 @@ use std::sync::Arc;
 
 use aionui_ai_agent::*;
 use aionui_common::{
-    AgentKillReason, AgentType, Confirmation, ConversationStatus, ProviderWithModel, TimestampMs,
-    now_ms,
+    AgentKillReason, AgentType, Confirmation, ConversationStatus, ProviderWithModel, TimestampMs, now_ms,
 };
 use serde_json::json;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -32,11 +31,7 @@ struct TypedMockAgent {
 }
 
 impl TypedMockAgent {
-    fn new(
-        agent_type: AgentType,
-        conversation_id: &str,
-        status: Option<ConversationStatus>,
-    ) -> Self {
+    fn new(agent_type: AgentType, conversation_id: &str, status: Option<ConversationStatus>) -> Self {
         let (event_tx, _) = broadcast::channel(16);
         Self {
             agent_type,
@@ -124,34 +119,27 @@ fn make_aionrs_config() -> AionrsResolvedConfig {
 
 #[tokio::test]
 async fn aionrs_agent_kill_succeeds() {
-    let agent =
-        AionrsAgentManager::new("conv-1".into(), "/proj".into(), make_aionrs_config(), None)
-            .await
-            .unwrap();
+    let agent = AionrsAgentManager::new("conv-1".into(), "/proj".into(), make_aionrs_config(), None)
+        .await
+        .unwrap();
     assert!(agent.kill(None).is_ok());
     assert!(agent.kill(Some(AgentKillReason::IdleTimeout)).is_ok());
 }
 
 #[tokio::test]
 async fn aionrs_agent_confirm_succeeds() {
-    let agent =
-        AionrsAgentManager::new("conv-1".into(), "/proj".into(), make_aionrs_config(), None)
-            .await
-            .unwrap();
+    let agent = AionrsAgentManager::new("conv-1".into(), "/proj".into(), make_aionrs_config(), None)
+        .await
+        .unwrap();
     let result = agent.confirm("msg", "call", json!({}), false);
     assert!(result.is_ok());
 }
 
 #[tokio::test]
 async fn aionrs_agent_metadata() {
-    let agent = AionrsAgentManager::new(
-        "conv-abc".into(),
-        "/work".into(),
-        make_aionrs_config(),
-        None,
-    )
-    .await
-    .unwrap();
+    let agent = AionrsAgentManager::new("conv-abc".into(), "/work".into(), make_aionrs_config(), None)
+        .await
+        .unwrap();
     assert_eq!(agent.agent_type(), AgentType::Aionrs);
     assert_eq!(agent.workspace(), "/work");
     assert_eq!(agent.conversation_id(), "conv-abc");
@@ -194,11 +182,8 @@ fn collect_idle_ignores_non_acp_agent_types() {
 
     mgr.get_or_build_task("nanobot-1", make_opts(AgentType::Nanobot, "nanobot-1"))
         .unwrap();
-    mgr.get_or_build_task(
-        "openclaw-1",
-        make_opts(AgentType::OpenclawGateway, "openclaw-1"),
-    )
-    .unwrap();
+    mgr.get_or_build_task("openclaw-1", make_opts(AgentType::OpenclawGateway, "openclaw-1"))
+        .unwrap();
     mgr.get_or_build_task("acp-1", make_opts(AgentType::Acp, "acp-1"))
         .unwrap();
     mgr.get_or_build_task("remote-1", make_opts(AgentType::Remote, "remote-1"))

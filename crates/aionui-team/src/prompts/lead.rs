@@ -65,8 +65,7 @@ pub struct LeadPromptParams<'a> {
 pub fn build_lead_prompt(params: &LeadPromptParams<'_>) -> String {
     let teammate_list = render_teammate_list(params.teammates, params.renamed_agents);
     let available_types_section = render_available_types_section(params.available_agent_types);
-    let available_assistants_section =
-        render_available_assistants_section(params.available_assistants);
+    let available_assistants_section = render_available_assistants_section(params.available_assistants);
     let workspace_section = render_workspace_section(params.team_workspace);
 
     // Phase1 does not surface preset assistants in the staffing-proposal formatting
@@ -77,29 +76,17 @@ pub fn build_lead_prompt(params: &LeadPromptParams<'_>) -> String {
 
     LEAD_PROMPT_TEMPLATE
         .replace(PLACEHOLDER_TEAMMATE_LIST, &teammate_list)
-        .replace(
-            PLACEHOLDER_AVAILABLE_TYPES_SECTION,
-            &available_types_section,
-        )
-        .replace(
-            PLACEHOLDER_AVAILABLE_ASSISTANTS_SECTION,
-            &available_assistants_section,
-        )
+        .replace(PLACEHOLDER_AVAILABLE_TYPES_SECTION, &available_types_section)
+        .replace(PLACEHOLDER_AVAILABLE_ASSISTANTS_SECTION, &available_assistants_section)
         .replace(PLACEHOLDER_WORKSPACE_SECTION, &workspace_section)
-        .replace(
-            PLACEHOLDER_PRESET_FORMATTING_STEP_RULE,
-            preset_formatting_step_rule,
-        )
+        .replace(PLACEHOLDER_PRESET_FORMATTING_STEP_RULE, preset_formatting_step_rule)
         .replace(
             PLACEHOLDER_PRESET_FORMATTING_IMPORTANT_RULE,
             preset_formatting_important_rule,
         )
 }
 
-fn render_teammate_list(
-    teammates: &[TeamAgent],
-    renamed_agents: &HashMap<String, String>,
-) -> String {
+fn render_teammate_list(teammates: &[TeamAgent], renamed_agents: &HashMap<String, String>) -> String {
     if teammates.is_empty() {
         return "(no teammates yet — propose the lineup to the user first, then use \
                 team_spawn_agent only after they confirm or explicitly ask you to create \
@@ -112,10 +99,7 @@ fn render_teammate_list(
         if idx > 0 {
             out.push('\n');
         }
-        let status = m
-            .status
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| "unknown".to_owned());
+        let status = m.status.map(|s| s.to_string()).unwrap_or_else(|| "unknown".to_owned());
         let _ = write!(out, "- {} ({}, status: {})", m.name, m.backend, status,);
         if let Some(former) = renamed_agents.get(&m.slot_id) {
             let _ = write!(out, " [formerly: {former}]");
@@ -135,9 +119,7 @@ fn render_available_types_section(agent_types: &[AvailableAgentType]) -> String 
         }
         let _ = write!(out, "- `{}` — {}", t.agent_type, t.display_name);
     }
-    out.push_str(
-        "\n\nUse `team_list_models` to query available models for each agent type before spawning.",
-    );
+    out.push_str("\n\nUse `team_list_models` to query available models for each agent type before spawning.");
     out
 }
 
@@ -288,10 +270,7 @@ mod tests {
         let got = render_teammate_list(std::slice::from_ref(&t), &renamed);
 
         assert_eq!(got, "- Worker1 (claude, status: idle)");
-        assert!(
-            !got.contains("slot="),
-            "teammate bullet must not expose slot="
-        );
+        assert!(!got.contains("slot="), "teammate bullet must not expose slot=");
         assert!(
             !got.contains("agentType="),
             "teammate bullet must not use agentType= prefix"
@@ -313,10 +292,7 @@ mod tests {
         let mut t = make_teammate("w1", "Worker1", "claude");
         t.status = Some(TeammateStatus::Working);
         let got = render_teammate_list(std::slice::from_ref(&t), &renamed);
-        assert_eq!(
-            got,
-            "- Worker1 (claude, status: working) [formerly: OldName]"
-        );
+        assert_eq!(got, "- Worker1 (claude, status: working) [formerly: OldName]");
     }
 
     #[test]
@@ -357,11 +333,7 @@ mod tests {
             skills: vec!["docx".into(), "formatting".into()],
         }]);
         assert!(got.contains("## Available Preset Assistants for Spawning"));
-        assert!(
-            got.contains(
-                "- `word-creator` (Word Creator, backend: claude) — Drafts Word documents"
-            )
-        );
+        assert!(got.contains("- `word-creator` (Word Creator, backend: claude) — Drafts Word documents"));
         assert!(got.contains("skills: docx, formatting"));
         assert!(got.contains("### How to pick a preset"));
     }
@@ -387,8 +359,7 @@ mod tests {
         // already asserts that both tokens are stripped from the final output.
         // This test guards the behavior by simulating the full substitution on a
         // template carrying just the two preset placeholders.
-        let template_with_presets_only =
-            "step:${presetFormattingStepRule}|important:${presetFormattingImportantRule}";
+        let template_with_presets_only = "step:${presetFormattingStepRule}|important:${presetFormattingImportantRule}";
         let out = template_with_presets_only
             .replace("${presetFormattingStepRule}", "")
             .replace("${presetFormattingImportantRule}", "");
@@ -404,10 +375,7 @@ mod tests {
         // healthy in the meantime.
         let renamed = HashMap::new();
         let out = build_lead_prompt(&params_min(&renamed));
-        assert!(
-            !out.is_empty(),
-            "output should not be empty with real template"
-        );
+        assert!(!out.is_empty(), "output should not be empty with real template");
         assert!(!out.contains("${"), "no unsubstituted placeholders");
     }
 

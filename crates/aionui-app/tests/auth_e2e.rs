@@ -52,21 +52,13 @@ fn extract_session_token(resp: &axum::response::Response) -> Option<String> {
         .filter_map(|v| v.to_str().ok())
         .find(|s| s.starts_with("aionui-session="))
         .and_then(|s| {
-            let value = s
-                .strip_prefix("aionui-session=")?
-                .split(';')
-                .next()?
-                .to_owned();
+            let value = s.strip_prefix("aionui-session=")?.split(';').next()?.to_owned();
             if value.is_empty() { None } else { Some(value) }
         })
 }
 
 fn get_request(uri: &str) -> Request<Body> {
-    Request::builder()
-        .method("GET")
-        .uri(uri)
-        .body(Body::empty())
-        .unwrap()
+    Request::builder().method("GET").uri(uri).body(Body::empty()).unwrap()
 }
 
 fn get_with_token(uri: &str, token: &str) -> Request<Body> {
@@ -117,27 +109,15 @@ async fn setup_and_login(
 ) -> (String, String) {
     // Create user
     let hash = aionui_auth::hash_password(password).unwrap();
-    services
-        .user_repo
-        .create_user(username, &hash)
-        .await
-        .unwrap();
+    services.user_repo.create_user(username, &hash).await.unwrap();
 
     // Get CSRF token from a GET request first
-    let resp = app
-        .clone()
-        .oneshot(get_request("/api/auth/status"))
-        .await
-        .unwrap();
+    let resp = app.clone().oneshot(get_request("/api/auth/status")).await.unwrap();
     let csrf = extract_csrf_token(&resp).expect("CSRF cookie should be set");
 
     // Login (exempt from CSRF)
     let body = format!(r#"{{"username":"{username}","password":"{password}"}}"#);
-    let resp = app
-        .clone()
-        .oneshot(post_json_login("/login", &body))
-        .await
-        .unwrap();
+    let resp = app.clone().oneshot(post_json_login("/login", &body)).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK, "login should succeed");
 
     let json = body_json(resp).await;
@@ -157,14 +137,8 @@ async fn t12_1_security_headers_on_all_responses() {
     let resp = app.oneshot(get_request("/health")).await.unwrap();
 
     assert_eq!(resp.headers().get("x-frame-options").unwrap(), "DENY");
-    assert_eq!(
-        resp.headers().get("x-content-type-options").unwrap(),
-        "nosniff"
-    );
-    assert_eq!(
-        resp.headers().get("x-xss-protection").unwrap(),
-        "1; mode=block"
-    );
+    assert_eq!(resp.headers().get("x-content-type-options").unwrap(), "nosniff");
+    assert_eq!(resp.headers().get("x-xss-protection").unwrap(), "1; mode=block");
     assert_eq!(
         resp.headers().get("referrer-policy").unwrap(),
         "strict-origin-when-cross-origin"
@@ -235,11 +209,7 @@ async fn t12_2_csrf_exempt_paths() {
 async fn t12_3_session_cookie_attributes() {
     let (app, services) = build_app().await;
     let hash = aionui_auth::hash_password("StrongP@ss1").unwrap();
-    services
-        .user_repo
-        .create_user("admin", &hash)
-        .await
-        .unwrap();
+    services.user_repo.create_user("admin", &hash).await.unwrap();
 
     let req = post_json_login("/login", r#"{"username":"admin","password":"StrongP@ss1"}"#);
     let resp = app.oneshot(req).await.unwrap();
@@ -330,11 +300,7 @@ async fn t14_2_setup_then_login() {
     let (app, services) = build_app().await;
 
     // Fresh system: needsSetup=true
-    let resp = app
-        .clone()
-        .oneshot(get_request("/api/auth/status"))
-        .await
-        .unwrap();
+    let resp = app.clone().oneshot(get_request("/api/auth/status")).await.unwrap();
     let json = body_json(resp).await;
     assert_eq!(json["needs_setup"], true);
 
@@ -347,11 +313,7 @@ async fn t14_2_setup_then_login() {
         .unwrap();
 
     // Now needsSetup=false
-    let resp = app
-        .clone()
-        .oneshot(get_request("/api/auth/status"))
-        .await
-        .unwrap();
+    let resp = app.clone().oneshot(get_request("/api/auth/status")).await.unwrap();
     let json = body_json(resp).await;
     assert_eq!(json["needs_setup"], false);
 
@@ -382,11 +344,7 @@ async fn full_auth_flow_e2e() {
     let (app, services) = build_app().await;
 
     // 1. Check initial status
-    let resp = app
-        .clone()
-        .oneshot(get_request("/api/auth/status"))
-        .await
-        .unwrap();
+    let resp = app.clone().oneshot(get_request("/api/auth/status")).await.unwrap();
     let csrf = extract_csrf_token(&resp).expect("CSRF cookie on first request");
     let json = body_json(resp).await;
     assert_eq!(json["needs_setup"], true);
@@ -400,10 +358,7 @@ async fn full_auth_flow_e2e() {
         .unwrap();
 
     // 3. Login
-    let req = post_json_login(
-        "/login",
-        r#"{"username":"admin","password":"Initial@Pass1"}"#,
-    );
+    let req = post_json_login("/login", r#"{"username":"admin","password":"Initial@Pass1"}"#);
     let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let session_token = extract_session_token(&resp).expect("session cookie set");
@@ -436,10 +391,7 @@ async fn full_auth_flow_e2e() {
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
 
     // 7. Login with new password
-    let req = post_json_login(
-        "/login",
-        r#"{"username":"admin","password":"Updated@Pass2"}"#,
-    );
+    let req = post_json_login("/login", r#"{"username":"admin","password":"Updated@Pass2"}"#);
     let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let json = body_json(resp).await;

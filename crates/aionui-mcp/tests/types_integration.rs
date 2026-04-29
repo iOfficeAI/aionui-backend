@@ -13,12 +13,7 @@ use aionui_mcp::{McpServer, McpServerTransport, McpTool};
 // McpServer::from_row — full pipeline tests
 // ---------------------------------------------------------------------------
 
-fn row(
-    transport_type: &str,
-    transport_config: &str,
-    tools: Option<&str>,
-    status: &str,
-) -> McpServerRow {
+fn row(transport_type: &str, transport_config: &str, tools: Option<&str>, status: &str) -> McpServerRow {
     McpServerRow {
         id: "mcp_integration".into(),
         name: "integration-test".into(),
@@ -48,21 +43,13 @@ fn stdio_server_full_pipeline() {
         { "name": "add", "description": "Add numbers", "input_schema": { "type": "object" } }
     ]);
 
-    let r = row(
-        "stdio",
-        &config.to_string(),
-        Some(&tools_json.to_string()),
-        "connected",
-    );
+    let r = row("stdio", &config.to_string(), Some(&tools_json.to_string()), "connected");
     let server = McpServer::from_row(r).unwrap();
 
     // Verify all fields
     assert_eq!(server.id, "mcp_integration");
     assert_eq!(server.name, "integration-test");
-    assert_eq!(
-        server.description.as_deref(),
-        Some("Integration test server")
-    );
+    assert_eq!(server.description.as_deref(), Some("Integration test server"));
     assert!(server.enabled);
     assert_eq!(server.status, McpServerStatus::Connected);
     assert_eq!(server.last_connected, Some(9999));
@@ -174,12 +161,7 @@ fn transport_db_roundtrip_preserves_all_fields() {
 
 #[test]
 fn invalid_transport_type_is_rejected() {
-    let r = row(
-        "grpc",
-        r#"{"endpoint":"localhost:50051"}"#,
-        None,
-        "disconnected",
-    );
+    let r = row("grpc", r#"{"endpoint":"localhost:50051"}"#, None, "disconnected");
     let err = McpServer::from_row(r).unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("unknown transport type"), "got: {msg}");

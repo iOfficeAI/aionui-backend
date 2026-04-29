@@ -2,10 +2,7 @@ use aionui_api_types::{PreviewHistoryTargetDto, PreviewSnapshotInfoDto};
 use aionui_common::PreviewContentType;
 use aionui_office::SnapshotService;
 
-fn make_target(
-    content_type: PreviewContentType,
-    file_path: Option<&str>,
-) -> PreviewHistoryTargetDto {
+fn make_target(content_type: PreviewContentType, file_path: Option<&str>) -> PreviewHistoryTargetDto {
     PreviewHistoryTargetDto {
         content_type,
         file_path: file_path.map(String::from),
@@ -194,12 +191,7 @@ async fn sh7_target_field_combination_different_hash() {
     let svc = SnapshotService::new(tmp.path());
 
     let t1 = make_target(PreviewContentType::Markdown, Some("/a.md"));
-    let t2 = make_target_full(
-        PreviewContentType::Markdown,
-        Some("/a.md"),
-        Some("/ws"),
-        Some("conv_1"),
-    );
+    let t2 = make_target_full(PreviewContentType::Markdown, Some("/a.md"), Some("/ws"), Some("conv_1"));
 
     svc.save(&t1, "content-1").await.unwrap();
     svc.save(&t2, "content-2").await.unwrap();

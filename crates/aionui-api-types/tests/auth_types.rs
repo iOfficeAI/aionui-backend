@@ -1,8 +1,8 @@
 //! Black-box tests for auth DTO serialization/deserialization.
 
 use aionui_api_types::{
-    AuthStatusResponse, ChangePasswordRequest, LoginRequest, LoginResponse, PublicUser,
-    QrLoginRequest, RefreshTokenRequest,
+    AuthStatusResponse, ChangePasswordRequest, LoginRequest, LoginResponse, PublicUser, QrLoginRequest,
+    RefreshTokenRequest,
 };
 
 // --- LoginRequest ---

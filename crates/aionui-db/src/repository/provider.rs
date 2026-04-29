@@ -17,8 +17,7 @@ pub trait IProviderRepository: Send + Sync {
     async fn create(&self, params: CreateProviderParams<'_>) -> Result<Provider, DbError>;
 
     /// Updates an existing provider. Returns `DbError::NotFound` if the ID doesn't exist.
-    async fn update(&self, id: &str, params: UpdateProviderParams<'_>)
-    -> Result<Provider, DbError>;
+    async fn update(&self, id: &str, params: UpdateProviderParams<'_>) -> Result<Provider, DbError>;
 
     /// Deletes a provider by ID. Returns `DbError::NotFound` if the ID doesn't exist.
     async fn delete(&self, id: &str) -> Result<(), DbError>;

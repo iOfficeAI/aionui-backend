@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
-use aionui_api_types::{
-    CronJobExecutedEvent, CronJobRemovedPayload, CronJobResponse, WebSocketMessage,
-};
+use aionui_api_types::{CronJobExecutedEvent, CronJobRemovedPayload, CronJobResponse, WebSocketMessage};
 use aionui_common::generate_id;
 use aionui_realtime::EventBroadcaster;
 use serde_json::json;
@@ -69,8 +67,7 @@ impl CronEventEmitter {
                 return;
             }
         };
-        self.broadcaster
-            .broadcast(WebSocketMessage::new(event_name, value));
+        self.broadcaster.broadcast(WebSocketMessage::new(event_name, value));
     }
 }
 
@@ -78,8 +75,8 @@ impl CronEventEmitter {
 mod tests {
     use super::*;
     use aionui_api_types::{
-        CronJobExecutedEvent, CronJobMetadataDto, CronJobPayloadDto, CronJobRemovedPayload,
-        CronJobResponse, CronJobStateDto, CronJobTargetDto, CronScheduleDto,
+        CronJobExecutedEvent, CronJobMetadataDto, CronJobPayloadDto, CronJobRemovedPayload, CronJobResponse,
+        CronJobStateDto, CronJobTargetDto, CronScheduleDto,
     };
 
     struct RecordingBroadcaster {
@@ -121,9 +118,7 @@ mod tests {
                 description: Some("every minute".into()),
             },
             target: CronJobTargetDto {
-                payload: CronJobPayloadDto::Message {
-                    text: "hello".into(),
-                },
+                payload: CronJobPayloadDto::Message { text: "hello".into() },
                 execution_mode: Some("existing".into()),
             },
             metadata: CronJobMetadataDto {

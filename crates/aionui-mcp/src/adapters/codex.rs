@@ -42,11 +42,7 @@ impl McpAgentAdapter for CodexAdapter {
         parse_codex_list_json(&stdout)
     }
 
-    async fn install_server(
-        &self,
-        name: &str,
-        transport: &McpServerTransport,
-    ) -> Result<(), McpError> {
+    async fn install_server(&self, name: &str, transport: &McpServerTransport) -> Result<(), McpError> {
         if !self.is_installed().await? {
             return Err(McpError::AgentNotInstalled(CLI_NAME.into()));
         }
@@ -71,12 +67,7 @@ impl McpAgentAdapter for CodexAdapter {
             }
             McpServerTransport::Http { url, .. } | McpServerTransport::Sse { url, .. } => {
                 // Codex only supports --url for HTTP, no headers via CLI
-                run_cli_strict(
-                    CLI_NAME,
-                    &["mcp", "add", name, "--url", url],
-                    MUTATE_TIMEOUT,
-                )
-                .await?;
+                run_cli_strict(CLI_NAME, &["mcp", "add", name, "--url", url], MUTATE_TIMEOUT).await?;
             }
         }
 
@@ -89,8 +80,7 @@ impl McpAgentAdapter for CodexAdapter {
         }
 
         // Codex has no scope parameter; remove is simple.
-        let (stdout, _stderr) =
-            super::cli_helpers::run_cli(CLI_NAME, &["mcp", "remove", name], MUTATE_TIMEOUT).await?;
+        let (stdout, _stderr) = super::cli_helpers::run_cli(CLI_NAME, &["mcp", "remove", name], MUTATE_TIMEOUT).await?;
 
         // Idempotent: treat "not found" as success.
         let lower = stdout.to_lowercase();
@@ -149,10 +139,7 @@ fn parse_codex_entry(entry: &serde_json::Value) -> Option<DetectedServer> {
     let name = entry.get("name")?.as_str()?.to_owned();
 
     let transport_obj = entry.get("transport")?;
-    let transport_type = transport_obj
-        .get("type")
-        .and_then(|v| v.as_str())
-        .unwrap_or("stdio");
+    let transport_type = transport_obj.get("type").and_then(|v| v.as_str()).unwrap_or("stdio");
 
     let transport = match transport_type {
         "stdio" => {
@@ -164,11 +151,7 @@ fn parse_codex_entry(entry: &serde_json::Value) -> Option<DetectedServer> {
             let args = transport_obj
                 .get("args")
                 .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_str().map(String::from))
-                        .collect()
-                })
+                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
                 .unwrap_or_default();
 
             // Codex supports both `env` (object) and `env_vars` (array of {name, value})
@@ -345,10 +328,7 @@ mod tests {
         ]"#;
         let servers = parse_codex_list_json(json).unwrap();
         assert_eq!(servers.len(), 1);
-        assert!(matches!(
-            servers[0].transport,
-            McpServerTransport::Http { .. }
-        ));
+        assert!(matches!(servers[0].transport, McpServerTransport::Http { .. }));
     }
 
     #[test]
@@ -423,10 +403,7 @@ mod tests {
         ]"#;
         let servers = parse_codex_list_json(json).unwrap();
         assert_eq!(servers.len(), 1);
-        assert!(matches!(
-            servers[0].transport,
-            McpServerTransport::Stdio { .. }
-        ));
+        assert!(matches!(servers[0].transport, McpServerTransport::Stdio { .. }));
     }
 
     #[test]

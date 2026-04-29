@@ -4,9 +4,7 @@ use aionui_ai_agent::IWorkerTaskManager;
 use aionui_api_types::{
     CreateConversationRequest, ListConversationsQuery, UpdateConversationRequest, WebSocketMessage,
 };
-use aionui_common::{
-    AgentKillReason, AgentType, AppError, ConversationSource, ConversationStatus, TimestampMs,
-};
+use aionui_common::{AgentKillReason, AgentType, AppError, ConversationSource, ConversationStatus, TimestampMs};
 use aionui_conversation::ConversationService;
 use aionui_conversation::skill_resolver::SkillResolver;
 use aionui_db::{SqliteConversationRepository, init_database_memory};
@@ -85,20 +83,14 @@ impl SkillResolver for EmptySkillResolver {
     }
 }
 
-async fn setup() -> (
-    ConversationService,
-    Arc<TestBroadcaster>,
-    Arc<dyn IWorkerTaskManager>,
-) {
+async fn setup() -> (ConversationService, Arc<TestBroadcaster>, Arc<dyn IWorkerTaskManager>) {
     let db = init_database_memory().await.unwrap();
     let repo = Arc::new(SqliteConversationRepository::new(db.pool().clone()));
     let broadcaster = Arc::new(TestBroadcaster::new());
-    let agent_metadata_repo: Arc<dyn aionui_db::IAgentMetadataRepository> = Arc::new(
-        aionui_db::SqliteAgentMetadataRepository::new(db.pool().clone()),
-    );
-    let acp_session_repo: Arc<dyn aionui_db::IAcpSessionRepository> = Arc::new(
-        aionui_db::SqliteAcpSessionRepository::new(db.pool().clone()),
-    );
+    let agent_metadata_repo: Arc<dyn aionui_db::IAgentMetadataRepository> =
+        Arc::new(aionui_db::SqliteAgentMetadataRepository::new(db.pool().clone()));
+    let acp_session_repo: Arc<dyn aionui_db::IAcpSessionRepository> =
+        Arc::new(aionui_db::SqliteAcpSessionRepository::new(db.pool().clone()));
     let svc = ConversationService::new_with_workspace_root(
         repo,
         broadcaster.clone(),
@@ -203,10 +195,7 @@ async fn t1_3_create_with_optional_fields() {
 #[tokio::test]
 async fn t2_1_list_empty() {
     let (svc, _, _task_mgr) = setup().await;
-    let result = svc
-        .list(USER_ID, ListConversationsQuery::default())
-        .await
-        .unwrap();
+    let result = svc.list(USER_ID, ListConversationsQuery::default()).await.unwrap();
     assert!(result.items.is_empty());
     assert_eq!(result.total, 0);
     assert!(!result.has_more);
@@ -219,10 +208,7 @@ async fn t2_2_list_basic() {
         svc.create(USER_ID, make_create_req()).await.unwrap();
     }
 
-    let result = svc
-        .list(USER_ID, ListConversationsQuery::default())
-        .await
-        .unwrap();
+    let result = svc.list(USER_ID, ListConversationsQuery::default()).await.unwrap();
     assert_eq!(result.items.len(), 3);
     assert_eq!(result.total, 3);
 }
@@ -312,11 +298,8 @@ async fn t2_5_pinned_filter() {
     svc.create(USER_ID, make_create_req()).await.unwrap();
 
     // Pin one
-    let pin_req: UpdateConversationRequest =
-        serde_json::from_value(json!({ "pinned": true })).unwrap();
-    svc.update(USER_ID, &conv.id, pin_req, &task_mgr)
-        .await
-        .unwrap();
+    let pin_req: UpdateConversationRequest = serde_json::from_value(json!({ "pinned": true })).unwrap();
+    svc.update(USER_ID, &conv.id, pin_req, &task_mgr).await.unwrap();
 
     let query = ListConversationsQuery {
         pinned: Some(true),
@@ -356,8 +339,7 @@ async fn t4_1_update_name() {
     let conv = svc.create(USER_ID, make_create_req()).await.unwrap();
     broadcaster.take_events();
 
-    let req: UpdateConversationRequest =
-        serde_json::from_value(json!({ "name": "New Name" })).unwrap();
+    let req: UpdateConversationRequest = serde_json::from_value(json!({ "name": "New Name" })).unwrap();
     let updated = svc.update(USER_ID, &conv.id, req, &task_mgr).await.unwrap();
 
     assert_eq!(updated.name, "New Name");
@@ -391,12 +373,8 @@ async fn t4_3_unpin_clears_pinned_at() {
     assert!(pinned.pinned_at.is_some());
 
     // Unpin
-    let unpin: UpdateConversationRequest =
-        serde_json::from_value(json!({ "pinned": false })).unwrap();
-    let unpinned = svc
-        .update(USER_ID, &conv.id, unpin, &task_mgr)
-        .await
-        .unwrap();
+    let unpin: UpdateConversationRequest = serde_json::from_value(json!({ "pinned": false })).unwrap();
+    let unpinned = svc.update(USER_ID, &conv.id, unpin, &task_mgr).await.unwrap();
     assert!(!unpinned.pinned);
     assert!(unpinned.pinned_at.is_none());
 }
@@ -416,10 +394,7 @@ async fn t4_4_extra_merge_preserves_existing_keys() {
     // Update only workspace
     let update_req: UpdateConversationRequest =
         serde_json::from_value(json!({ "extra": { "workspace": "/new" } })).unwrap();
-    let updated = svc
-        .update(USER_ID, &conv.id, update_req, &task_mgr)
-        .await
-        .unwrap();
+    let updated = svc.update(USER_ID, &conv.id, update_req, &task_mgr).await.unwrap();
 
     assert_eq!(updated.extra["workspace"], "/new");
     assert_eq!(updated.extra["contextFileName"], "ctx.md");
@@ -445,10 +420,7 @@ async fn t4_5_update_model() {
 async fn t4_6_update_not_found() {
     let (svc, _, task_mgr) = setup().await;
     let req: UpdateConversationRequest = serde_json::from_value(json!({ "name": "x" })).unwrap();
-    let err = svc
-        .update(USER_ID, "non-existent", req, &task_mgr)
-        .await
-        .unwrap_err();
+    let err = svc.update(USER_ID, "non-existent", req, &task_mgr).await.unwrap_err();
     assert!(matches!(err, aionui_common::AppError::NotFound(_)));
 }
 
@@ -618,10 +590,7 @@ async fn full_lifecycle_create_get_update_delete() {
         "extra": { "workspace": "/updated" }
     }))
     .unwrap();
-    let updated = svc
-        .update(USER_ID, &created.id, update_req, &task_mgr)
-        .await
-        .unwrap();
+    let updated = svc.update(USER_ID, &created.id, update_req, &task_mgr).await.unwrap();
     assert_eq!(updated.name, "Updated");
     assert!(updated.pinned);
     assert_eq!(updated.extra["workspace"], "/updated");

@@ -38,21 +38,14 @@ pub fn cron_skill_name(job_id: &str) -> Result<String, CronError> {
 }
 
 pub fn cron_skill_dir(data_dir: &Path, job_id: &str) -> Result<PathBuf, CronError> {
-    Ok(data_dir
-        .join(CRON_SKILLS_REL_DIR)
-        .join(cron_skill_name(job_id)?))
+    Ok(data_dir.join(CRON_SKILLS_REL_DIR).join(cron_skill_name(job_id)?))
 }
 
 pub fn cron_skill_file_path(data_dir: &Path, job_id: &str) -> Result<PathBuf, CronError> {
     Ok(cron_skill_dir(data_dir, job_id)?.join(SKILL_FILE_NAME))
 }
 
-pub fn build_skill_content(
-    name: &str,
-    description: &str,
-    prompt: &str,
-    schedule_description: Option<&str>,
-) -> String {
+pub fn build_skill_content(name: &str, description: &str, prompt: &str, schedule_description: Option<&str>) -> String {
     let sanitized_desc = description
         .replace("\r\n", "\n")
         .replace('\r', "\n")
@@ -80,8 +73,7 @@ pub fn build_skill_content(
         "## Instructions".to_owned(),
         String::new(),
         "You are executing a scheduled task. Follow the instructions below directly.".to_owned(),
-        "Do NOT ask clarifying questions — just execute the task and produce the result."
-            .to_owned(),
+        "Do NOT ask clarifying questions — just execute the task and produce the result.".to_owned(),
         String::new(),
         prompt.to_owned(),
     ]);
@@ -103,9 +95,7 @@ pub fn validate_skill_content(content: &str) -> Result<ParsedSkillContent, CronE
     let (name, description, body) = parse_frontmatter(content)?;
     let trimmed_body = body.trim();
     if trimmed_body.is_empty() {
-        return Err(CronError::InvalidSkillContent(
-            "skill file body cannot be empty".into(),
-        ));
+        return Err(CronError::InvalidSkillContent("skill file body cannot be empty".into()));
     }
     if is_placeholder(&name, PLACEHOLDER_PATTERNS) {
         return Err(CronError::InvalidSkillContent(
@@ -149,11 +139,7 @@ pub async fn write_skill_file(
     write_raw_skill_file(data_dir, job_id, &content).await
 }
 
-pub async fn write_raw_skill_file(
-    data_dir: &Path,
-    job_id: &str,
-    raw_content: &str,
-) -> Result<PathBuf, CronError> {
+pub async fn write_raw_skill_file(data_dir: &Path, job_id: &str, raw_content: &str) -> Result<PathBuf, CronError> {
     validate_skill_content(raw_content)?;
 
     let dir = cron_skill_dir(data_dir, job_id)?;
@@ -166,10 +152,7 @@ pub async fn write_raw_skill_file(
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    let temp_path = dir.join(format!(
-        "{SKILL_FILE_NAME}.tmp-{}-{nonce}",
-        std::process::id()
-    ));
+    let temp_path = dir.join(format!("{SKILL_FILE_NAME}.tmp-{}-{nonce}", std::process::id()));
 
     fs::write(&temp_path, raw_content)
         .await
@@ -181,10 +164,7 @@ pub async fn write_raw_skill_file(
     Ok(file_path)
 }
 
-pub async fn read_skill_content(
-    data_dir: &Path,
-    job_id: &str,
-) -> Result<Option<String>, CronError> {
+pub async fn read_skill_content(data_dir: &Path, job_id: &str) -> Result<Option<String>, CronError> {
     let file_path = cron_skill_file_path(data_dir, job_id)?;
     match fs::read_to_string(file_path).await {
         Ok(content) => Ok(Some(content)),
@@ -213,9 +193,7 @@ pub async fn delete_skill_file(data_dir: &Path, job_id: &str) -> Result<(), Cron
 
 fn validate_job_id(job_id: &str) -> Result<(), CronError> {
     if job_id.is_empty() || job_id.contains('/') || job_id.contains('\\') || job_id.contains("..") {
-        return Err(CronError::InvalidSkillContent(format!(
-            "invalid cron job id: {job_id}"
-        )));
+        return Err(CronError::InvalidSkillContent(format!("invalid cron job id: {job_id}")));
     }
     Ok(())
 }
@@ -278,10 +256,7 @@ fn extract_prompt_from_body(body: &str) -> String {
     let mut start_idx = lines.len();
     for (idx, line) in lines.iter().enumerate().skip(1) {
         let trimmed = line.trim();
-        if trimmed.is_empty()
-            || trimmed.starts_with("You are executing")
-            || trimmed.starts_with("Do NOT ask")
-        {
+        if trimmed.is_empty() || trimmed.starts_with("You are executing") || trimmed.starts_with("Do NOT ask") {
             continue;
         }
         start_idx = idx;
@@ -297,15 +272,9 @@ fn extract_prompt_from_body(body: &str) -> String {
 
 fn is_placeholder(value: &str, patterns: &[&str]) -> bool {
     let normalized = value.trim().to_ascii_lowercase();
-    patterns
-        .iter()
-        .any(|pattern| normalized.starts_with(pattern))
+    patterns.iter().any(|pattern| normalized.starts_with(pattern))
 }
 
 fn normalize_for_hash(content: &str) -> String {
-    content
-        .replace("\r\n", "\n")
-        .replace('\r', "\n")
-        .trim()
-        .to_owned()
+    content.replace("\r\n", "\n").replace('\r', "\n").trim().to_owned()
 }

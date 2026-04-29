@@ -5,11 +5,10 @@ use axum::http::StatusCode;
 use axum::routing::{delete, get, post};
 
 use aionui_api_types::{
-    ApiResponse, ClientPreferencesResponse, CreateProviderRequest, DetectProtocolRequest,
-    FetchModelsAnonymousRequest, FetchModelsRequest, FetchModelsResponse,
-    ProtocolDetectionResponse, ProviderResponse, SystemInfoResponse, SystemSettingsResponse,
-    UpdateCheckRequest, UpdateCheckResult, UpdateClientPreferencesRequest, UpdateProviderRequest,
-    UpdateSettingsRequest,
+    ApiResponse, ClientPreferencesResponse, CreateProviderRequest, DetectProtocolRequest, FetchModelsAnonymousRequest,
+    FetchModelsRequest, FetchModelsResponse, ProtocolDetectionResponse, ProviderResponse, SystemInfoResponse,
+    SystemSettingsResponse, UpdateCheckRequest, UpdateCheckResult, UpdateClientPreferencesRequest,
+    UpdateProviderRequest, UpdateSettingsRequest,
 };
 use aionui_common::AppError;
 
@@ -62,10 +61,7 @@ pub fn system_routes(state: SystemRouterState) -> Router {
         // "fetch-models" as a provider id.
         .route("/api/providers/detect-protocol", post(detect_protocol))
         .route("/api/providers/fetch-models", post(fetch_models_anonymous))
-        .route(
-            "/api/providers/{id}",
-            delete(delete_provider).put(update_provider),
-        )
+        .route("/api/providers/{id}", delete(delete_provider).put(update_provider))
         .route("/api/providers/{id}/models", post(fetch_models))
         .route("/api/system/info", get(get_system_info))
         .route("/api/system/check-update", post(check_update))
@@ -117,14 +113,9 @@ async fn get_client_preferences(
             .collect()
     });
 
-    let key_refs: Option<Vec<&str>> = keys_filter
-        .as_ref()
-        .map(|v| v.iter().map(|s| s.as_str()).collect());
+    let key_refs: Option<Vec<&str>> = keys_filter.as_ref().map(|v| v.iter().map(|s| s.as_str()).collect());
 
-    let prefs = state
-        .client_pref_service
-        .get_preferences(key_refs.as_deref())
-        .await?;
+    let prefs = state.client_pref_service.get_preferences(key_refs.as_deref()).await?;
     Ok(Json(ApiResponse::ok(prefs)))
 }
 
@@ -190,10 +181,7 @@ async fn fetch_models_anonymous(
     body: Result<Json<FetchModelsAnonymousRequest>, JsonRejection>,
 ) -> Result<Json<ApiResponse<FetchModelsResponse>>, AppError> {
     let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
-    let result = state
-        .model_fetch_service
-        .fetch_models_anonymous(&req)
-        .await?;
+    let result = state.model_fetch_service.fetch_models_anonymous(&req).await?;
     Ok(Json(ApiResponse::ok(result)))
 }
 
@@ -202,10 +190,7 @@ async fn detect_protocol(
     body: Result<Json<DetectProtocolRequest>, JsonRejection>,
 ) -> Result<Json<ApiResponse<ProtocolDetectionResponse>>, AppError> {
     let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
-    let result = state
-        .protocol_detection_service
-        .detect_protocol(&req)
-        .await?;
+    let result = state.protocol_detection_service.detect_protocol(&req).await?;
     Ok(Json(ApiResponse::ok(result)))
 }
 

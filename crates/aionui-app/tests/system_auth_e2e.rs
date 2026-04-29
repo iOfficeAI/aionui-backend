@@ -31,10 +31,7 @@ async fn auth_required_patch_settings() {
 #[tokio::test]
 async fn auth_required_get_client_prefs() {
     let (app, _) = build_app().await;
-    let resp = app
-        .oneshot(get_request("/api/settings/client"))
-        .await
-        .unwrap();
+    let resp = app.oneshot(get_request("/api/settings/client")).await.unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
 }
 
@@ -65,7 +62,9 @@ async fn auth_required_post_providers() {
         .method("POST")
         .uri("/api/providers")
         .header("content-type", "application/json")
-        .body(Body::from(r#"{"platform":"openai","name":"Test","base_url":"https://api.openai.com","api_key":"sk-test"}"#))
+        .body(Body::from(
+            r#"{"platform":"openai","name":"Test","base_url":"https://api.openai.com","api_key":"sk-test"}"#,
+        ))
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);

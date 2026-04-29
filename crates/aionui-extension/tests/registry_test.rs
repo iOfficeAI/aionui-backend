@@ -12,8 +12,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use aionui_extension::{
-    ExtensionManifest, ExtensionRegistry, ExtensionSource, ExtensionState, ExtensionStateStore,
-    LoadedExtension, ScanPath, save_states_to_file,
+    ExtensionManifest, ExtensionRegistry, ExtensionSource, ExtensionState, ExtensionStateStore, LoadedExtension,
+    ScanPath, save_states_to_file,
 };
 use aionui_realtime::BroadcastEventBus;
 use tempfile::TempDir;
@@ -55,10 +55,7 @@ fn make_ext(name: &str, version: &str, enabled: bool) -> LoadedExtension {
 }
 
 /// Write extension fixture files to `ext_dir` and return scan paths for them.
-fn write_fixtures(
-    tmp: &TempDir,
-    extensions: &[LoadedExtension],
-) -> (std::path::PathBuf, Vec<ScanPath>) {
+fn write_fixtures(tmp: &TempDir, extensions: &[LoadedExtension]) -> (std::path::PathBuf, Vec<ScanPath>) {
     let ext_dir = tmp.path().join("extensions");
     std::fs::create_dir_all(&ext_dir).unwrap();
 
@@ -86,9 +83,7 @@ fn write_fixtures(
 }
 
 /// Create a registry pre-seeded with extensions (bypasses env var resolution).
-async fn seeded_registry(
-    extensions: Vec<LoadedExtension>,
-) -> (ExtensionRegistry, Arc<BroadcastEventBus>, TempDir) {
+async fn seeded_registry(extensions: Vec<LoadedExtension>) -> (ExtensionRegistry, Arc<BroadcastEventBus>, TempDir) {
     let tmp = TempDir::new().unwrap();
     let store = ExtensionStateStore::new(tmp.path().join("states.json"));
     let bus = Arc::new(BroadcastEventBus::new(64));
@@ -104,10 +99,7 @@ async fn seeded_registry(
     save_states_to_file(&tmp.path().join("states.json"), &states).unwrap();
 
     // Initialize using explicit scan paths — no env vars needed.
-    registry
-        .initialize_with_scan_paths(scan_paths)
-        .await
-        .unwrap();
+    registry.initialize_with_scan_paths(scan_paths).await.unwrap();
 
     (registry, bus, tmp)
 }
@@ -131,10 +123,7 @@ async fn eq1_get_loaded_extensions_empty() {
         path: empty_dir,
         source: ExtensionSource::Env,
     }];
-    registry
-        .initialize_with_scan_paths(scan_paths)
-        .await
-        .unwrap();
+    registry.initialize_with_scan_paths(scan_paths).await.unwrap();
 
     let exts = registry.get_loaded_extensions().await;
     assert!(exts.is_empty(), "expected empty extension list");
@@ -257,8 +246,7 @@ async fn hr3_hot_reload_emits_registry_reloaded() {
     // Should receive at least one lifecycle event for REGISTRY_RELOADED.
     // Drain events until we find it (there may be EXTENSION_ACTIVATED events first).
     let mut found_reload = false;
-    while let Ok(msg) = tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await
-    {
+    while let Ok(msg) = tokio::time::timeout(std::time::Duration::from_millis(500), rx.recv()).await {
         if let Ok(msg) = msg {
             if msg.name == "extensions.lifecycle" && msg.data["event"] == "REGISTRY_RELOADED" {
                 found_reload = true;
@@ -287,19 +275,13 @@ async fn hr3_hot_reload_preserves_disabled_state() {
     let (registry, _, _tmp) = seeded_registry(extensions).await;
 
     // Disable an extension, then hot-reload.
-    registry
-        .disable_extension("enabled-ext", None)
-        .await
-        .unwrap();
+    registry.disable_extension("enabled-ext", None).await.unwrap();
 
     registry.hot_reload().await;
 
     let exts = registry.get_loaded_extensions().await;
     let enabled = exts.iter().find(|e| e.name == "enabled-ext").unwrap();
-    assert!(
-        !enabled.enabled,
-        "disabled state should persist through reload"
-    );
+    assert!(!enabled.enabled, "disabled state should persist through reload");
 }
 
 // ---------------------------------------------------------------------------
@@ -333,10 +315,7 @@ async fn sp_enable_disable_persists_through_reload() {
     }];
 
     let registry = ExtensionRegistry::new(store.clone(), bus, "1.0.0".to_owned());
-    registry
-        .initialize_with_scan_paths(scan_paths.clone())
-        .await
-        .unwrap();
+    registry.initialize_with_scan_paths(scan_paths.clone()).await.unwrap();
 
     // Extension should be enabled by default (SP-3).
     let exts = registry.get_loaded_extensions().await;
@@ -356,17 +335,11 @@ async fn sp_enable_disable_persists_through_reload() {
     let store2 = ExtensionStateStore::new(state_path);
     let bus2 = Arc::new(BroadcastEventBus::new(16));
     let registry2 = ExtensionRegistry::new(store2, bus2, "1.0.0".to_owned());
-    registry2
-        .initialize_with_scan_paths(scan_paths)
-        .await
-        .unwrap();
+    registry2.initialize_with_scan_paths(scan_paths).await.unwrap();
 
     let exts2 = registry2.get_loaded_extensions().await;
     assert!(!exts2.is_empty(), "second registry should find extensions");
-    assert!(
-        !exts2[0].enabled,
-        "disabled state should persist across restarts"
-    );
+    assert!(!exts2[0].enabled, "disabled state should persist across restarts");
 }
 
 // ---------------------------------------------------------------------------
@@ -428,10 +401,7 @@ async fn initialize_sets_flag() {
         path: empty_dir,
         source: ExtensionSource::Env,
     }];
-    registry
-        .initialize_with_scan_paths(scan_paths)
-        .await
-        .unwrap();
+    registry.initialize_with_scan_paths(scan_paths).await.unwrap();
 
     assert!(registry.is_initialized().await);
 }

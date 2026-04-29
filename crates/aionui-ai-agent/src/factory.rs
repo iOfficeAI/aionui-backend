@@ -12,13 +12,10 @@ use crate::remote_agent::RemoteAgentConfig;
 use crate::skill_manager::AcpSkillManager;
 use crate::task_manager::AgentFactory;
 use crate::types::{
-    AcpBuildExtra, AionrsBuildExtra, AionrsCompatOverrides, AionrsResolvedConfig, BuildTaskOptions,
-    OpenClawBuildExtra, RemoteBuildExtra,
+    AcpBuildExtra, AionrsBuildExtra, AionrsCompatOverrides, AionrsResolvedConfig, BuildTaskOptions, OpenClawBuildExtra,
+    RemoteBuildExtra,
 };
-use crate::{
-    AcpAgentManager, AionrsAgentManager, NanobotAgentManager, OpenClawAgentManager,
-    RemoteAgentManager,
-};
+use crate::{AcpAgentManager, AionrsAgentManager, NanobotAgentManager, OpenClawAgentManager, RemoteAgentManager};
 
 /// Dependencies needed by the agent factory to construct agents.
 pub struct AgentFactoryDeps {
@@ -55,10 +52,7 @@ pub fn build_agent_factory(deps: AgentFactoryDeps) -> AgentFactory {
     })
 }
 
-async fn build_agent(
-    deps: Arc<AgentFactoryDeps>,
-    options: BuildTaskOptions,
-) -> Result<AgentManagerHandle, AppError> {
+async fn build_agent(deps: Arc<AgentFactoryDeps>, options: BuildTaskOptions) -> Result<AgentManagerHandle, AppError> {
     let conversation_id = options.conversation_id.clone();
     // `is_custom_workspace` is the authoritative signal for "user chose
     // this path" — determined here and plumbed down to the managers
@@ -104,11 +98,7 @@ async fn build_agent(
             } else {
                 None
             }
-            .ok_or_else(|| {
-                AppError::BadRequest(
-                    "ACP agent requires either agent_id or backend in extra".into(),
-                )
-            })?;
+            .ok_or_else(|| AppError::BadRequest("ACP agent requires either agent_id or backend in extra".into()))?;
 
             if config.backend.is_none() {
                 config.backend.clone_from(&meta.backend);
@@ -122,9 +112,9 @@ async fn build_agent(
             // spawn-time error.
             let (command, args, env) = {
                 (
-                    meta.resolved_command.clone().ok_or_else(|| {
-                        AppError::BadRequest(format!("Agent '{}' CLI not found in PATH", meta.name))
-                    })?,
+                    meta.resolved_command
+                        .clone()
+                        .ok_or_else(|| AppError::BadRequest(format!("Agent '{}' CLI not found in PATH", meta.name)))?,
                     meta.args.clone(),
                     meta.env
                         .iter()
@@ -165,17 +155,13 @@ async fn build_agent(
             // Hand the service a subscription to the manager's event
             // bus so it can persist per-session runtime state. Ownership
             // of the DB flows through the service, not the manager.
-            deps.acp_agent_service
-                .attach(conversation_id, handle.clone())
-                .await;
+            deps.acp_agent_service.attach(conversation_id, handle.clone()).await;
 
             Ok(handle)
         }
         AgentType::OpenclawGateway => {
-            let mut config: OpenClawBuildExtra =
-                serde_json::from_value(options.extra).map_err(|e| {
-                    AppError::BadRequest(format!("Invalid OpenClaw build options: {e}"))
-                })?;
+            let mut config: OpenClawBuildExtra = serde_json::from_value(options.extra)
+                .map_err(|e| AppError::BadRequest(format!("Invalid OpenClaw build options: {e}")))?;
 
             // OpenClaw lives in the catalog as an internal row; reuse
             // the registry-resolved path instead of re-running `which()`.
@@ -192,9 +178,7 @@ async fn build_agent(
             }
 
             let resume_session_key = config.session_key.clone();
-            let agent =
-                OpenClawAgentManager::new(conversation_id, workspace, config, resume_session_key)
-                    .await?;
+            let agent = OpenClawAgentManager::new(conversation_id, workspace, config, resume_session_key).await?;
             let arc = Arc::new(agent);
             arc.start_event_relay();
             Ok(arc as AgentManagerHandle)
@@ -219,15 +203,8 @@ async fn build_agent(
                 .remote_agent_repo
                 .find_by_id(&extra.remote_agent_id)
                 .await
-                .map_err(|e| {
-                    AppError::Internal(format!("Failed to load remote agent config: {e}"))
-                })?
-                .ok_or_else(|| {
-                    AppError::NotFound(format!(
-                        "Remote agent '{}' not found",
-                        extra.remote_agent_id
-                    ))
-                })?;
+                .map_err(|e| AppError::Internal(format!("Failed to load remote agent config: {e}")))?
+                .ok_or_else(|| AppError::NotFound(format!("Remote agent '{}' not found", extra.remote_agent_id)))?;
             let auth_token = row
                 .auth_token
                 .as_deref()
@@ -250,8 +227,7 @@ async fn build_agent(
             Ok(Arc::new(agent) as AgentManagerHandle)
         }
         AgentType::Aionrs => {
-            let overrides: AionrsBuildExtra =
-                serde_json::from_value(options.extra).unwrap_or_default();
+            let overrides: AionrsBuildExtra = serde_json::from_value(options.extra).unwrap_or_default();
 
             let provider_id = &options.model.provider_id;
             let row = deps
@@ -259,12 +235,9 @@ async fn build_agent(
                 .find_by_id(provider_id)
                 .await
                 .map_err(|e| AppError::Internal(format!("Failed to load provider config: {e}")))?
-                .ok_or_else(|| {
-                    AppError::BadRequest(format!("Provider '{provider_id}' not found"))
-                })?;
+                .ok_or_else(|| AppError::BadRequest(format!("Provider '{provider_id}' not found")))?;
 
-            let api_key =
-                aionui_common::decrypt_string(&row.api_key_encrypted, &deps.encryption_key)?;
+            let api_key = aionui_common::decrypt_string(&row.api_key_encrypted, &deps.encryption_key)?;
 
             let model_id = options
                 .model
@@ -274,11 +247,9 @@ async fn build_agent(
                 .unwrap_or(&options.model.model)
                 .to_owned();
 
-            let provider =
-                map_aionrs_provider(&row.platform, &model_id, row.model_protocols.as_deref());
+            let provider = map_aionrs_provider(&row.platform, &model_id, row.model_protocols.as_deref());
 
-            let (base_url, compat_overrides) =
-                resolve_aionrs_url_and_compat(&row.platform, &row.base_url, &provider);
+            let (base_url, compat_overrides) = resolve_aionrs_url_and_compat(&row.platform, &row.base_url, &provider);
 
             let session_directory = deps.data_dir.join("aionrs-sessions");
 
@@ -318,8 +289,7 @@ async fn build_agent(
                 session_mode: overrides.session_mode,
             };
 
-            let agent =
-                AionrsAgentManager::new(conversation_id, workspace, config, resume_session).await?;
+            let agent = AionrsAgentManager::new(conversation_id, workspace, config, resume_session).await?;
             Ok(Arc::new(agent) as AgentManagerHandle)
         }
     }
@@ -333,8 +303,7 @@ async fn build_agent(
 fn map_aionrs_provider(platform: &str, model_id: &str, model_protocols: Option<&str>) -> String {
     if platform == "new-api"
         && let Some(protocols_json) = model_protocols
-        && let Ok(map) =
-            serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(protocols_json)
+        && let Ok(map) = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(protocols_json)
         && let Some(serde_json::Value::String(protocol)) = map.get(model_id)
         && protocol == "anthropic"
     {
@@ -459,10 +428,7 @@ mod tests {
     #[test]
     fn map_aionrs_provider_custom_and_others_default_to_openai() {
         assert_eq!(map_aionrs_provider("custom", "gpt-4o", None), "openai");
-        assert_eq!(
-            map_aionrs_provider("gemini", "gemini-2.5-pro", None),
-            "openai"
-        );
+        assert_eq!(map_aionrs_provider("gemini", "gemini-2.5-pro", None), "openai");
         assert_eq!(map_aionrs_provider("new-api", "m", None), "openai");
         assert_eq!(map_aionrs_provider("unknown", "m", None), "openai");
     }
@@ -474,10 +440,7 @@ mod tests {
             map_aionrs_provider("new-api", "claude-sonnet", Some(protocols)),
             "anthropic"
         );
-        assert_eq!(
-            map_aionrs_provider("new-api", "gpt-4o", Some(protocols)),
-            "openai"
-        );
+        assert_eq!(map_aionrs_provider("new-api", "gpt-4o", Some(protocols)), "openai");
         assert_eq!(
             map_aionrs_provider("new-api", "unknown-model", Some(protocols)),
             "openai"
@@ -486,19 +449,13 @@ mod tests {
 
     #[test]
     fn map_aionrs_provider_new_api_with_invalid_json() {
-        assert_eq!(
-            map_aionrs_provider("new-api", "m", Some("not json")),
-            "openai"
-        );
+        assert_eq!(map_aionrs_provider("new-api", "m", Some("not json")), "openai");
     }
 
     #[test]
     fn map_aionrs_provider_non_new_api_ignores_protocols() {
         let protocols = r#"{"m":"anthropic"}"#;
-        assert_eq!(
-            map_aionrs_provider("custom", "m", Some(protocols)),
-            "openai"
-        );
+        assert_eq!(map_aionrs_provider("custom", "m", Some(protocols)), "openai");
     }
 
     #[test]
@@ -514,31 +471,23 @@ mod tests {
 
     #[test]
     fn resolve_openai_official_sets_max_completion_tokens() {
-        let (base_url, compat) =
-            resolve_aionrs_url_and_compat("custom", "https://api.openai.com/v1", "openai");
+        let (base_url, compat) = resolve_aionrs_url_and_compat("custom", "https://api.openai.com/v1", "openai");
         assert_eq!(base_url.as_deref(), Some("https://api.openai.com"));
-        assert_eq!(
-            compat.max_tokens_field.as_deref(),
-            Some("max_completion_tokens")
-        );
+        assert_eq!(compat.max_tokens_field.as_deref(), Some("max_completion_tokens"));
         assert!(compat.api_path.is_none());
     }
 
     #[test]
     fn resolve_non_openai_keeps_default_max_tokens() {
-        let (base_url, compat) =
-            resolve_aionrs_url_and_compat("custom", "https://api.deepseek.com/v1", "openai");
+        let (base_url, compat) = resolve_aionrs_url_and_compat("custom", "https://api.deepseek.com/v1", "openai");
         assert_eq!(base_url.as_deref(), Some("https://api.deepseek.com"));
         assert!(compat.max_tokens_field.is_none());
     }
 
     #[test]
     fn resolve_gemini_prepends_path_and_sets_api_path() {
-        let (base_url, compat) = resolve_aionrs_url_and_compat(
-            "gemini",
-            "https://generativelanguage.googleapis.com",
-            "openai",
-        );
+        let (base_url, compat) =
+            resolve_aionrs_url_and_compat("gemini", "https://generativelanguage.googleapis.com", "openai");
         assert_eq!(
             base_url.as_deref(),
             Some("https://generativelanguage.googleapis.com/v1beta/openai")
@@ -549,8 +498,7 @@ mod tests {
 
     #[test]
     fn resolve_anthropic_no_compat_overrides() {
-        let (base_url, compat) =
-            resolve_aionrs_url_and_compat("anthropic", "https://api.anthropic.com", "anthropic");
+        let (base_url, compat) = resolve_aionrs_url_and_compat("anthropic", "https://api.anthropic.com", "anthropic");
         assert_eq!(base_url.as_deref(), Some("https://api.anthropic.com"));
         assert!(compat.max_tokens_field.is_none());
         assert!(compat.api_path.is_none());

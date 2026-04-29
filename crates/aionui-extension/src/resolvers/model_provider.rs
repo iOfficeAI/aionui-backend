@@ -1,10 +1,7 @@
 use crate::types::{ExtModelProvider, ResolvedModelProvider};
 
 /// Resolve a single model provider contribution.
-pub fn resolve_model_provider(
-    provider: &ExtModelProvider,
-    extension_name: &str,
-) -> ResolvedModelProvider {
+pub fn resolve_model_provider(provider: &ExtModelProvider, extension_name: &str) -> ResolvedModelProvider {
     ResolvedModelProvider {
         extension_name: extension_name.to_owned(),
         id: provider.id.clone(),
@@ -17,10 +14,7 @@ pub fn resolve_model_provider(
 }
 
 /// Resolve all model provider contributions from an extension.
-pub fn resolve_model_providers(
-    providers: &[ExtModelProvider],
-    extension_name: &str,
-) -> Vec<ResolvedModelProvider> {
+pub fn resolve_model_providers(providers: &[ExtModelProvider], extension_name: &str) -> Vec<ResolvedModelProvider> {
     providers
         .iter()
         .map(|p| resolve_model_provider(p, extension_name))

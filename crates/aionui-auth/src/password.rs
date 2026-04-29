@@ -15,8 +15,7 @@ const UPPER: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const DIGITS: &[u8] = b"0123456789";
 const SPECIAL: &[u8] = b"!@#$%^&*";
 const ALPHANUMERIC_LOWER: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
-const ALL_PASSWORD_CHARS: &[u8] =
-    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
+const ALL_PASSWORD_CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*";
 
 /// Pre-computed dummy hash for timing attack prevention.
 static DUMMY_HASH: OnceLock<String> = OnceLock::new();
@@ -70,8 +69,7 @@ pub fn dummy_password_hash() -> &'static str {
     DUMMY_HASH.get_or_init(|| {
         // bcrypt hash of a fixed dummy input. This cannot fail for valid input;
         // if it does, the bcrypt implementation is fundamentally broken.
-        bcrypt::hash("__aionui_dummy_password__", BCRYPT_COST)
-            .expect("bcrypt hash of constant input must succeed")
+        bcrypt::hash("__aionui_dummy_password__", BCRYPT_COST).expect("bcrypt hash of constant input must succeed")
     })
 }
 

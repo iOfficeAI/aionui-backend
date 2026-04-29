@@ -27,10 +27,7 @@ impl SttService {
 
         match config.provider {
             SpeechToTextProvider::Openai => {
-                let openai_config = config
-                    .openai
-                    .as_ref()
-                    .ok_or(SttError::OpenaiNotConfigured)?;
+                let openai_config = config.openai.as_ref().ok_or(SttError::OpenaiNotConfigured)?;
                 stt_openai::transcribe(
                     &self.client,
                     openai_config,
@@ -42,18 +39,8 @@ impl SttService {
                 .await
             }
             SpeechToTextProvider::Deepgram => {
-                let deepgram_config = config
-                    .deepgram
-                    .as_ref()
-                    .ok_or(SttError::DeepgramNotConfigured)?;
-                stt_deepgram::transcribe(
-                    &self.client,
-                    deepgram_config,
-                    audio_data,
-                    mime_type,
-                    language_hint,
-                )
-                .await
+                let deepgram_config = config.deepgram.as_ref().ok_or(SttError::DeepgramNotConfigured)?;
+                stt_deepgram::transcribe(&self.client, deepgram_config, audio_data, mime_type, language_hint).await
             }
         }
     }
@@ -113,13 +100,7 @@ mod tests {
     async fn disabled_config_returns_disabled_error() {
         let svc = SttService::new(Client::new());
         let result = svc
-            .transcribe(
-                vec![0u8; 10],
-                "test.wav",
-                "audio/wav",
-                None,
-                &make_disabled_config(),
-            )
+            .transcribe(vec![0u8; 10], "test.wav", "audio/wav", None, &make_disabled_config())
             .await;
         assert!(matches!(result, Err(SttError::Disabled)));
     }

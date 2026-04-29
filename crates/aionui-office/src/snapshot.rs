@@ -22,10 +22,7 @@ impl SnapshotService {
         }
     }
 
-    pub async fn list(
-        &self,
-        target: &PreviewHistoryTargetDto,
-    ) -> Result<Vec<PreviewSnapshotInfoDto>, OfficeError> {
+    pub async fn list(&self, target: &PreviewHistoryTargetDto) -> Result<Vec<PreviewSnapshotInfoDto>, OfficeError> {
         let dir = self.target_dir(target);
         let index_path = dir.join(INDEX_FILE);
 
@@ -207,11 +204,7 @@ fn format_label(timestamp_ms: i64) -> String {
     let mut month = 0;
     let mut day = days;
     for (i, &md) in month_days.iter().enumerate() {
-        let md = if i == 1 && is_leap_year(year) {
-            md + 1
-        } else {
-            md
-        };
+        let md = if i == 1 && is_leap_year(year) { md + 1 } else { md };
         if day < md {
             month = i + 1;
             break;
@@ -223,10 +216,7 @@ fn format_label(timestamp_ms: i64) -> String {
         month = 12;
     }
 
-    format!(
-        "{year:04}-{month:02}-{:02} {hours:02}:{minutes:02}",
-        day + 1,
-    )
+    format!("{year:04}-{month:02}-{:02} {hours:02}:{minutes:02}", day + 1,)
 }
 
 fn is_leap_year(year: i64) -> bool {
@@ -454,10 +444,7 @@ mod tests {
         assert_eq!(list2.len(), 2);
     }
 
-    fn make_target(
-        content_type: PreviewContentType,
-        file_path: Option<&str>,
-    ) -> PreviewHistoryTargetDto {
+    fn make_target(content_type: PreviewContentType, file_path: Option<&str>) -> PreviewHistoryTargetDto {
         PreviewHistoryTargetDto {
             content_type,
             file_path: file_path.map(String::from),

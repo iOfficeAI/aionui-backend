@@ -8,9 +8,7 @@ use axum::http::StatusCode;
 use serde_json::json;
 use tower::ServiceExt;
 
-use common::{
-    body_json, build_app, delete_with_token, get_with_token, json_with_token, setup_and_login,
-};
+use common::{body_json, build_app, delete_with_token, get_with_token, json_with_token, setup_and_login};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -58,13 +56,7 @@ async fn create_stdio_server() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
-    let req = json_with_token(
-        "POST",
-        "/api/mcp/servers",
-        stdio_server_json("test-mcp"),
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("POST", "/api/mcp/servers", stdio_server_json("test-mcp"), &token, &csrf);
     let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
 
@@ -86,13 +78,7 @@ async fn create_http_server() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
-    let req = json_with_token(
-        "POST",
-        "/api/mcp/servers",
-        http_server_json("http-mcp"),
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("POST", "/api/mcp/servers", http_server_json("http-mcp"), &token, &csrf);
     let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
 
@@ -106,22 +92,13 @@ async fn create_sse_server_with_headers() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
-    let req = json_with_token(
-        "POST",
-        "/api/mcp/servers",
-        sse_server_json("sse-mcp"),
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("POST", "/api/mcp/servers", sse_server_json("sse-mcp"), &token, &csrf);
     let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
 
     let json = body_json(resp).await;
     assert_eq!(json["data"]["transport"]["type"], "sse");
-    assert_eq!(
-        json["data"]["transport"]["headers"]["Authorization"],
-        "Bearer xxx"
-    );
+    assert_eq!(json["data"]["transport"]["headers"]["Authorization"], "Bearer xxx");
 }
 
 // ===========================================================================
@@ -185,13 +162,7 @@ async fn create_missing_transport_returns_400() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
-    let req = json_with_token(
-        "POST",
-        "/api/mcp/servers",
-        json!({ "name": "test" }),
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("POST", "/api/mcp/servers", json!({ "name": "test" }), &token, &csrf);
     let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
@@ -314,13 +285,7 @@ async fn list_servers_returns_all() {
 
     // Create two servers
     for name in ["list-a", "list-b"] {
-        let req = json_with_token(
-            "POST",
-            "/api/mcp/servers",
-            stdio_server_json(name),
-            &token,
-            &csrf,
-        );
+        let req = json_with_token("POST", "/api/mcp/servers", stdio_server_json(name), &token, &csrf);
         app.clone().oneshot(req).await.unwrap();
     }
 
@@ -359,13 +324,7 @@ async fn update_server_name() {
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
     // Create
-    let req = json_with_token(
-        "POST",
-        "/api/mcp/servers",
-        stdio_server_json("old-name"),
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("POST", "/api/mcp/servers", stdio_server_json("old-name"), &token, &csrf);
     let resp = app.clone().oneshot(req).await.unwrap();
     let json = body_json(resp).await;
     let id = json["data"]["id"].as_str().unwrap().to_string();
@@ -467,22 +426,10 @@ async fn update_name_to_existing_returns_409() {
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
     // Create A and B
-    let req = json_with_token(
-        "POST",
-        "/api/mcp/servers",
-        stdio_server_json("server-a"),
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("POST", "/api/mcp/servers", stdio_server_json("server-a"), &token, &csrf);
     app.clone().oneshot(req).await.unwrap();
 
-    let req = json_with_token(
-        "POST",
-        "/api/mcp/servers",
-        stdio_server_json("server-b"),
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("POST", "/api/mcp/servers", stdio_server_json("server-b"), &token, &csrf);
     let resp = app.clone().oneshot(req).await.unwrap();
     let json = body_json(resp).await;
     let b_id = json["data"]["id"].as_str().unwrap().to_string();
@@ -597,13 +544,7 @@ async fn toggle_nonexistent_server_returns_404() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
-    let req = json_with_token(
-        "POST",
-        "/api/mcp/servers/nonexistent/toggle",
-        json!({}),
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("POST", "/api/mcp/servers/nonexistent/toggle", json!({}), &token, &csrf);
     let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
@@ -642,13 +583,7 @@ async fn batch_import_upserts_existing() {
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
     // Create one first
-    let req = json_with_token(
-        "POST",
-        "/api/mcp/servers",
-        stdio_server_json("existing"),
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("POST", "/api/mcp/servers", stdio_server_json("existing"), &token, &csrf);
     app.clone().oneshot(req).await.unwrap();
 
     // Batch import with one existing and one new

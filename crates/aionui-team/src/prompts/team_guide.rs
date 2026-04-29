@@ -70,11 +70,7 @@ Use **only** `aion_create_team` and `aion_list_models` for team operations. Do N
 ///   mirroring the `rawLabel ? "${rawLabel} (${agentType})" : agentType` branch
 ///   in `teamGuidePrompt.ts`. Whitespace-only labels are treated as absent.
 pub fn build_team_guide_prompt(backend: &str, leader_label: Option<&str>) -> String {
-    let agent_type = if backend.is_empty() {
-        "claude"
-    } else {
-        backend
-    };
+    let agent_type = if backend.is_empty() { "claude" } else { backend };
     let raw_label = leader_label.map(str::trim).filter(|s| !s.is_empty());
     let leader_cell = match raw_label {
         Some(label) => format!("{label} ({agent_type})"),
@@ -83,10 +79,7 @@ pub fn build_team_guide_prompt(backend: &str, leader_label: Option<&str>) -> Str
 
     TEAM_GUIDE_PROMPT_TEMPLATE
         .replace("{solo_default_rule}", SOLO_DEFAULT_RULE)
-        .replace(
-            "{explicit_team_request_criteria}",
-            EXPLICIT_TEAM_REQUEST_CRITERIA,
-        )
+        .replace("{explicit_team_request_criteria}", EXPLICIT_TEAM_REQUEST_CRITERIA)
         .replace("{extreme_complexity_criteria}", EXTREME_COMPLEXITY_CRITERIA)
         .replace("{stay_solo_criteria}", STAY_SOLO_CRITERIA)
         .replace("{leader_cell}", &leader_cell)
@@ -146,10 +139,7 @@ Use **only** `aion_create_team` and `aion_list_models` for team operations. Do N
     #[test]
     fn team_guide_prompt_with_preset_leader_label() {
         let prompt = build_team_guide_prompt("gemini", Some("Word Creator"));
-        assert!(
-            prompt
-                .contains("| Leader | Coordinate and review | Word Creator (gemini) | (default) |")
-        );
+        assert!(prompt.contains("| Leader | Coordinate and review | Word Creator (gemini) | (default) |"));
         assert!(prompt.contains("| Developer | Implement features | gemini | (model from list) |"));
         assert!(prompt.contains("| Tester | Write and run tests | gemini | (model from list) |"));
         assert!(!prompt.contains("{leader_cell}"));

@@ -5,8 +5,8 @@ use axum::http::StatusCode;
 use axum::routing::{get, post};
 
 use aionui_api_types::{
-    ApiResponse, CreateRemoteAgentRequest, HandshakeResponse, RemoteAgentListItem,
-    RemoteAgentResponse, TestRemoteAgentConnectionRequest, UpdateRemoteAgentRequest,
+    ApiResponse, CreateRemoteAgentRequest, HandshakeResponse, RemoteAgentListItem, RemoteAgentResponse,
+    TestRemoteAgentConnectionRequest, UpdateRemoteAgentRequest,
 };
 use aionui_auth::CurrentUser;
 use aionui_common::AppError;
@@ -26,10 +26,7 @@ pub fn remote_agent_routes(state: RemoteAgentRouterState) -> Router {
     Router::new()
         .route("/api/remote-agents", get(list).post(create))
         .route("/api/remote-agents/test-connection", post(test_connection))
-        .route(
-            "/api/remote-agents/{id}",
-            get(get_one).put(update).delete(delete_one),
-        )
+        .route("/api/remote-agents/{id}", get(get_one).put(update).delete(delete_one))
         .route("/api/remote-agents/{id}/handshake", post(handshake))
         .with_state(state)
 }

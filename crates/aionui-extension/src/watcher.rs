@@ -87,10 +87,7 @@ impl Drop for ExtensionWatcher {
 
 /// Create a `RecommendedWatcher` that sends a unit signal for every relevant
 /// file-system event.
-fn create_watcher(
-    tx: mpsc::Sender<()>,
-    directories: &[PathBuf],
-) -> Result<RecommendedWatcher, notify::Error> {
+fn create_watcher(tx: mpsc::Sender<()>, directories: &[PathBuf]) -> Result<RecommendedWatcher, notify::Error> {
     let mut watcher = RecommendedWatcher::new(
         move |result: Result<Event, notify::Error>| {
             match result {
@@ -149,11 +146,7 @@ fn is_relevant_event(event: &Event) -> bool {
 
 /// Consume raw FS event signals, debounce by [`DEBOUNCE_MS`], and trigger
 /// `registry.hot_reload()`.
-async fn debounce_loop(
-    mut rx: mpsc::Receiver<()>,
-    registry: ExtensionRegistry,
-    shutdown: Arc<Notify>,
-) {
+async fn debounce_loop(mut rx: mpsc::Receiver<()>, registry: ExtensionRegistry, shutdown: Arc<Notify>) {
     let debounce = Duration::from_millis(DEBOUNCE_MS);
 
     loop {

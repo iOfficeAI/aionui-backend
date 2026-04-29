@@ -1,7 +1,6 @@
 use aionui_db::{
-    ConversationFilters, ConversationRowUpdate, IConversationRepository, MessageRowUpdate,
-    SortOrder, SqliteConversationRepository, init_database_memory, models::ConversationRow,
-    models::MessageRow,
+    ConversationFilters, ConversationRowUpdate, IConversationRepository, MessageRowUpdate, SortOrder,
+    SqliteConversationRepository, init_database_memory, models::ConversationRow, models::MessageRow,
 };
 
 const USER_ID: &str = "system_default_user";
@@ -116,19 +115,13 @@ async fn delete_conversation_cascades_messages() {
     }
 
     // Verify messages exist
-    let msgs = repo
-        .get_messages(&conv.id, 1, 50, SortOrder::Desc)
-        .await
-        .unwrap();
+    let msgs = repo.get_messages(&conv.id, 1, 50, SortOrder::Desc).await.unwrap();
     assert_eq!(msgs.total, 3);
 
     // Delete conversation → messages cascade
     repo.delete(&conv.id).await.unwrap();
 
-    let msgs = repo
-        .get_messages(&conv.id, 1, 50, SortOrder::Desc)
-        .await
-        .unwrap();
+    let msgs = repo.get_messages(&conv.id, 1, 50, SortOrder::Desc).await.unwrap();
     assert_eq!(msgs.total, 0);
 }
 
@@ -406,20 +399,14 @@ async fn message_pagination_and_ordering() {
     }
 
     // DESC page 1
-    let p1 = repo
-        .get_messages(&conv.id, 1, 3, SortOrder::Desc)
-        .await
-        .unwrap();
+    let p1 = repo.get_messages(&conv.id, 1, 3, SortOrder::Desc).await.unwrap();
     assert_eq!(p1.items.len(), 3);
     assert_eq!(p1.total, 10);
     assert!(p1.has_more);
     assert!(p1.items[0].created_at > p1.items[1].created_at);
 
     // ASC page 1
-    let asc = repo
-        .get_messages(&conv.id, 1, 3, SortOrder::Asc)
-        .await
-        .unwrap();
+    let asc = repo.get_messages(&conv.id, 1, 3, SortOrder::Asc).await.unwrap();
     assert!(asc.items[0].created_at < asc.items[1].created_at);
 }
 
@@ -443,10 +430,7 @@ async fn update_message_fields() {
     .await
     .unwrap();
 
-    let msgs = repo
-        .get_messages(&conv.id, 1, 50, SortOrder::Desc)
-        .await
-        .unwrap();
+    let msgs = repo.get_messages(&conv.id, 1, 50, SortOrder::Desc).await.unwrap();
     let updated = &msgs.items[0];
     assert_eq!(updated.content, r#"{"content":"modified"}"#);
     assert!(updated.hidden);
@@ -464,14 +448,9 @@ async fn delete_messages_by_conversation_clears_all() {
         repo.insert_message(&msg).await.unwrap();
     }
 
-    repo.delete_messages_by_conversation(&conv.id)
-        .await
-        .unwrap();
+    repo.delete_messages_by_conversation(&conv.id).await.unwrap();
 
-    let result = repo
-        .get_messages(&conv.id, 1, 50, SortOrder::Desc)
-        .await
-        .unwrap();
+    let result = repo.get_messages(&conv.id, 1, 50, SortOrder::Desc).await.unwrap();
     assert!(result.items.is_empty());
     assert_eq!(result.total, 0);
 }
@@ -569,25 +548,16 @@ async fn search_messages_pagination() {
         repo.insert_message(&msg).await.unwrap();
     }
 
-    let p1 = repo
-        .search_messages(USER_ID, "searchable", 1, 2)
-        .await
-        .unwrap();
+    let p1 = repo.search_messages(USER_ID, "searchable", 1, 2).await.unwrap();
     assert_eq!(p1.items.len(), 2);
     assert_eq!(p1.total, 5);
     assert!(p1.has_more);
 
-    let p2 = repo
-        .search_messages(USER_ID, "searchable", 2, 2)
-        .await
-        .unwrap();
+    let p2 = repo.search_messages(USER_ID, "searchable", 2, 2).await.unwrap();
     assert_eq!(p2.items.len(), 2);
     assert!(p2.has_more);
 
-    let p3 = repo
-        .search_messages(USER_ID, "searchable", 3, 2)
-        .await
-        .unwrap();
+    let p3 = repo.search_messages(USER_ID, "searchable", 3, 2).await.unwrap();
     assert_eq!(p3.items.len(), 1);
     assert!(!p3.has_more);
 }
@@ -665,10 +635,7 @@ async fn delete_nonexistent_conversation_returns_not_found() {
 #[tokio::test]
 async fn list_associated_nonexistent_returns_not_found() {
     let (repo, _db) = setup().await;
-    let err = repo
-        .list_associated(USER_ID, "nonexistent_id")
-        .await
-        .unwrap_err();
+    let err = repo.list_associated(USER_ID, "nonexistent_id").await.unwrap_err();
     assert!(matches!(err, aionui_db::DbError::NotFound(_)));
 }
 
@@ -718,14 +685,9 @@ async fn get_messages_excludes_legacy_cron_and_skill_suggest_rows() {
     let conv = make_conversation("message-filter");
     repo.create(&conv).await.unwrap();
 
-    repo.insert_message(&make_message(&conv.id, "visible"))
-        .await
-        .unwrap();
+    repo.insert_message(&make_message(&conv.id, "visible")).await.unwrap();
 
-    for (id, ty) in [
-        ("legacy-cron", "cron_trigger"),
-        ("legacy-skill", "skill_suggest"),
-    ] {
+    for (id, ty) in [("legacy-cron", "cron_trigger"), ("legacy-skill", "skill_suggest")] {
         repo.insert_message(&MessageRow {
             id: id.into(),
             conversation_id: conv.id.clone(),
@@ -741,10 +703,7 @@ async fn get_messages_excludes_legacy_cron_and_skill_suggest_rows() {
         .unwrap();
     }
 
-    let rows = repo
-        .get_messages(&conv.id, 1, 50, SortOrder::Asc)
-        .await
-        .unwrap();
+    let rows = repo.get_messages(&conv.id, 1, 50, SortOrder::Asc).await.unwrap();
     assert_eq!(rows.total, 1);
     assert_eq!(rows.items.len(), 1);
     assert_eq!(rows.items[0].r#type, "text");
@@ -773,10 +732,7 @@ async fn list_legacy_cron_trigger_messages_returns_only_trigger_rows() {
         .await
         .unwrap();
 
-    let rows = repo
-        .list_legacy_cron_trigger_messages(&conv.id)
-        .await
-        .unwrap();
+    let rows = repo.list_legacy_cron_trigger_messages(&conv.id).await.unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].r#type, "cron_trigger");
 }
@@ -806,10 +762,7 @@ async fn artifact_upsert_list_and_mark_saved() {
     assert_eq!(dismissed.status, "dismissed");
     assert_eq!(dismissed.updated_at, 2000);
 
-    let saved = repo
-        .mark_skill_suggest_artifacts_saved("cron_1", 3000)
-        .await
-        .unwrap();
+    let saved = repo.mark_skill_suggest_artifacts_saved("cron_1", 3000).await.unwrap();
     assert_eq!(saved.len(), 1);
     assert_eq!(saved[0].status, "saved");
     assert_eq!(saved[0].updated_at, 3000);
@@ -826,9 +779,7 @@ async fn delete_artifacts_by_conversation_removes_rows() {
         .await
         .unwrap();
 
-    repo.delete_artifacts_by_conversation(&conv.id)
-        .await
-        .unwrap();
+    repo.delete_artifacts_by_conversation(&conv.id).await.unwrap();
 
     let listed = repo.list_artifacts(&conv.id).await.unwrap();
     assert!(listed.is_empty());

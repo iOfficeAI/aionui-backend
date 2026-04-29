@@ -8,9 +8,7 @@ use tower::ServiceExt;
 use wiremock::matchers::{header as match_header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use common::{
-    body_json, build_app, delete_with_token, get_with_token, json_with_token, setup_and_login,
-};
+use common::{body_json, build_app, delete_with_token, get_with_token, json_with_token, setup_and_login};
 
 // ===========================================================================
 // Provider CRUD
@@ -82,20 +80,13 @@ async fn provider_full_crud_with_auth() {
     // 5. Delete
     let resp = app
         .clone()
-        .oneshot(delete_with_token(
-            &format!("/api/providers/{id}"),
-            &token,
-            &csrf,
-        ))
+        .oneshot(delete_with_token(&format!("/api/providers/{id}"), &token, &csrf))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
     // 6. Verify deleted
-    let resp = app
-        .oneshot(get_with_token("/api/providers", &token))
-        .await
-        .unwrap();
+    let resp = app.oneshot(get_with_token("/api/providers", &token)).await.unwrap();
     let json = body_json(resp).await;
     assert_eq!(json["data"], json!([]));
 }
@@ -133,13 +124,7 @@ async fn provider_update_nonexistent_with_auth() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
-    let req = json_with_token(
-        "PUT",
-        "/api/providers/nonexistent",
-        json!({"name": "X"}),
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("PUT", "/api/providers/nonexistent", json!({"name": "X"}), &token, &csrf);
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
@@ -150,11 +135,7 @@ async fn provider_delete_nonexistent_with_auth() {
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
     let resp = app
-        .oneshot(delete_with_token(
-            "/api/providers/nonexistent",
-            &token,
-            &csrf,
-        ))
+        .oneshot(delete_with_token("/api/providers/nonexistent", &token, &csrf))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
@@ -215,13 +196,7 @@ async fn model_fetch_nonexistent_provider_with_auth() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
-    let req = json_with_token(
-        "POST",
-        "/api/providers/nonexistent/models",
-        json!({}),
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("POST", "/api/providers/nonexistent/models", json!({}), &token, &csrf);
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }

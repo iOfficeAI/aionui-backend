@@ -10,17 +10,15 @@ use crate::constants::DINGTALK_MESSAGE_LIMIT;
 use crate::error::ChannelError;
 use crate::plugin::{ChannelPlugin, PluginCallbacks};
 use crate::types::{
-    ActionCategory, ActionContext, BotInfo, MessageContentType, PluginConfig, PluginStatus,
-    PluginType, UnifiedAction, UnifiedIncomingMessage, UnifiedMessageContent,
-    UnifiedOutgoingMessage, UnifiedUser,
+    ActionCategory, ActionContext, BotInfo, MessageContentType, PluginConfig, PluginStatus, PluginType, UnifiedAction,
+    UnifiedIncomingMessage, UnifiedMessageContent, UnifiedOutgoingMessage, UnifiedUser,
 };
 
 use super::api::DingtalkApi;
 use super::types::{
-    BotMessageCallback, CardActionCallback, CardData, CreateCardInstanceRequest,
-    DeliverCardRequest, ImGroupDeliverModel, ImRobotDeliverModel, SendRobotMessageRequest,
-    StreamAck, StreamFrame, StreamingWriteRequest, SystemEvent, UpdateCardRequest,
-    build_open_space_id, decode_chat_id, encode_chat_id, format_dingtalk_callback,
+    BotMessageCallback, CardActionCallback, CardData, CreateCardInstanceRequest, DeliverCardRequest,
+    ImGroupDeliverModel, ImRobotDeliverModel, SendRobotMessageRequest, StreamAck, StreamFrame, StreamingWriteRequest,
+    SystemEvent, UpdateCardRequest, build_open_space_id, decode_chat_id, encode_chat_id, format_dingtalk_callback,
     parse_dingtalk_callback,
 };
 
@@ -68,11 +66,7 @@ impl DingtalkPlugin {
 
 #[async_trait::async_trait]
 impl ChannelPlugin for DingtalkPlugin {
-    async fn initialize(
-        &mut self,
-        config: PluginConfig,
-        callbacks: PluginCallbacks,
-    ) -> Result<(), ChannelError> {
+    async fn initialize(&mut self, config: PluginConfig, callbacks: PluginCallbacks) -> Result<(), ChannelError> {
         self.status = PluginStatus::Initializing;
 
         let client_id = config
@@ -170,20 +164,13 @@ impl ChannelPlugin for DingtalkPlugin {
         Ok(())
     }
 
-    async fn send_message(
-        &self,
-        chat_id: &str,
-        message: UnifiedOutgoingMessage,
-    ) -> Result<String, ChannelError> {
+    async fn send_message(&self, chat_id: &str, message: UnifiedOutgoingMessage) -> Result<String, ChannelError> {
         let api = self
             .api
             .as_ref()
             .ok_or_else(|| ChannelError::PlatformApi("Plugin not initialized".into()))?;
 
-        let text = truncate_message(
-            message.text.as_deref().unwrap_or(""),
-            DINGTALK_MESSAGE_LIMIT,
-        );
+        let text = truncate_message(message.text.as_deref().unwrap_or(""), DINGTALK_MESSAGE_LIMIT);
 
         // Try AI Card first
         match send_via_ai_card(api, chat_id, &text, message.buttons.as_deref()).await {
@@ -208,10 +195,7 @@ impl ChannelPlugin for DingtalkPlugin {
             .as_ref()
             .ok_or_else(|| ChannelError::PlatformApi("Plugin not initialized".into()))?;
 
-        let text = truncate_message(
-            message.text.as_deref().unwrap_or(""),
-            DINGTALK_MESSAGE_LIMIT,
-        );
+        let text = truncate_message(message.text.as_deref().unwrap_or(""), DINGTALK_MESSAGE_LIMIT);
 
         // Presence of buttons signals the final message in a streaming sequence.
         let is_final = message.buttons.is_some();
@@ -303,9 +287,7 @@ async fn send_via_ai_card(
     let card_id = create_resp
         .result
         .and_then(|r| r.out_track_id)
-        .ok_or_else(|| {
-            ChannelError::MessageSendFailed("DingTalk card create returned no outTrackId".into())
-        })?;
+        .ok_or_else(|| ChannelError::MessageSendFailed("DingTalk card create returned no outTrackId".into()))?;
 
     // Deliver the card
     let open_space_id = build_open_space_id(chat_id);
@@ -336,22 +318,14 @@ async fn send_via_ai_card(
 }
 
 /// Send a message via DingTalk Open API (fallback).
-async fn send_via_open_api(
-    api: &Arc<DingtalkApi>,
-    chat_id: &str,
-    text: &str,
-) -> Result<String, ChannelError> {
+async fn send_via_open_api(api: &Arc<DingtalkApi>, chat_id: &str, text: &str) -> Result<String, ChannelError> {
     let (is_group, raw_id) = decode_chat_id(chat_id);
 
     let req = SendRobotMessageRequest {
         msg_key: "sampleText".into(),
         msg_param: serde_json::json!({ "content": text }).to_string(),
         robot_code: api.client_id().to_string(),
-        open_conversation_id: if is_group {
-            Some(raw_id.to_string())
-        } else {
-            None
-        },
+        open_conversation_id: if is_group { Some(raw_id.to_string()) } else { None },
         user_ids: if !is_group {
             Some(vec![raw_id.to_string()])
         } else {
@@ -367,10 +341,7 @@ async fn send_via_open_api(
 }
 
 /// Build the card_param_map for an AI Card.
-fn build_card_param_map(
-    text: &str,
-    buttons: Option<&[Vec<crate::types::ActionButton>]>,
-) -> serde_json::Value {
+fn build_card_param_map(text: &str, buttons: Option<&[Vec<crate::types::ActionButton>]>) -> serde_json::Value {
     let mut map = serde_json::json!({
         "content": text
     });
@@ -623,8 +594,7 @@ async fn handle_bot_message(data_str: &str, message_tx: &mpsc::Sender<UnifiedInc
         avatar_url: None,
     };
 
-    let (content_type, text) =
-        extract_message_content(cb.msgtype.as_deref().unwrap_or("text"), &cb);
+    let (content_type, text) = extract_message_content(cb.msgtype.as_deref().unwrap_or("text"), &cb);
 
     let timestamp = cb.create_at.map(|ms| ms / 1000).unwrap_or_else(chrono_now);
 
@@ -795,9 +765,7 @@ fn truncate_message(text: &str, limit: usize) -> String {
 
 /// Calculate exponential backoff delay, capped at the maximum.
 fn backoff_delay(attempt: u32) -> Duration {
-    let delay_secs = 2u64
-        .saturating_pow(attempt)
-        .min(MAX_RECONNECT_DELAY.as_secs());
+    let delay_secs = 2u64.saturating_pow(attempt).min(MAX_RECONNECT_DELAY.as_secs());
     Duration::from_secs(delay_secs)
 }
 
@@ -974,12 +942,7 @@ mod tests {
         assert_eq!(map["content"], "Choose:");
         let actions = map["actions"].as_array().unwrap();
         assert_eq!(actions[0]["label"], "Yes");
-        assert!(
-            actions[0]["action"]
-                .as_str()
-                .unwrap()
-                .contains("system.confirm")
-        );
+        assert!(actions[0]["action"].as_str().unwrap().contains("system.confirm"));
     }
 
     // -- build_ack ----------------------------------------------------------
@@ -1030,10 +993,7 @@ mod tests {
         let result = plugin.edit_message("chat1", "msg1", msg).await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(
-            err.contains("not initialized"),
-            "expected init error: {err}"
-        );
+        assert!(err.contains("not initialized"), "expected init error: {err}");
     }
 
     // -- send_message: not initialized guard -----------------------------------
@@ -1057,10 +1017,7 @@ mod tests {
         let result = plugin.send_message("chat1", msg).await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(
-            err.contains("not initialized"),
-            "expected init error: {err}"
-        );
+        assert!(err.contains("not initialized"), "expected init error: {err}");
     }
 
     // -- DingtalkPlugin constructor -----------------------------------------

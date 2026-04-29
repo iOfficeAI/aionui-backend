@@ -53,10 +53,7 @@ impl ProxyService {
             .build()
             .expect("failed to build proxy HTTP client");
 
-        Self {
-            watch_manager,
-            client,
-        }
+        Self { watch_manager, client }
     }
 
     pub async fn forward(
@@ -70,8 +67,7 @@ impl ProxyService {
             return Err(ProxyError::PortNotActive(port));
         }
         let proxy_base = format!("/api/{}/{}", doc_type.proxy_prefix(), port);
-        self.forward_inner(port, path, &proxy_base, request_headers)
-            .await
+        self.forward_inner(port, path, &proxy_base, request_headers).await
     }
 
     pub async fn forward_watch(
@@ -84,8 +80,7 @@ impl ProxyService {
             return Err(ProxyError::PortNotActive(port));
         }
         let proxy_base = format!("/api/office-watch-proxy/{port}");
-        self.forward_inner(port, path, &proxy_base, request_headers)
-            .await
+        self.forward_inner(port, path, &proxy_base, request_headers).await
     }
 
     async fn forward_inner(
@@ -112,10 +107,7 @@ impl ProxyService {
             if lower == "host" {
                 continue;
             }
-            if let (Ok(name), Ok(val)) = (
-                HeaderName::from_bytes(lower.as_bytes()),
-                HeaderValue::from_str(value),
-            ) {
+            if let (Ok(name), Ok(val)) = (HeaderName::from_bytes(lower.as_bytes()), HeaderValue::from_str(value)) {
                 req_headers.insert(name, val);
             }
         }
@@ -244,9 +236,7 @@ fn rewrite_location(location: &str, port: u16, proxy_base: &str) -> String {
     };
 
     if rewritten == "/"
-        || (rewritten.starts_with('/')
-            && !rewritten.starts_with("//")
-            && !rewritten.starts_with(proxy_base))
+        || (rewritten.starts_with('/') && !rewritten.starts_with("//") && !rewritten.starts_with(proxy_base))
     {
         if rewritten == "/" {
             format!("{proxy_base}/")
@@ -292,10 +282,7 @@ mod tests {
 
     #[test]
     fn build_target_url_without_leading_slash() {
-        assert_eq!(
-            build_target_url(8080, "index.html"),
-            "http://127.0.0.1:8080/index.html"
-        );
+        assert_eq!(build_target_url(8080, "index.html"), "http://127.0.0.1:8080/index.html");
     }
 
     #[test]
@@ -325,10 +312,7 @@ mod tests {
     #[test]
     fn is_html_content_type_detects_html() {
         let mut headers = HeaderMap::new();
-        headers.insert(
-            CONTENT_TYPE,
-            HeaderValue::from_static("text/html; charset=utf-8"),
-        );
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("text/html; charset=utf-8"));
         assert!(is_html_content_type(&headers));
     }
 
@@ -347,21 +331,13 @@ mod tests {
 
     #[test]
     fn rewrite_location_localhost_absolute() {
-        let result = rewrite_location(
-            "http://localhost:8080/new/path",
-            8080,
-            "/api/ppt-proxy/8080",
-        );
+        let result = rewrite_location("http://localhost:8080/new/path", 8080, "/api/ppt-proxy/8080");
         assert_eq!(result, "/api/ppt-proxy/8080/new/path");
     }
 
     #[test]
     fn rewrite_location_ip_absolute() {
-        let result = rewrite_location(
-            "http://127.0.0.1:8080/new/path",
-            8080,
-            "/api/ppt-proxy/8080",
-        );
+        let result = rewrite_location("http://127.0.0.1:8080/new/path", 8080, "/api/ppt-proxy/8080");
         assert_eq!(result, "/api/ppt-proxy/8080/new/path");
     }
 
@@ -397,11 +373,7 @@ mod tests {
 
     #[test]
     fn rewrite_location_localhost_root() {
-        let result = rewrite_location(
-            "http://localhost:3000",
-            3000,
-            "/api/office-watch-proxy/3000",
-        );
+        let result = rewrite_location("http://localhost:3000", 3000, "/api/office-watch-proxy/3000");
         assert_eq!(result, "/api/office-watch-proxy/3000");
     }
 

@@ -18,13 +18,7 @@ fn write_manifest(dir: &Path, name: &str, version: &str) {
     write_manifest_full(dir, name, version, None, None);
 }
 
-fn write_manifest_full(
-    dir: &Path,
-    name: &str,
-    version: &str,
-    engine_aionui: Option<&str>,
-    api_version: Option<&str>,
-) {
+fn write_manifest_full(dir: &Path, name: &str, version: &str, engine_aionui: Option<&str>, api_version: Option<&str>) {
     let mut manifest = serde_json::json!({
         "name": name,
         "version": version,

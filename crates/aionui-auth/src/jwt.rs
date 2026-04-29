@@ -102,15 +102,11 @@ impl JwtService {
         validation.set_issuer(&[JWT_ISSUER]);
         validation.set_audience(&[JWT_AUDIENCE]);
 
-        let token_data = decode::<TokenPayload>(
-            token,
-            &DecodingKey::from_secret(secret.as_bytes()),
-            &validation,
-        )
-        .map_err(|e| match e.kind() {
-            jsonwebtoken::errors::ErrorKind::ExpiredSignature => AuthError::TokenExpired,
-            _ => AuthError::TokenInvalid(format!("JWT verification failed: {e}")),
-        })?;
+        let token_data = decode::<TokenPayload>(token, &DecodingKey::from_secret(secret.as_bytes()), &validation)
+            .map_err(|e| match e.kind() {
+                jsonwebtoken::errors::ErrorKind::ExpiredSignature => AuthError::TokenExpired,
+                _ => AuthError::TokenInvalid(format!("JWT verification failed: {e}")),
+            })?;
 
         Ok(token_data.claims)
     }
@@ -161,13 +157,9 @@ impl JwtService {
         validation.set_issuer(&[JWT_ISSUER]);
         validation.set_audience(&[JWT_AUDIENCE]);
 
-        decode::<TokenPayload>(
-            token,
-            &DecodingKey::from_secret(secret.as_bytes()),
-            &validation,
-        )
-        .ok()
-        .map(|data| data.claims.exp)
+        decode::<TokenPayload>(token, &DecodingKey::from_secret(secret.as_bytes()), &validation)
+            .ok()
+            .map(|data| data.claims.exp)
     }
 }
 
@@ -246,10 +238,7 @@ mod tests {
         let service = test_service();
         let token = service.sign("user_1", "admin").unwrap();
         let tampered = format!("{token}x");
-        assert!(matches!(
-            service.verify(&tampered),
-            Err(AuthError::TokenInvalid(_))
-        ));
+        assert!(matches!(service.verify(&tampered), Err(AuthError::TokenInvalid(_))));
     }
 
     #[test]
@@ -281,10 +270,7 @@ mod tests {
         .unwrap();
         drop(secret);
 
-        assert!(matches!(
-            service.verify(&token),
-            Err(AuthError::TokenExpired)
-        ));
+        assert!(matches!(service.verify(&token), Err(AuthError::TokenExpired)));
     }
 
     #[test]
@@ -294,10 +280,7 @@ mod tests {
         assert!(service.verify(&token).is_ok());
 
         service.blacklist_token(&token);
-        assert!(matches!(
-            service.verify(&token),
-            Err(AuthError::TokenBlacklisted)
-        ));
+        assert!(matches!(service.verify(&token), Err(AuthError::TokenBlacklisted)));
     }
 
     #[test]

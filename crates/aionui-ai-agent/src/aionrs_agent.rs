@@ -11,9 +11,7 @@ use aion_mcp::manager::McpManager;
 use aion_protocol::commands::SessionMode;
 use aion_protocol::{ToolApprovalManager, ToolApprovalResult};
 use aionui_api_types::AgentModeResponse;
-use aionui_common::{
-    AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, TimestampMs, now_ms,
-};
+use aionui_common::{AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, TimestampMs, now_ms};
 use serde_json::Value;
 use tokio::sync::{Mutex, broadcast};
 use tracing::{debug, error, info};
@@ -89,10 +87,7 @@ impl AionrsAgentManager {
             tools: Default::default(),
             session: SessionConfig {
                 enabled: true,
-                directory: config_extra
-                    .session_directory
-                    .to_string_lossy()
-                    .into_owned(),
+                directory: config_extra.session_directory.to_string_lossy().into_owned(),
                 ..Default::default()
             },
             compact: Default::default(),
@@ -122,9 +117,7 @@ impl AionrsAgentManager {
             .map_err(|e| AppError::Internal(format!("Agent bootstrap failed: {e}")))?;
 
         let mut engine = result.engine;
-        if !is_resume
-            && let Err(e) = engine.init_session(&provider_label, &workspace, Some(&conversation_id))
-        {
+        if !is_resume && let Err(e) = engine.init_session(&provider_label, &workspace, Some(&conversation_id)) {
             error!(
                 conversation_id = %conversation_id,
                 error = %e,
@@ -222,9 +215,11 @@ impl IAgentManager for AionrsAgentManager {
                 );
                 // AgentEngine.run() does not call emit_stream_end(), so we must
                 // send the Finish event ourselves to unblock StreamRelay.
-                let _ = self.event_tx.send(AgentStreamEvent::Finish(
-                    crate::stream_event::FinishEventData { session_id: None },
-                ));
+                let _ = self
+                    .event_tx
+                    .send(AgentStreamEvent::Finish(crate::stream_event::FinishEventData {
+                        session_id: None,
+                    }));
                 Ok(())
             }
             Err(e) => {
@@ -235,15 +230,17 @@ impl IAgentManager for AionrsAgentManager {
                     error = %e,
                     "Aionrs engine.run() failed, emitting Error+Finish"
                 );
-                let _ = self.event_tx.send(AgentStreamEvent::Error(
-                    crate::stream_event::ErrorEventData {
+                let _ = self
+                    .event_tx
+                    .send(AgentStreamEvent::Error(crate::stream_event::ErrorEventData {
                         message: error_msg.clone(),
                         code: None,
-                    },
-                ));
-                let _ = self.event_tx.send(AgentStreamEvent::Finish(
-                    crate::stream_event::FinishEventData { session_id: None },
-                ));
+                    }));
+                let _ = self
+                    .event_tx
+                    .send(AgentStreamEvent::Finish(crate::stream_event::FinishEventData {
+                        session_id: None,
+                    }));
                 Err(AppError::Internal(error_msg))
             }
         }
@@ -257,36 +254,29 @@ impl IAgentManager for AionrsAgentManager {
         if let Ok(mut confs) = self.confirmations.write() {
             confs.clear();
         }
-        let _ = self.event_tx.send(AgentStreamEvent::Error(
-            crate::stream_event::ErrorEventData {
+        let _ = self
+            .event_tx
+            .send(AgentStreamEvent::Error(crate::stream_event::ErrorEventData {
                 message: "Stopped by user".into(),
                 code: None,
-            },
-        ));
-        let _ = self.event_tx.send(AgentStreamEvent::Finish(
-            crate::stream_event::FinishEventData { session_id: None },
-        ));
+            }));
+        let _ = self
+            .event_tx
+            .send(AgentStreamEvent::Finish(crate::stream_event::FinishEventData {
+                session_id: None,
+            }));
         if let Ok(mut s) = self.status.write() {
             *s = Some(ConversationStatus::Finished);
         }
         Ok(())
     }
 
-    fn confirm(
-        &self,
-        _msg_id: &str,
-        call_id: &str,
-        data: Value,
-        always_allow: bool,
-    ) -> Result<(), AppError> {
+    fn confirm(&self, _msg_id: &str, call_id: &str, data: Value, always_allow: bool) -> Result<(), AppError> {
         if let Ok(mut confs) = self.confirmations.write() {
             confs.retain(|c| c.call_id != call_id);
         }
 
-        let value = data
-            .get("value")
-            .and_then(|v| v.as_str())
-            .unwrap_or("cancel");
+        let value = data.get("value").and_then(|v| v.as_str()).unwrap_or("cancel");
 
         let is_cancel = value == "cancel";
 
@@ -317,10 +307,7 @@ impl IAgentManager for AionrsAgentManager {
     }
 
     fn get_confirmations(&self) -> Vec<Confirmation> {
-        self.confirmations
-            .read()
-            .map(|c| c.clone())
-            .unwrap_or_default()
+        self.confirmations.read().map(|c| c.clone()).unwrap_or_default()
     }
 
     fn check_approval(&self, action: &str, _command_type: Option<&str>) -> bool {
@@ -392,10 +379,9 @@ mod tests {
 
     #[tokio::test]
     async fn aionrs_agent_returns_correct_type() {
-        let agent =
-            AionrsAgentManager::new("conv-1".into(), "/project".into(), make_test_config(), None)
-                .await
-                .unwrap();
+        let agent = AionrsAgentManager::new("conv-1".into(), "/project".into(), make_test_config(), None)
+            .await
+            .unwrap();
         assert_eq!(agent.agent_type(), AgentType::Aionrs);
         assert_eq!(agent.workspace(), "/project");
         assert_eq!(agent.conversation_id(), "conv-1");
@@ -403,69 +389,58 @@ mod tests {
 
     #[tokio::test]
     async fn aionrs_agent_initial_status_is_pending() {
-        let agent =
-            AionrsAgentManager::new("conv-1".into(), "/project".into(), make_test_config(), None)
-                .await
-                .unwrap();
+        let agent = AionrsAgentManager::new("conv-1".into(), "/project".into(), make_test_config(), None)
+            .await
+            .unwrap();
         assert_eq!(agent.status(), Some(ConversationStatus::Pending));
     }
 
     #[tokio::test]
     async fn aionrs_agent_subscribe_returns_receiver() {
-        let agent =
-            AionrsAgentManager::new("conv-1".into(), "/project".into(), make_test_config(), None)
-                .await
-                .unwrap();
+        let agent = AionrsAgentManager::new("conv-1".into(), "/project".into(), make_test_config(), None)
+            .await
+            .unwrap();
         let _rx = agent.subscribe();
     }
 
     #[tokio::test]
     async fn aionrs_agent_kill_succeeds() {
-        let agent =
-            AionrsAgentManager::new("conv-1".into(), "/project".into(), make_test_config(), None)
-                .await
-                .unwrap();
+        let agent = AionrsAgentManager::new("conv-1".into(), "/project".into(), make_test_config(), None)
+            .await
+            .unwrap();
         assert!(agent.kill(None).is_ok());
         assert_eq!(agent.status(), None);
     }
 
     #[tokio::test]
     async fn aionrs_agent_kill_with_reason_succeeds() {
-        let agent =
-            AionrsAgentManager::new("conv-1".into(), "/project".into(), make_test_config(), None)
-                .await
-                .unwrap();
+        let agent = AionrsAgentManager::new("conv-1".into(), "/project".into(), make_test_config(), None)
+            .await
+            .unwrap();
         assert!(agent.kill(Some(AgentKillReason::IdleTimeout)).is_ok());
     }
 
     #[tokio::test]
     async fn aionrs_agent_confirmations_initially_empty() {
-        let agent =
-            AionrsAgentManager::new("conv-1".into(), "/project".into(), make_test_config(), None)
-                .await
-                .unwrap();
+        let agent = AionrsAgentManager::new("conv-1".into(), "/project".into(), make_test_config(), None)
+            .await
+            .unwrap();
         assert!(agent.get_confirmations().is_empty());
     }
 
     #[tokio::test]
     async fn aionrs_agent_check_approval_returns_false_by_default() {
-        let agent =
-            AionrsAgentManager::new("conv-1".into(), "/project".into(), make_test_config(), None)
-                .await
-                .unwrap();
+        let agent = AionrsAgentManager::new("conv-1".into(), "/project".into(), make_test_config(), None)
+            .await
+            .unwrap();
         assert!(!agent.check_approval("any_action", None));
     }
 
     #[tokio::test]
     async fn stop_emits_finish_event_and_sets_status() {
-        let agent = AionrsAgentManager::new(
-            "conv-stop".into(),
-            "/project".into(),
-            make_test_config(),
-            None,
-        )
-        .await
-        .unwrap();
+        let agent = AionrsAgentManager::new("conv-stop".into(), "/project".into(), make_test_config(), None)
+            .await
+            .unwrap();
         let mut rx = agent.subscribe();
 
         agent.stop().await.unwrap();
@@ -486,25 +461,22 @@ mod tests {
 
     #[tokio::test]
     async fn event_tx_can_send_error_and_finish() {
-        let agent = AionrsAgentManager::new(
-            "conv-err".into(),
-            "/project".into(),
-            make_test_config(),
-            None,
-        )
-        .await
-        .unwrap();
+        let agent = AionrsAgentManager::new("conv-err".into(), "/project".into(), make_test_config(), None)
+            .await
+            .unwrap();
         let mut rx = agent.subscribe();
 
-        let _ = agent.event_tx.send(AgentStreamEvent::Error(
-            crate::stream_event::ErrorEventData {
+        let _ = agent
+            .event_tx
+            .send(AgentStreamEvent::Error(crate::stream_event::ErrorEventData {
                 message: "test error".into(),
                 code: None,
-            },
-        ));
-        let _ = agent.event_tx.send(AgentStreamEvent::Finish(
-            crate::stream_event::FinishEventData { session_id: None },
-        ));
+            }));
+        let _ = agent
+            .event_tx
+            .send(AgentStreamEvent::Finish(crate::stream_event::FinishEventData {
+                session_id: None,
+            }));
 
         match rx.try_recv().unwrap() {
             AgentStreamEvent::Error(data) => assert_eq!(data.message, "test error"),

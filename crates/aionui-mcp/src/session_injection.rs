@@ -132,10 +132,7 @@ pub fn parse_acp_mcp_capabilities(response: &serde_json::Value) -> AcpMcpCapabil
 ///
 /// Filters to only enabled servers whose transport type is supported
 /// by the ACP backend, then converts to the ACP wire format.
-pub fn build_session_mcp_servers(
-    servers: &[McpServer],
-    capabilities: &AcpMcpCapabilities,
-) -> Vec<AcpSessionMcpServer> {
+pub fn build_session_mcp_servers(servers: &[McpServer], capabilities: &AcpMcpCapabilities) -> Vec<AcpSessionMcpServer> {
     servers
         .iter()
         .filter(|s| s.enabled)
@@ -179,33 +176,24 @@ fn bool_field(value: &serde_json::Value, key: &str) -> bool {
 ///
 /// Returns `None` if the server's transport type is not supported
 /// by the given capabilities.
-fn convert_server(
-    server: &McpServer,
-    capabilities: &AcpMcpCapabilities,
-) -> Option<AcpSessionMcpServer> {
+fn convert_server(server: &McpServer, capabilities: &AcpMcpCapabilities) -> Option<AcpSessionMcpServer> {
     match &server.transport {
-        McpServerTransport::Stdio { command, args, env } if capabilities.stdio => {
-            Some(AcpSessionMcpServer::Stdio {
-                name: server.name.clone(),
-                command: command.clone(),
-                args: args.clone(),
-                env: hashmap_to_pairs(env),
-            })
-        }
-        McpServerTransport::Http { url, headers } if capabilities.http => {
-            Some(AcpSessionMcpServer::Http {
-                name: server.name.clone(),
-                url: url.clone(),
-                headers: hashmap_to_pairs(headers),
-            })
-        }
-        McpServerTransport::Sse { url, headers } if capabilities.sse => {
-            Some(AcpSessionMcpServer::Sse {
-                name: server.name.clone(),
-                url: url.clone(),
-                headers: hashmap_to_pairs(headers),
-            })
-        }
+        McpServerTransport::Stdio { command, args, env } if capabilities.stdio => Some(AcpSessionMcpServer::Stdio {
+            name: server.name.clone(),
+            command: command.clone(),
+            args: args.clone(),
+            env: hashmap_to_pairs(env),
+        }),
+        McpServerTransport::Http { url, headers } if capabilities.http => Some(AcpSessionMcpServer::Http {
+            name: server.name.clone(),
+            url: url.clone(),
+            headers: hashmap_to_pairs(headers),
+        }),
+        McpServerTransport::Sse { url, headers } if capabilities.sse => Some(AcpSessionMcpServer::Sse {
+            name: server.name.clone(),
+            url: url.clone(),
+            headers: hashmap_to_pairs(headers),
+        }),
         _ => None,
     }
 }
@@ -439,9 +427,7 @@ mod tests {
         let result = convert_server(&server, &all_caps());
         assert!(result.is_some());
         match result.unwrap() {
-            AcpSessionMcpServer::Sse {
-                name, url, headers, ..
-            } => {
+            AcpSessionMcpServer::Sse { name, url, headers, .. } => {
                 assert_eq!(name, "sse-test");
                 assert_eq!(url, "https://example.com/sse");
                 assert!(headers.is_empty());

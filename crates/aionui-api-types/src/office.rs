@@ -751,10 +751,7 @@ mod tests {
         let wb = ExcelWorkbookData {
             sheets: vec![ExcelSheetData {
                 name: "Sheet1".into(),
-                data: vec![
-                    vec![json!("Name"), json!("Age")],
-                    vec![json!("Alice"), json!(30)],
-                ],
+                data: vec![vec![json!("Name"), json!("Age")], vec![json!("Alice"), json!(30)]],
                 merges: None,
                 images: None,
             }],

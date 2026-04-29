@@ -30,9 +30,7 @@ pub enum AuthError {
 impl From<AuthError> for AppError {
     fn from(err: AuthError) -> Self {
         match err {
-            AuthError::InvalidCredentials => {
-                AppError::Unauthorized("Invalid username or password".into())
-            }
+            AuthError::InvalidCredentials => AppError::Unauthorized("Invalid username or password".into()),
             AuthError::WeakPassword(msg) => AppError::BadRequest(msg),
             AuthError::InvalidUsername(msg) => AppError::BadRequest(msg),
             AuthError::TokenExpired => AppError::Unauthorized("Token expired".into()),

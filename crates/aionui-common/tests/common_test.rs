@@ -99,42 +99,21 @@ fn test_encrypt_large_text() {
 fn test_app_error_status_codes() {
     use axum::http::StatusCode;
 
-    assert_eq!(
-        AppError::NotFound("x".into()).status_code(),
-        StatusCode::NOT_FOUND
-    );
-    assert_eq!(
-        AppError::BadRequest("x".into()).status_code(),
-        StatusCode::BAD_REQUEST
-    );
+    assert_eq!(AppError::NotFound("x".into()).status_code(), StatusCode::NOT_FOUND);
+    assert_eq!(AppError::BadRequest("x".into()).status_code(), StatusCode::BAD_REQUEST);
     assert_eq!(
         AppError::Unauthorized("x".into()).status_code(),
         StatusCode::UNAUTHORIZED
     );
-    assert_eq!(
-        AppError::Forbidden("x".into()).status_code(),
-        StatusCode::FORBIDDEN
-    );
-    assert_eq!(
-        AppError::Conflict("x".into()).status_code(),
-        StatusCode::CONFLICT
-    );
-    assert_eq!(
-        AppError::RateLimited.status_code(),
-        StatusCode::TOO_MANY_REQUESTS
-    );
+    assert_eq!(AppError::Forbidden("x".into()).status_code(), StatusCode::FORBIDDEN);
+    assert_eq!(AppError::Conflict("x".into()).status_code(), StatusCode::CONFLICT);
+    assert_eq!(AppError::RateLimited.status_code(), StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(
         AppError::Internal("x".into()).status_code(),
         StatusCode::INTERNAL_SERVER_ERROR
     );
-    assert_eq!(
-        AppError::BadGateway("x".into()).status_code(),
-        StatusCode::BAD_GATEWAY
-    );
-    assert_eq!(
-        AppError::Timeout("x".into()).status_code(),
-        StatusCode::BAD_GATEWAY
-    );
+    assert_eq!(AppError::BadGateway("x".into()).status_code(), StatusCode::BAD_GATEWAY);
+    assert_eq!(AppError::Timeout("x".into()).status_code(), StatusCode::BAD_GATEWAY);
 }
 
 #[test]

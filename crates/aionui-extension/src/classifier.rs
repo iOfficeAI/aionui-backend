@@ -38,20 +38,10 @@ impl AssistantClassifier for DefaultUserClassifier {
 #[async_trait::async_trait]
 pub trait AssistantRuleDispatcher: Send + Sync {
     async fn read_rule(&self, id: &str, locale: Option<&str>) -> Result<String, AppError>;
-    async fn write_rule(
-        &self,
-        id: &str,
-        locale: Option<&str>,
-        content: &str,
-    ) -> Result<(), AppError>;
+    async fn write_rule(&self, id: &str, locale: Option<&str>, content: &str) -> Result<(), AppError>;
     async fn delete_rule(&self, id: &str) -> Result<bool, AppError>;
 
     async fn read_skill(&self, id: &str, locale: Option<&str>) -> Result<String, AppError>;
-    async fn write_skill(
-        &self,
-        id: &str,
-        locale: Option<&str>,
-        content: &str,
-    ) -> Result<(), AppError>;
+    async fn write_skill(&self, id: &str, locale: Option<&str>, content: &str) -> Result<(), AppError>;
     async fn delete_skill(&self, id: &str) -> Result<bool, AppError>;
 }

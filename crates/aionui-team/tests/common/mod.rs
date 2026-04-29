@@ -44,11 +44,7 @@ impl ITeamRepository for MockTeamRepo {
         Ok(())
     }
 
-    async fn read_unread_and_mark(
-        &self,
-        team_id: &str,
-        to_agent_id: &str,
-    ) -> Result<Vec<MailboxMessageRow>, DbError> {
+    async fn read_unread_and_mark(&self, team_id: &str, to_agent_id: &str) -> Result<Vec<MailboxMessageRow>, DbError> {
         let mut state = self.state.lock().unwrap();
         let mut result = vec![];
         for msg in &mut state.messages {
@@ -79,11 +75,7 @@ impl ITeamRepository for MockTeamRepo {
     }
 
     async fn delete_mailbox_by_team(&self, team_id: &str) -> Result<(), DbError> {
-        self.state
-            .lock()
-            .unwrap()
-            .messages
-            .retain(|m| m.team_id != team_id);
+        self.state.lock().unwrap().messages.retain(|m| m.team_id != team_id);
         Ok(())
     }
 
@@ -92,11 +84,7 @@ impl ITeamRepository for MockTeamRepo {
         Ok(())
     }
 
-    async fn find_task_by_id(
-        &self,
-        team_id: &str,
-        task_id: &str,
-    ) -> Result<Option<TeamTaskRow>, DbError> {
+    async fn find_task_by_id(&self, team_id: &str, task_id: &str) -> Result<Option<TeamTaskRow>, DbError> {
         let state = self.state.lock().unwrap();
         let found = state
             .tasks
@@ -134,12 +122,7 @@ impl ITeamRepository for MockTeamRepo {
 
     async fn list_tasks(&self, team_id: &str) -> Result<Vec<TeamTaskRow>, DbError> {
         let state = self.state.lock().unwrap();
-        let tasks = state
-            .tasks
-            .iter()
-            .filter(|t| t.team_id == team_id)
-            .cloned()
-            .collect();
+        let tasks = state.tasks.iter().filter(|t| t.team_id == team_id).cloned().collect();
         Ok(tasks)
     }
 
@@ -156,30 +139,21 @@ impl ITeamRepository for MockTeamRepo {
         Ok(())
     }
 
-    async fn remove_from_blocked_by(
-        &self,
-        task_id: &str,
-        unblocked_task_id: &str,
-    ) -> Result<(), DbError> {
+    async fn remove_from_blocked_by(&self, task_id: &str, unblocked_task_id: &str) -> Result<(), DbError> {
         let mut state = self.state.lock().unwrap();
         let task = state
             .tasks
             .iter_mut()
             .find(|t| t.id == task_id)
             .ok_or_else(|| DbError::NotFound(task_id.to_owned()))?;
-        let mut blocked_by: Vec<String> =
-            serde_json::from_str(&task.blocked_by).unwrap_or_default();
+        let mut blocked_by: Vec<String> = serde_json::from_str(&task.blocked_by).unwrap_or_default();
         blocked_by.retain(|id| id != unblocked_task_id);
         task.blocked_by = serde_json::to_string(&blocked_by).unwrap();
         Ok(())
     }
 
     async fn delete_tasks_by_team(&self, team_id: &str) -> Result<(), DbError> {
-        self.state
-            .lock()
-            .unwrap()
-            .tasks
-            .retain(|t| t.team_id != team_id);
+        self.state.lock().unwrap().tasks.retain(|t| t.team_id != team_id);
         Ok(())
     }
 }

@@ -102,10 +102,7 @@ async fn http_401_returns_needs_auth() {
             axum::routing::post(|| async {
                 (
                     axum::http::StatusCode::UNAUTHORIZED,
-                    [(
-                        axum::http::header::WWW_AUTHENTICATE,
-                        "Bearer realm=\"mcp-server\"",
-                    )],
+                    [(axum::http::header::WWW_AUTHENTICATE, "Bearer realm=\"mcp-server\"")],
                     "",
                 )
             }),
@@ -142,10 +139,7 @@ async fn sse_401_returns_needs_auth() {
             axum::routing::get(|| async {
                 (
                     axum::http::StatusCode::UNAUTHORIZED,
-                    [(
-                        axum::http::header::WWW_AUTHENTICATE,
-                        "Bearer realm=\"mcp-sse\"",
-                    )],
+                    [(axum::http::header::WWW_AUTHENTICATE, "Bearer realm=\"mcp-sse\"")],
                     "",
                 )
             }),

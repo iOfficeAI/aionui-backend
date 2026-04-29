@@ -72,10 +72,7 @@ async fn get_files_by_dir_subdirectory() {
     let svc = make_service(dir.path());
     let root = dir.path().to_str().unwrap();
 
-    let items = svc
-        .get_files_by_dir(sub.to_str().unwrap(), root)
-        .await
-        .unwrap();
+    let items = svc.get_files_by_dir(sub.to_str().unwrap(), root).await.unwrap();
 
     assert_eq!(items.len(), 2);
     // Relative paths should be relative to root, not to sub
@@ -91,10 +88,7 @@ async fn get_files_by_dir_rejects_path_outside_sandbox() {
     let svc = make_service(sandbox.path());
 
     let result = svc
-        .get_files_by_dir(
-            outside.path().to_str().unwrap(),
-            outside.path().to_str().unwrap(),
-        )
+        .get_files_by_dir(outside.path().to_str().unwrap(), outside.path().to_str().unwrap())
         .await;
 
     assert!(result.is_err());
@@ -148,10 +142,7 @@ async fn list_workspace_files_recursive() {
     fs::write(dir.path().join("a/b/deep.txt"), "").unwrap();
 
     let svc = make_service(dir.path());
-    let files = svc
-        .list_workspace_files(dir.path().to_str().unwrap())
-        .await
-        .unwrap();
+    let files = svc.list_workspace_files(dir.path().to_str().unwrap()).await.unwrap();
 
     assert_eq!(files.len(), 3);
     let names: Vec<&str> = files.iter().map(|f| f.name.as_str()).collect();
@@ -170,10 +161,7 @@ async fn list_workspace_files_respects_gitignore() {
     fs::write(dir.path().join("build/output.js"), "").unwrap();
 
     let svc = make_service(dir.path());
-    let files = svc
-        .list_workspace_files(dir.path().to_str().unwrap())
-        .await
-        .unwrap();
+    let files = svc.list_workspace_files(dir.path().to_str().unwrap()).await.unwrap();
 
     let names: Vec<&str> = files.iter().map(|f| f.name.as_str()).collect();
     assert!(names.contains(&"app.rs"));
@@ -187,10 +175,7 @@ async fn list_workspace_files_empty_workspace() {
     let dir = tempfile::tempdir().unwrap();
     let svc = make_service(dir.path());
 
-    let files = svc
-        .list_workspace_files(dir.path().to_str().unwrap())
-        .await
-        .unwrap();
+    let files = svc.list_workspace_files(dir.path().to_str().unwrap()).await.unwrap();
 
     assert!(files.is_empty());
 }
@@ -202,9 +187,7 @@ async fn list_workspace_files_rejects_outside_sandbox() {
 
     let svc = make_service(sandbox.path());
 
-    let result = svc
-        .list_workspace_files(outside.path().to_str().unwrap())
-        .await;
+    let result = svc.list_workspace_files(outside.path().to_str().unwrap()).await;
 
     assert!(result.is_err());
 }
@@ -241,10 +224,7 @@ async fn list_workspace_files_relative_paths() {
     fs::write(dir.path().join("src/utils/helper.ts"), "").unwrap();
 
     let svc = make_service(dir.path());
-    let files = svc
-        .list_workspace_files(dir.path().to_str().unwrap())
-        .await
-        .unwrap();
+    let files = svc.list_workspace_files(dir.path().to_str().unwrap()).await.unwrap();
 
     let helper = files.iter().find(|f| f.name == "helper.ts").unwrap();
     assert_eq!(helper.relative_path, "src/utils/helper.ts");

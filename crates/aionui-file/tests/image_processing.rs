@@ -48,9 +48,7 @@ async fn get_image_base64_png() {
 
     // Verify roundtrip: decode base64 back to original bytes
     let encoded_part = result.strip_prefix("data:image/png;base64,").unwrap();
-    let decoded = base64::engine::general_purpose::STANDARD
-        .decode(encoded_part)
-        .unwrap();
+    let decoded = base64::engine::general_purpose::STANDARD.decode(encoded_part).unwrap();
     assert_eq!(decoded, png_bytes);
 }
 
@@ -71,7 +69,8 @@ async fn get_image_base64_jpeg() {
 async fn get_image_base64_svg() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("icon.svg");
-    let svg_content = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><circle cx="50" cy="50" r="40"/></svg>"#;
+    let svg_content =
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><circle cx="50" cy="50" r="40"/></svg>"#;
     fs::write(&file, svg_content).unwrap();
 
     let svc = make_service(dir.path());
@@ -81,9 +80,7 @@ async fn get_image_base64_svg() {
 
     // Verify content roundtrip
     let encoded_part = result.strip_prefix("data:image/svg+xml;base64,").unwrap();
-    let decoded = base64::engine::general_purpose::STANDARD
-        .decode(encoded_part)
-        .unwrap();
+    let decoded = base64::engine::general_purpose::STANDARD.decode(encoded_part).unwrap();
     assert_eq!(String::from_utf8(decoded).unwrap(), svg_content);
 }
 
@@ -197,9 +194,7 @@ async fn fetch_remote_image_placeholder_contains_valid_svg() {
 
     // Verify the placeholder decodes to a valid SVG
     let encoded_part = result.strip_prefix("data:image/svg+xml;base64,").unwrap();
-    let decoded = base64::engine::general_purpose::STANDARD
-        .decode(encoded_part)
-        .unwrap();
+    let decoded = base64::engine::general_purpose::STANDARD.decode(encoded_part).unwrap();
     let svg = String::from_utf8(decoded).unwrap();
     assert!(svg.contains("<svg"));
     assert!(svg.contains("</svg>"));
@@ -210,9 +205,7 @@ async fn fetch_remote_image_data_protocol_returns_placeholder() {
     let dir = tempfile::tempdir().unwrap();
     let svc = make_service(dir.path());
 
-    let result = svc
-        .fetch_remote_image("data:text/html,<script>alert(1)</script>")
-        .await;
+    let result = svc.fetch_remote_image("data:text/html,<script>alert(1)</script>").await;
 
     assert!(result.starts_with("data:image/svg+xml;base64,"));
 }

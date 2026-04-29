@@ -5,9 +5,7 @@ use axum::extract::rejection::JsonRejection;
 use axum::extract::{Extension, Json, State};
 use axum::routing::{get, post};
 
-use aionui_api_types::{
-    AgentMetadata, ApiResponse, TestCustomAgentRequest, TestCustomAgentResponse,
-};
+use aionui_api_types::{AgentMetadata, ApiResponse, TestCustomAgentRequest, TestCustomAgentResponse};
 use aionui_auth::CurrentUser;
 use aionui_common::AppError;
 

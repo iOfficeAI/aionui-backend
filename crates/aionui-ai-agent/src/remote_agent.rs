@@ -3,8 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use aionui_common::{
-    AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, RemoteAgentStatus,
-    TimestampMs, now_ms,
+    AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, RemoteAgentStatus, TimestampMs, now_ms,
 };
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
@@ -52,9 +51,7 @@ pub struct RemoteAgentManager {
     ws_sink: Mutex<
         Option<
             futures_util::stream::SplitSink<
-                tokio_tungstenite::WebSocketStream<
-                    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-                >,
+                tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
                 Message,
             >,
         >,
@@ -134,9 +131,7 @@ impl RemoteAgentManager {
     async fn run_ws_reader(
         self: Arc<Self>,
         mut stream: futures_util::stream::SplitStream<
-            tokio_tungstenite::WebSocketStream<
-                tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-            >,
+            tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
         >,
     ) {
         while let Some(msg) = stream.next().await {
@@ -220,11 +215,7 @@ impl RemoteAgentManager {
             AgentStreamEvent::AcpPermission(data) => {
                 if let Some(conf) = data.as_confirmation() {
                     let mut guard = self.state.write().await;
-                    if let Some(existing) = guard
-                        .confirmations
-                        .iter_mut()
-                        .find(|c| c.call_id == conf.call_id)
-                    {
+                    if let Some(existing) = guard.confirmations.iter_mut().find(|c| c.call_id == conf.call_id) {
                         *existing = conf;
                     } else {
                         guard.confirmations.push(conf);
@@ -237,9 +228,8 @@ impl RemoteAgentManager {
 
     /// Send a JSON message over the WebSocket.
     async fn ws_send(&self, payload: &Value) -> Result<(), AppError> {
-        let text = serde_json::to_string(payload).map_err(|e| {
-            AppError::Internal(format!("Failed to serialize WebSocket message: {e}"))
-        })?;
+        let text = serde_json::to_string(payload)
+            .map_err(|e| AppError::Internal(format!("Failed to serialize WebSocket message: {e}")))?;
 
         let mut guard = self.ws_sink.lock().await;
         let sink = guard
@@ -341,17 +331,9 @@ impl IAgentManager for RemoteAgentManager {
         Ok(())
     }
 
-    fn confirm(
-        &self,
-        _msg_id: &str,
-        call_id: &str,
-        _data: Value,
-        always_allow: bool,
-    ) -> Result<(), AppError> {
+    fn confirm(&self, _msg_id: &str, call_id: &str, _data: Value, always_allow: bool) -> Result<(), AppError> {
         if let Ok(mut state) = self.state.try_write() {
-            if always_allow
-                && let Some(conf) = state.confirmations.iter().find(|c| c.call_id == call_id)
-            {
+            if always_allow && let Some(conf) = state.confirmations.iter().find(|c| c.call_id == call_id) {
                 let key = approval_key(conf.action.as_deref(), conf.command_type.as_deref());
                 state.approval_memory.insert(key, true);
             }

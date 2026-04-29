@@ -64,11 +64,7 @@ impl ExternalPathsManager {
     /// Add a custom external path.
     ///
     /// If a path with the same value already exists, it is updated with the new name.
-    pub async fn add_custom_external_path(
-        &self,
-        name: &str,
-        path: &str,
-    ) -> Result<(), ExtensionError> {
+    pub async fn add_custom_external_path(&self, name: &str, path: &str) -> Result<(), ExtensionError> {
         let mut paths = self.paths.write().await;
 
         // Update existing or add new
@@ -139,10 +135,7 @@ async fn load_from_file(file_path: &Path) -> Vec<PersistedNamedPath> {
 }
 
 /// Save paths to the persistence file.
-async fn save_to_file(
-    file_path: &Path,
-    paths: &[PersistedNamedPath],
-) -> Result<(), ExtensionError> {
+async fn save_to_file(file_path: &Path, paths: &[PersistedNamedPath]) -> Result<(), ExtensionError> {
     // Ensure parent directory exists
     if let Some(parent) = file_path.parent() {
         tokio::fs::create_dir_all(parent).await?;
@@ -196,12 +189,8 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let mgr = ExternalPathsManager::new(tmp.path()).await;
 
-        mgr.add_custom_external_path("Original", "/my/path")
-            .await
-            .unwrap();
-        mgr.add_custom_external_path("Updated", "/my/path")
-            .await
-            .unwrap();
+        mgr.add_custom_external_path("Original", "/my/path").await.unwrap();
+        mgr.add_custom_external_path("Updated", "/my/path").await.unwrap();
 
         let paths = mgr.get_custom_external_paths().await;
         assert_eq!(paths.len(), 1);
@@ -213,12 +202,8 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let mgr = ExternalPathsManager::new(tmp.path()).await;
 
-        mgr.add_custom_external_path("Skills", "/path/a")
-            .await
-            .unwrap();
-        mgr.add_custom_external_path("More", "/path/b")
-            .await
-            .unwrap();
+        mgr.add_custom_external_path("Skills", "/path/a").await.unwrap();
+        mgr.add_custom_external_path("More", "/path/b").await.unwrap();
 
         mgr.remove_custom_external_path("/path/a").await.unwrap();
 
@@ -232,9 +217,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let mgr = ExternalPathsManager::new(tmp.path()).await;
 
-        mgr.remove_custom_external_path("/nonexistent")
-            .await
-            .unwrap();
+        mgr.remove_custom_external_path("/nonexistent").await.unwrap();
 
         let paths = mgr.get_custom_external_paths().await;
         assert!(paths.is_empty());

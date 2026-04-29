@@ -111,12 +111,10 @@ async fn migrations_applied() {
 async fn system_default_user_exists() {
     let db = init_database_memory().await.unwrap();
 
-    let row = sqlx::query(
-        "SELECT id, username, password_hash FROM users WHERE id = 'system_default_user'",
-    )
-    .fetch_one(db.pool())
-    .await
-    .unwrap();
+    let row = sqlx::query("SELECT id, username, password_hash FROM users WHERE id = 'system_default_user'")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
 
     assert_eq!(row.get::<String, _>("id"), "system_default_user");
     assert_eq!(row.get::<String, _>("username"), "system");
@@ -133,11 +131,10 @@ async fn system_user_has_valid_timestamps() {
     let db = init_database_memory().await.unwrap();
     let after = aionui_common::now_ms();
 
-    let row =
-        sqlx::query("SELECT created_at, updated_at FROM users WHERE id = 'system_default_user'")
-            .fetch_one(db.pool())
-            .await
-            .unwrap();
+    let row = sqlx::query("SELECT created_at, updated_at FROM users WHERE id = 'system_default_user'")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
 
     let created = row.get::<i64, _>("created_at");
     let updated = row.get::<i64, _>("updated_at");
@@ -176,10 +173,7 @@ async fn users_table_accepts_all_columns() {
         row.get::<Option<String>, _>("avatar_path"),
         Some("/avatar.png".to_string())
     );
-    assert_eq!(
-        row.get::<Option<String>, _>("jwt_secret"),
-        Some("secret".to_string())
-    );
+    assert_eq!(row.get::<Option<String>, _>("jwt_secret"), Some("secret".to_string()));
     assert_eq!(row.get::<Option<i64>, _>("last_login"), Some(3000));
 }
 
@@ -202,10 +196,7 @@ async fn username_unique_constraint() {
     .execute(db.pool())
     .await;
 
-    assert!(
-        result.is_err(),
-        "duplicate username should violate unique constraint"
-    );
+    assert!(result.is_err(), "duplicate username should violate unique constraint");
 }
 
 #[tokio::test]
@@ -227,10 +218,7 @@ async fn email_unique_constraint() {
     .execute(db.pool())
     .await;
 
-    assert!(
-        result.is_err(),
-        "duplicate email should violate unique constraint"
-    );
+    assert!(result.is_err(), "duplicate email should violate unique constraint");
 }
 
 // -- Corruption recovery --
@@ -270,9 +258,6 @@ async fn creates_parent_directories() {
     let path = dir.path().join("sub").join("nested").join("test.db");
 
     let db = init_database(&path).await.unwrap();
-    assert!(
-        path.exists(),
-        "database file should be created in nested directory"
-    );
+    assert!(path.exists(), "database file should be created in nested directory");
     db.close().await;
 }

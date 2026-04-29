@@ -5,18 +5,9 @@ use serde_json::json;
 
 #[test]
 fn test_risk_level_serde() {
-    assert_eq!(
-        serde_json::to_string(&RiskLevel::Safe).unwrap(),
-        r#""safe""#
-    );
-    assert_eq!(
-        serde_json::to_string(&RiskLevel::Moderate).unwrap(),
-        r#""moderate""#
-    );
-    assert_eq!(
-        serde_json::to_string(&RiskLevel::Dangerous).unwrap(),
-        r#""dangerous""#
-    );
+    assert_eq!(serde_json::to_string(&RiskLevel::Safe).unwrap(), r#""safe""#);
+    assert_eq!(serde_json::to_string(&RiskLevel::Moderate).unwrap(), r#""moderate""#);
+    assert_eq!(serde_json::to_string(&RiskLevel::Dangerous).unwrap(), r#""dangerous""#);
 }
 
 #[test]
@@ -54,10 +45,7 @@ fn test_filesystem_scope_serde() {
         serde_json::to_string(&FilesystemScope::Workspace).unwrap(),
         r#""workspace""#
     );
-    assert_eq!(
-        serde_json::to_string(&FilesystemScope::Full).unwrap(),
-        r#""full""#
-    );
+    assert_eq!(serde_json::to_string(&FilesystemScope::Full).unwrap(), r#""full""#);
 }
 
 #[test]
@@ -361,30 +349,12 @@ fn test_extension_state_optional_timestamps() {
 #[test]
 fn test_extension_system_event_serde() {
     let cases = [
-        (
-            ExtensionSystemEvent::ExtensionActivated,
-            r#""EXTENSION_ACTIVATED""#,
-        ),
-        (
-            ExtensionSystemEvent::ExtensionDeactivated,
-            r#""EXTENSION_DEACTIVATED""#,
-        ),
-        (
-            ExtensionSystemEvent::ExtensionInstalled,
-            r#""EXTENSION_INSTALLED""#,
-        ),
-        (
-            ExtensionSystemEvent::ExtensionUninstalled,
-            r#""EXTENSION_UNINSTALLED""#,
-        ),
-        (
-            ExtensionSystemEvent::RegistryReloaded,
-            r#""REGISTRY_RELOADED""#,
-        ),
-        (
-            ExtensionSystemEvent::StatesPersisted,
-            r#""STATES_PERSISTED""#,
-        ),
+        (ExtensionSystemEvent::ExtensionActivated, r#""EXTENSION_ACTIVATED""#),
+        (ExtensionSystemEvent::ExtensionDeactivated, r#""EXTENSION_DEACTIVATED""#),
+        (ExtensionSystemEvent::ExtensionInstalled, r#""EXTENSION_INSTALLED""#),
+        (ExtensionSystemEvent::ExtensionUninstalled, r#""EXTENSION_UNINSTALLED""#),
+        (ExtensionSystemEvent::RegistryReloaded, r#""REGISTRY_RELOADED""#),
+        (ExtensionSystemEvent::StatesPersisted, r#""STATES_PERSISTED""#),
     ];
     for (variant, expected) in cases {
         let json = serde_json::to_string(&variant).unwrap();

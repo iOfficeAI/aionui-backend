@@ -6,8 +6,8 @@ use aionui_db::ISettingsRepository;
 
 /// Supported BCP 47 language codes.
 const SUPPORTED_LANGUAGES: &[&str] = &[
-    "en-US", "zh-CN", "zh-TW", "ja-JP", "ko-KR", "fr-FR", "de-DE", "es-ES", "pt-BR", "ru-RU",
-    "ar-SA", "it-IT", "nl-NL", "pl-PL", "tr-TR", "vi-VN", "th-TH", "id-ID",
+    "en-US", "zh-CN", "zh-TW", "ja-JP", "ko-KR", "fr-FR", "de-DE", "es-ES", "pt-BR", "ru-RU", "ar-SA", "it-IT",
+    "nl-NL", "pl-PL", "tr-TR", "vi-VN", "th-TH", "id-ID",
 ];
 
 /// Business logic for system settings (language, notifications, etc.).
@@ -29,22 +29,19 @@ impl SettingsService {
             .await
             .map_err(|e| AppError::Internal(format!("Failed to get settings: {e}")))?;
 
-        Ok(row.map_or_else(SystemSettingsResponse::default, |s| {
-            SystemSettingsResponse {
+        Ok(
+            row.map_or_else(SystemSettingsResponse::default, |s| SystemSettingsResponse {
                 language: s.language,
                 notification_enabled: s.notification_enabled,
                 cron_notification_enabled: s.cron_notification_enabled,
                 command_queue_enabled: s.command_queue_enabled,
                 save_upload_to_workspace: s.save_upload_to_workspace,
-            }
-        }))
+            }),
+        )
     }
 
     /// Partially update system settings. Only fields present in the request are changed.
-    pub async fn update_settings(
-        &self,
-        req: UpdateSettingsRequest,
-    ) -> Result<SystemSettingsResponse, AppError> {
+    pub async fn update_settings(&self, req: UpdateSettingsRequest) -> Result<SystemSettingsResponse, AppError> {
         if let Some(ref lang) = req.language {
             validate_language(lang)?;
         }
@@ -53,18 +50,12 @@ impl SettingsService {
         let current = self.get_settings().await?;
 
         let language = req.language.unwrap_or(current.language);
-        let notification_enabled = req
-            .notification_enabled
-            .unwrap_or(current.notification_enabled);
+        let notification_enabled = req.notification_enabled.unwrap_or(current.notification_enabled);
         let cron_notification_enabled = req
             .cron_notification_enabled
             .unwrap_or(current.cron_notification_enabled);
-        let command_queue_enabled = req
-            .command_queue_enabled
-            .unwrap_or(current.command_queue_enabled);
-        let save_upload_to_workspace = req
-            .save_upload_to_workspace
-            .unwrap_or(current.save_upload_to_workspace);
+        let command_queue_enabled = req.command_queue_enabled.unwrap_or(current.command_queue_enabled);
+        let save_upload_to_workspace = req.save_upload_to_workspace.unwrap_or(current.save_upload_to_workspace);
 
         let row = self
             .repo
@@ -92,9 +83,7 @@ fn validate_language(lang: &str) -> Result<(), AppError> {
     if SUPPORTED_LANGUAGES.contains(&lang) {
         Ok(())
     } else {
-        Err(AppError::BadRequest(format!(
-            "Unsupported language code: '{lang}'"
-        )))
+        Err(AppError::BadRequest(format!("Unsupported language code: '{lang}'")))
     }
 }
 
@@ -163,10 +152,7 @@ mod tests {
     #[tokio::test]
     async fn update_empty_request_returns_current() {
         let svc = setup().await;
-        let result = svc
-            .update_settings(UpdateSettingsRequest::default())
-            .await
-            .unwrap();
+        let result = svc.update_settings(UpdateSettingsRequest::default()).await.unwrap();
         assert_eq!(result, SystemSettingsResponse::default());
     }
 

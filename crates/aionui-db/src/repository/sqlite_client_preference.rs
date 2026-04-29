@@ -19,10 +19,9 @@ impl SqliteClientPreferenceRepository {
 #[async_trait::async_trait]
 impl IClientPreferenceRepository for SqliteClientPreferenceRepository {
     async fn get_all(&self) -> Result<Vec<ClientPreference>, DbError> {
-        let rows =
-            sqlx::query_as::<_, ClientPreference>("SELECT * FROM client_preferences ORDER BY key")
-                .fetch_all(&self.pool)
-                .await?;
+        let rows = sqlx::query_as::<_, ClientPreference>("SELECT * FROM client_preferences ORDER BY key")
+            .fetch_all(&self.pool)
+            .await?;
 
         Ok(rows)
     }
@@ -134,9 +133,7 @@ mod tests {
     #[tokio::test]
     async fn get_by_keys_filters_correctly() {
         let (repo, _db) = setup().await;
-        repo.upsert_batch(&[("a", "1"), ("b", "2"), ("c", "3")])
-            .await
-            .unwrap();
+        repo.upsert_batch(&[("a", "1"), ("b", "2"), ("c", "3")]).await.unwrap();
 
         let prefs = repo.get_by_keys(&["a", "c", "nonexistent"]).await.unwrap();
         assert_eq!(prefs.len(), 2);
@@ -167,9 +164,7 @@ mod tests {
     #[tokio::test]
     async fn delete_keys_removes_entries() {
         let (repo, _db) = setup().await;
-        repo.upsert_batch(&[("a", "1"), ("b", "2"), ("c", "3")])
-            .await
-            .unwrap();
+        repo.upsert_batch(&[("a", "1"), ("b", "2"), ("c", "3")]).await.unwrap();
 
         repo.delete_keys(&["a", "c"]).await.unwrap();
 

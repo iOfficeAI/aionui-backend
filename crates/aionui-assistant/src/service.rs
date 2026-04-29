@@ -6,17 +6,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use aionui_api_types::{
-    AssistantResponse, AssistantSource, CreateAssistantRequest, ImportAssistantsRequest,
-    ImportAssistantsResult, ImportError, SetAssistantStateRequest, UpdateAssistantRequest,
+    AssistantResponse, AssistantSource, CreateAssistantRequest, ImportAssistantsRequest, ImportAssistantsResult,
+    ImportError, SetAssistantStateRequest, UpdateAssistantRequest,
 };
 use aionui_common::{AppError, now_ms};
 use aionui_db::{
-    AssistantOverrideRow, AssistantRow, CreateAssistantParams, IAssistantOverrideRepository,
-    IAssistantRepository, UpdateAssistantParams, UpsertOverrideParams,
+    AssistantOverrideRow, AssistantRow, CreateAssistantParams, IAssistantOverrideRepository, IAssistantRepository,
+    UpdateAssistantParams, UpsertOverrideParams,
 };
-use aionui_extension::{
-    AssistantClassifier, AssistantRuleDispatcher, ExtensionRegistry, ResolvedAssistant,
-};
+use aionui_extension::{AssistantClassifier, AssistantRuleDispatcher, ExtensionRegistry, ResolvedAssistant};
 use serde_json;
 use tracing::{debug, warn};
 
@@ -83,10 +81,8 @@ impl AssistantService {
         let extensions = self.extension_registry.get_assistants().await;
         let overrides = self.override_repo.get_all().await?;
 
-        let overrides_map: HashMap<String, AssistantOverrideRow> = overrides
-            .into_iter()
-            .map(|o| (o.assistant_id.clone(), o))
-            .collect();
+        let overrides_map: HashMap<String, AssistantOverrideRow> =
+            overrides.into_iter().map(|o| (o.assistant_id.clone(), o)).collect();
 
         let mut result = Vec::new();
 
@@ -164,9 +160,7 @@ impl AssistantService {
 
         // Reject id collisions with built-in / extension-contributed.
         if self.builtin.has(&id) {
-            return Err(AppError::BadRequest(
-                "Id conflicts with built-in assistant".into(),
-            ));
+            return Err(AppError::BadRequest("Id conflicts with built-in assistant".into()));
         }
         if self.extension_registry.has_assistant(&id).await {
             return Err(AppError::BadRequest(
@@ -180,10 +174,7 @@ impl AssistantService {
             name: &name,
             description: req.description.as_deref(),
             avatar: req.avatar.as_deref(),
-            preset_agent_type: req
-                .preset_agent_type
-                .as_deref()
-                .unwrap_or(DEFAULT_AGENT_TYPE),
+            preset_agent_type: req.preset_agent_type.as_deref().unwrap_or(DEFAULT_AGENT_TYPE),
             enabled_skills: serialized.enabled_skills.as_deref(),
             custom_skill_names: serialized.custom_skill_names.as_deref(),
             disabled_builtin_skills: serialized.disabled_builtin_skills.as_deref(),
@@ -199,16 +190,10 @@ impl AssistantService {
         user_row_to_response(&row, ov.as_ref())
     }
 
-    pub async fn update(
-        &self,
-        id: &str,
-        req: UpdateAssistantRequest,
-    ) -> Result<AssistantResponse, AppError> {
+    pub async fn update(&self, id: &str, req: UpdateAssistantRequest) -> Result<AssistantResponse, AppError> {
         match self.classify_source(id).await {
             AssistantSource::Builtin => {
-                return Err(AppError::Forbidden(
-                    "Cannot modify built-in assistant".into(),
-                ));
+                return Err(AppError::Forbidden("Cannot modify built-in assistant".into()));
             }
             AssistantSource::Extension => {
                 return Err(AppError::Forbidden(
@@ -225,21 +210,12 @@ impl AssistantService {
             avatar: req.avatar.as_ref().map(|s| Some(s.as_str())),
             preset_agent_type: req.preset_agent_type.as_deref(),
             enabled_skills: serialized.enabled_skills.as_ref().map(|s| Some(s.as_str())),
-            custom_skill_names: serialized
-                .custom_skill_names
-                .as_ref()
-                .map(|s| Some(s.as_str())),
-            disabled_builtin_skills: serialized
-                .disabled_builtin_skills
-                .as_ref()
-                .map(|s| Some(s.as_str())),
+            custom_skill_names: serialized.custom_skill_names.as_ref().map(|s| Some(s.as_str())),
+            disabled_builtin_skills: serialized.disabled_builtin_skills.as_ref().map(|s| Some(s.as_str())),
             prompts: serialized.prompts.as_ref().map(|s| Some(s.as_str())),
             models: serialized.models.as_ref().map(|s| Some(s.as_str())),
             name_i18n: serialized.name_i18n.as_ref().map(|s| Some(s.as_str())),
-            description_i18n: serialized
-                .description_i18n
-                .as_ref()
-                .map(|s| Some(s.as_str())),
+            description_i18n: serialized.description_i18n.as_ref().map(|s| Some(s.as_str())),
             prompts_i18n: serialized.prompts_i18n.as_ref().map(|s| Some(s.as_str())),
         };
 
@@ -255,9 +231,7 @@ impl AssistantService {
     pub async fn delete(&self, id: &str) -> Result<(), AppError> {
         match self.classify_source(id).await {
             AssistantSource::Builtin => {
-                return Err(AppError::Forbidden(
-                    "Cannot delete built-in assistant".into(),
-                ));
+                return Err(AppError::Forbidden("Cannot delete built-in assistant".into()));
             }
             AssistantSource::Extension => {
                 return Err(AppError::Forbidden(
@@ -283,16 +257,10 @@ impl AssistantService {
         Ok(())
     }
 
-    pub async fn set_state(
-        &self,
-        id: &str,
-        req: SetAssistantStateRequest,
-    ) -> Result<AssistantResponse, AppError> {
+    pub async fn set_state(&self, id: &str, req: SetAssistantStateRequest) -> Result<AssistantResponse, AppError> {
         match self.classify_source(id).await {
             AssistantSource::Extension => {
-                return Err(AppError::BadRequest(
-                    "Extension assistants are read-only".into(),
-                ));
+                return Err(AppError::BadRequest("Extension assistants are read-only".into()));
             }
             AssistantSource::Builtin => {}
             AssistantSource::User => {
@@ -334,10 +302,7 @@ impl AssistantService {
     /// Bulk insert-only import of legacy Electron config rows. Skip on
     /// built-in / extension id collision or already-imported user-id collision.
     /// Never overwrites an existing user row.
-    pub async fn import(
-        &self,
-        req: ImportAssistantsRequest,
-    ) -> Result<ImportAssistantsResult, AppError> {
+    pub async fn import(&self, req: ImportAssistantsRequest) -> Result<ImportAssistantsResult, AppError> {
         let mut result = ImportAssistantsResult::default();
 
         for entry in req.assistants {
@@ -398,10 +363,7 @@ impl AssistantService {
                 name: &name,
                 description: entry.description.as_deref(),
                 avatar: entry.avatar.as_deref(),
-                preset_agent_type: entry
-                    .preset_agent_type
-                    .as_deref()
-                    .unwrap_or(DEFAULT_AGENT_TYPE),
+                preset_agent_type: entry.preset_agent_type.as_deref().unwrap_or(DEFAULT_AGENT_TYPE),
                 enabled_skills: serialized.enabled_skills.as_deref(),
                 custom_skill_names: serialized.custom_skill_names.as_deref(),
                 disabled_builtin_skills: serialized.disabled_builtin_skills.as_deref(),
@@ -461,16 +423,9 @@ impl AssistantService {
     }
 
     /// Write an assistant rule file. User only; built-in / extension reject.
-    pub async fn write_rule(
-        &self,
-        id: &str,
-        locale: Option<&str>,
-        content: &str,
-    ) -> Result<(), AppError> {
+    pub async fn write_rule(&self, id: &str, locale: Option<&str>, content: &str) -> Result<(), AppError> {
         match self.classify_source(id).await {
-            AssistantSource::Builtin => Err(AppError::BadRequest(
-                "Cannot write rule for built-in assistant".into(),
-            )),
+            AssistantSource::Builtin => Err(AppError::BadRequest("Cannot write rule for built-in assistant".into())),
             AssistantSource::Extension => Err(AppError::BadRequest(
                 "Cannot write rule for extension-contributed assistant".into(),
             )),
@@ -480,8 +435,7 @@ impl AssistantService {
                     std::fs::create_dir_all(parent)
                         .map_err(|e| AppError::Internal(format!("create dir failed: {e}")))?;
                 }
-                std::fs::write(&path, content)
-                    .map_err(|e| AppError::Internal(format!("write failed: {e}")))?;
+                std::fs::write(&path, content).map_err(|e| AppError::Internal(format!("write failed: {e}")))?;
                 Ok(())
             }
         }
@@ -490,9 +444,7 @@ impl AssistantService {
     /// Delete all locale versions of an assistant rule. User only.
     pub async fn delete_rule(&self, id: &str) -> Result<bool, AppError> {
         match self.classify_source(id).await {
-            AssistantSource::Builtin => Err(AppError::BadRequest(
-                "Cannot delete rule for built-in assistant".into(),
-            )),
+            AssistantSource::Builtin => Err(AppError::BadRequest("Cannot delete rule for built-in assistant".into())),
             AssistantSource::Extension => Err(AppError::BadRequest(
                 "Cannot delete rule for extension-contributed assistant".into(),
             )),
@@ -518,16 +470,9 @@ impl AssistantService {
         }
     }
 
-    pub async fn write_skill(
-        &self,
-        id: &str,
-        locale: Option<&str>,
-        content: &str,
-    ) -> Result<(), AppError> {
+    pub async fn write_skill(&self, id: &str, locale: Option<&str>, content: &str) -> Result<(), AppError> {
         match self.classify_source(id).await {
-            AssistantSource::Builtin => Err(AppError::BadRequest(
-                "Cannot write skill for built-in assistant".into(),
-            )),
+            AssistantSource::Builtin => Err(AppError::BadRequest("Cannot write skill for built-in assistant".into())),
             AssistantSource::Extension => Err(AppError::BadRequest(
                 "Cannot write skill for extension-contributed assistant".into(),
             )),
@@ -537,8 +482,7 @@ impl AssistantService {
                     std::fs::create_dir_all(parent)
                         .map_err(|e| AppError::Internal(format!("create dir failed: {e}")))?;
                 }
-                std::fs::write(&path, content)
-                    .map_err(|e| AppError::Internal(format!("write failed: {e}")))?;
+                std::fs::write(&path, content).map_err(|e| AppError::Internal(format!("write failed: {e}")))?;
                 Ok(())
             }
         }
@@ -643,12 +587,7 @@ impl AssistantRuleDispatcher for AssistantService {
         AssistantService::read_rule(self, id, locale).await
     }
 
-    async fn write_rule(
-        &self,
-        id: &str,
-        locale: Option<&str>,
-        content: &str,
-    ) -> Result<(), AppError> {
+    async fn write_rule(&self, id: &str, locale: Option<&str>, content: &str) -> Result<(), AppError> {
         AssistantService::write_rule(self, id, locale, content).await
     }
 
@@ -660,12 +599,7 @@ impl AssistantRuleDispatcher for AssistantService {
         AssistantService::read_skill(self, id, locale).await
     }
 
-    async fn write_skill(
-        &self,
-        id: &str,
-        locale: Option<&str>,
-        content: &str,
-    ) -> Result<(), AppError> {
+    async fn write_skill(&self, id: &str, locale: Option<&str>, content: &str) -> Result<(), AppError> {
         AssistantService::write_skill(self, id, locale, content).await
     }
 
@@ -680,10 +614,7 @@ impl AssistantRuleDispatcher for AssistantService {
 
 const DEFAULT_AGENT_TYPE: &str = "gemini";
 
-fn builtin_to_response(
-    b: &BuiltinAssistant,
-    ov: Option<&AssistantOverrideRow>,
-) -> AssistantResponse {
+fn builtin_to_response(b: &BuiltinAssistant, ov: Option<&AssistantOverrideRow>) -> AssistantResponse {
     AssistantResponse {
         id: b.id.clone(),
         source: AssistantSource::Builtin,
@@ -707,10 +638,7 @@ fn builtin_to_response(
     }
 }
 
-fn user_row_to_response(
-    row: &AssistantRow,
-    ov: Option<&AssistantOverrideRow>,
-) -> Result<AssistantResponse, AppError> {
+fn user_row_to_response(row: &AssistantRow, ov: Option<&AssistantOverrideRow>) -> Result<AssistantResponse, AppError> {
     Ok(AssistantResponse {
         id: row.id.clone(),
         source: AssistantSource::User,
@@ -805,35 +733,27 @@ impl SerializedFields {
 
 fn encode_str_list(value: Option<&[String]>) -> Result<Option<String>, AppError> {
     match value {
-        Some(v) => {
-            Ok(Some(serde_json::to_string(v).map_err(|e| {
-                AppError::Internal(format!("encode list: {e}"))
-            })?))
-        }
+        Some(v) => Ok(Some(
+            serde_json::to_string(v).map_err(|e| AppError::Internal(format!("encode list: {e}")))?,
+        )),
         None => Ok(None),
     }
 }
 
 fn encode_str_map(value: Option<&HashMap<String, String>>) -> Result<Option<String>, AppError> {
     match value {
-        Some(v) => {
-            Ok(Some(serde_json::to_string(v).map_err(|e| {
-                AppError::Internal(format!("encode map: {e}"))
-            })?))
-        }
+        Some(v) => Ok(Some(
+            serde_json::to_string(v).map_err(|e| AppError::Internal(format!("encode map: {e}")))?,
+        )),
         None => Ok(None),
     }
 }
 
-fn encode_list_map(
-    value: Option<&HashMap<String, Vec<String>>>,
-) -> Result<Option<String>, AppError> {
+fn encode_list_map(value: Option<&HashMap<String, Vec<String>>>) -> Result<Option<String>, AppError> {
     match value {
-        Some(v) => {
-            Ok(Some(serde_json::to_string(v).map_err(|e| {
-                AppError::Internal(format!("encode map: {e}"))
-            })?))
-        }
+        Some(v) => Ok(Some(
+            serde_json::to_string(v).map_err(|e| AppError::Internal(format!("encode map: {e}")))?,
+        )),
         None => Ok(None),
     }
 }
@@ -849,18 +769,14 @@ fn decode_str_list(raw: Option<&str>) -> Result<Vec<String>, AppError> {
 
 fn decode_str_map(raw: Option<&str>) -> Result<HashMap<String, String>, AppError> {
     match raw {
-        Some(s) if !s.is_empty() => {
-            serde_json::from_str(s).map_err(|e| AppError::Internal(format!("decode map: {e}")))
-        }
+        Some(s) if !s.is_empty() => serde_json::from_str(s).map_err(|e| AppError::Internal(format!("decode map: {e}"))),
         _ => Ok(HashMap::new()),
     }
 }
 
 fn decode_list_map(raw: Option<&str>) -> Result<HashMap<String, Vec<String>>, AppError> {
     match raw {
-        Some(s) if !s.is_empty() => {
-            serde_json::from_str(s).map_err(|e| AppError::Internal(format!("decode map: {e}")))
-        }
+        Some(s) if !s.is_empty() => serde_json::from_str(s).map_err(|e| AppError::Internal(format!("decode map: {e}"))),
         _ => Ok(HashMap::new()),
     }
 }
@@ -870,9 +786,7 @@ fn decode_list_map(raw: Option<&str>) -> Result<HashMap<String, Vec<String>>, Ap
 // ---------------------------------------------------------------------------
 
 fn default_user_data_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(std::env::temp_dir)
-        .join(".aionui")
+    dirs::home_dir().unwrap_or_else(std::env::temp_dir).join(".aionui")
 }
 
 fn assistant_md_path(dir: &Path, id: &str, locale: Option<&str>) -> PathBuf {
@@ -953,9 +867,7 @@ pub fn generate_user_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aionui_db::{
-        SqliteAssistantOverrideRepository, SqliteAssistantRepository, init_database_memory,
-    };
+    use aionui_db::{SqliteAssistantOverrideRepository, SqliteAssistantRepository, init_database_memory};
     use aionui_extension::ExtensionStateStore;
     use aionui_realtime::BroadcastEventBus;
     use tempfile::TempDir;
@@ -973,8 +885,7 @@ mod tests {
     async fn fixture_with_builtins(builtins: Vec<BuiltinAssistant>) -> Fixture {
         let tmp = TempDir::new().unwrap();
         let db = init_database_memory().await.unwrap();
-        let repo: Arc<dyn IAssistantRepository> =
-            Arc::new(SqliteAssistantRepository::new(db.pool().clone()));
+        let repo: Arc<dyn IAssistantRepository> = Arc::new(SqliteAssistantRepository::new(db.pool().clone()));
         let orepo: Arc<dyn IAssistantOverrideRepository> =
             Arc::new(SqliteAssistantOverrideRepository::new(db.pool().clone()));
 
@@ -1005,8 +916,7 @@ mod tests {
 
         let event_bus = Arc::new(BroadcastEventBus::new(8));
         let ext_state_store = ExtensionStateStore::new(tmp.path().join("ext-states.json"));
-        let extension_registry =
-            ExtensionRegistry::new(ext_state_store, event_bus, "1.0.0".to_string());
+        let extension_registry = ExtensionRegistry::new(ext_state_store, event_bus, "1.0.0".to_string());
 
         let service = AssistantService::new(repo, orepo, builtin_reg, extension_registry)
             .with_user_data_dir(tmp.path().to_path_buf());
@@ -1355,10 +1265,7 @@ mod tests {
             })
             .await
             .unwrap();
-        fx.service
-            .write_rule("u1", Some("en-US"), "rule body")
-            .await
-            .unwrap();
+        fx.service.write_rule("u1", Some("en-US"), "rule body").await.unwrap();
         let content = fx.service.read_rule("u1", Some("en-US")).await.unwrap();
         assert_eq!(content, "rule body");
     }
@@ -1398,30 +1305,22 @@ mod tests {
         .unwrap();
         let builtin_reg = Arc::new(BuiltinAssistantRegistry::load_from_dir(assets_dir));
 
-        let repo: Arc<dyn IAssistantRepository> =
-            Arc::new(SqliteAssistantRepository::new(db.pool().clone()));
+        let repo: Arc<dyn IAssistantRepository> = Arc::new(SqliteAssistantRepository::new(db.pool().clone()));
         let orepo: Arc<dyn IAssistantOverrideRepository> =
             Arc::new(SqliteAssistantOverrideRepository::new(db.pool().clone()));
         let event_bus = Arc::new(BroadcastEventBus::new(8));
         let ext_state_store = ExtensionStateStore::new(tmp.path().join("ext-states.json"));
-        let extension_registry =
-            ExtensionRegistry::new(ext_state_store, event_bus, "1.0.0".to_string());
+        let extension_registry = ExtensionRegistry::new(ext_state_store, event_bus, "1.0.0".to_string());
 
         let service = AssistantService::new(repo, orepo, builtin_reg, extension_registry);
-        let content = service
-            .read_rule("builtin-office", Some("en-US"))
-            .await
-            .unwrap();
+        let content = service.read_rule("builtin-office", Some("en-US")).await.unwrap();
         assert_eq!(content, "office rules");
     }
 
     #[tokio::test]
     async fn classify_falls_back_to_user() {
         let fx = fixture().await;
-        assert_eq!(
-            fx.service.classify_source("ghost").await,
-            AssistantSource::User
-        );
+        assert_eq!(fx.service.classify_source("ghost").await, AssistantSource::User);
     }
 
     #[tokio::test]

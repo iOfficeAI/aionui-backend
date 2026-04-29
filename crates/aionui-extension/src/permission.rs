@@ -1,6 +1,5 @@
 use crate::types::{
-    ExtPermissions, FilesystemScope, NetworkPermission, PermissionDetail, PermissionLevel,
-    PermissionSummary, RiskLevel,
+    ExtPermissions, FilesystemScope, NetworkPermission, PermissionDetail, PermissionLevel, PermissionSummary, RiskLevel,
 };
 
 /// Calculate the overall risk level from permission declarations.
@@ -58,21 +57,13 @@ fn build_details(permissions: &ExtPermissions) -> Vec<PermissionDetail> {
         build_network_detail(&permissions.network),
         build_shell_detail(permissions.shell),
         build_filesystem_detail(permissions.filesystem),
-        build_bool_detail(
-            "clipboard",
-            permissions.clipboard,
-            "Clipboard read/write access",
-        ),
+        build_bool_detail("clipboard", permissions.clipboard, "Clipboard read/write access"),
         build_bool_detail(
             "activeUser",
             permissions.active_user,
             "Access to current user information",
         ),
-        build_bool_detail(
-            "events",
-            permissions.events,
-            "Extension event bus communication",
-        ),
+        build_bool_detail("events", permissions.events, "Extension event bus communication"),
     ]
 }
 
@@ -98,9 +89,7 @@ fn build_network_detail(network: &Option<NetworkPermission>) -> PermissionDetail
             level: PermissionLevel::Full,
             description: "Unrestricted network access".into(),
         },
-        Some(NetworkPermission::Scoped {
-            allowed_domains, ..
-        }) => PermissionDetail {
+        Some(NetworkPermission::Scoped { allowed_domains, .. }) => PermissionDetail {
             permission: "network".into(),
             level: PermissionLevel::Limited,
             description: format!("Network access limited to: {}", allowed_domains.join(", ")),
@@ -300,11 +289,7 @@ mod tests {
             ..Default::default()
         };
         let summary = build_permission_summary(&perms);
-        let storage = summary
-            .details
-            .iter()
-            .find(|d| d.permission == "storage")
-            .unwrap();
+        let storage = summary.details.iter().find(|d| d.permission == "storage").unwrap();
         assert_eq!(storage.level, PermissionLevel::Full);
     }
 
@@ -318,11 +303,7 @@ mod tests {
             ..Default::default()
         };
         let summary = build_permission_summary(&perms);
-        let network = summary
-            .details
-            .iter()
-            .find(|d| d.permission == "network")
-            .unwrap();
+        let network = summary.details.iter().find(|d| d.permission == "network").unwrap();
         assert_eq!(network.level, PermissionLevel::Limited);
         assert!(network.description.contains("a.com"));
         assert!(network.description.contains("b.com"));
@@ -335,11 +316,7 @@ mod tests {
             ..Default::default()
         };
         let summary = build_permission_summary(&perms);
-        let fs = summary
-            .details
-            .iter()
-            .find(|d| d.permission == "filesystem")
-            .unwrap();
+        let fs = summary.details.iter().find(|d| d.permission == "filesystem").unwrap();
         assert_eq!(fs.level, PermissionLevel::Full);
     }
 

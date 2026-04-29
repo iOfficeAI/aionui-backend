@@ -15,12 +15,12 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use aionui_common::encrypt_string;
 use aionui_db::{
-    CreateProviderParams, IProviderRepository, SqliteClientPreferenceRepository,
-    SqliteProviderRepository, SqliteSettingsRepository, init_database_memory,
+    CreateProviderParams, IProviderRepository, SqliteClientPreferenceRepository, SqliteProviderRepository,
+    SqliteSettingsRepository, init_database_memory,
 };
 use aionui_system::{
-    ClientPrefService, ModelFetchService, ProtocolDetectionService, ProviderService,
-    SettingsService, SystemRouterState, VersionCheckService, system_routes,
+    ClientPrefService, ModelFetchService, ProtocolDetectionService, ProviderService, SettingsService,
+    SystemRouterState, VersionCheckService, system_routes,
 };
 
 // ---------------------------------------------------------------------------
@@ -33,12 +33,8 @@ fn build_state(db: &aionui_db::Database) -> SystemRouterState {
     let provider_repo = Arc::new(SqliteProviderRepository::new(db.pool().clone()));
     let http_client = reqwest::Client::new();
     SystemRouterState {
-        settings_service: SettingsService::new(Arc::new(SqliteSettingsRepository::new(
-            db.pool().clone(),
-        ))),
-        client_pref_service: ClientPrefService::new(Arc::new(
-            SqliteClientPreferenceRepository::new(db.pool().clone()),
-        )),
+        settings_service: SettingsService::new(Arc::new(SqliteSettingsRepository::new(db.pool().clone()))),
+        client_pref_service: ClientPrefService::new(Arc::new(SqliteClientPreferenceRepository::new(db.pool().clone()))),
         provider_service: ProviderService::new(provider_repo.clone(), TEST_KEY),
         model_fetch_service: ModelFetchService::new(provider_repo, TEST_KEY, http_client.clone()),
         protocol_detection_service: ProtocolDetectionService::new(http_client.clone()),
@@ -52,12 +48,7 @@ async fn setup() -> (axum::Router, aionui_db::Database) {
     (system_routes(state), db)
 }
 
-async fn create_provider(
-    db: &aionui_db::Database,
-    platform: &str,
-    base_url: &str,
-    api_key: &str,
-) -> String {
+async fn create_provider(db: &aionui_db::Database, platform: &str, base_url: &str, api_key: &str) -> String {
     let repo = SqliteProviderRepository::new(db.pool().clone());
     let encrypted = encrypt_string(api_key, &TEST_KEY).unwrap();
     let row = repo
@@ -102,10 +93,7 @@ fn post_request(uri: &str, body: serde_json::Value) -> Request<Body> {
 #[tokio::test]
 async fn fetch_models_nonexistent_provider() {
     let (router, _db) = setup().await;
-    let req = post_request(
-        "/api/providers/nonexistent/models",
-        json!({"try_fix": false}),
-    );
+    let req = post_request("/api/providers/nonexistent/models", json!({"try_fix": false}));
     let resp = router.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
@@ -114,10 +102,7 @@ async fn fetch_models_nonexistent_provider() {
 async fn fetch_models_vertex_ai_hardcoded() {
     let (router, db) = setup().await;
     let id = create_provider(&db, "vertex-ai", "https://unused", "fake-key").await;
-    let req = post_request(
-        &format!("/api/providers/{id}/models"),
-        json!({"try_fix": false}),
-    );
+    let req = post_request(&format!("/api/providers/{id}/models"), json!({"try_fix": false}));
     let resp = router.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
@@ -164,10 +149,7 @@ async fn fetch_models_openai_compatible_success() {
     let (router, db) = setup().await;
     let id = create_provider(&db, "openai", &mock_server.uri(), "test-api-key").await;
 
-    let req = post_request(
-        &format!("/api/providers/{id}/models"),
-        json!({"try_fix": false}),
-    );
+    let req = post_request(&format!("/api/providers/{id}/models"), json!({"try_fix": false}));
     let resp = router.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
@@ -190,10 +172,7 @@ async fn fetch_models_openai_remote_error() {
     let (router, db) = setup().await;
     let id = create_provider(&db, "openai", &mock_server.uri(), "test-key").await;
 
-    let req = post_request(
-        &format!("/api/providers/{id}/models"),
-        json!({"try_fix": false}),
-    );
+    let req = post_request(&format!("/api/providers/{id}/models"), json!({"try_fix": false}));
     let resp = router.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_GATEWAY);
 }
@@ -363,10 +342,7 @@ async fn fetch_models_url_auto_fix_success() {
     let (router, db) = setup().await;
     let id = create_provider(&db, "openai", &mock_server.uri(), "test-key").await;
 
-    let req = post_request(
-        &format!("/api/providers/{id}/models"),
-        json!({"try_fix": true}),
-    );
+    let req = post_request(&format!("/api/providers/{id}/models"), json!({"try_fix": true}));
     let resp = router.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
@@ -375,12 +351,7 @@ async fn fetch_models_url_auto_fix_success() {
     assert_eq!(models.len(), 1);
     assert_eq!(models[0], "fixed-model");
     // fixedBaseUrl should be present
-    assert!(
-        json["data"]["fixed_base_url"]
-            .as_str()
-            .unwrap()
-            .contains("/v1")
-    );
+    assert!(json["data"]["fixed_base_url"].as_str().unwrap().contains("/v1"));
 }
 
 #[tokio::test]
@@ -397,10 +368,7 @@ async fn fetch_models_url_auto_fix_not_triggered_when_success() {
     let (router, db) = setup().await;
     let id = create_provider(&db, "openai", &mock_server.uri(), "test-key").await;
 
-    let req = post_request(
-        &format!("/api/providers/{id}/models"),
-        json!({"try_fix": true}),
-    );
+    let req = post_request(&format!("/api/providers/{id}/models"), json!({"try_fix": true}));
     let resp = router.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
@@ -425,10 +393,7 @@ async fn fetch_models_url_auto_fix_not_for_anthropic() {
     let id = create_provider(&db, "anthropic", &mock_server.uri(), "bad-key").await;
 
     // Even with tryFix=true, Anthropic should use fallback, not URL fix
-    let req = post_request(
-        &format!("/api/providers/{id}/models"),
-        json!({"try_fix": true}),
-    );
+    let req = post_request(&format!("/api/providers/{id}/models"), json!({"try_fix": true}));
     let resp = router.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 

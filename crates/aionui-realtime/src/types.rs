@@ -95,16 +95,10 @@ mod tests {
 
     #[test]
     fn ws_outbound_close() {
-        let msg = WsOutbound::Close(
-            WebSocketCloseCode::PolicyViolation,
-            "policy violation".into(),
-        );
+        let msg = WsOutbound::Close(WebSocketCloseCode::PolicyViolation, "policy violation".into());
         assert_eq!(
             msg,
-            WsOutbound::Close(
-                WebSocketCloseCode::PolicyViolation,
-                "policy violation".into()
-            )
+            WsOutbound::Close(WebSocketCloseCode::PolicyViolation, "policy violation".into())
         );
     }
 

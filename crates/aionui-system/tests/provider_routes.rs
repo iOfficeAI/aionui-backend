@@ -13,12 +13,11 @@ use serde_json::json;
 use tower::ServiceExt;
 
 use aionui_db::{
-    SqliteClientPreferenceRepository, SqliteProviderRepository, SqliteSettingsRepository,
-    init_database_memory,
+    SqliteClientPreferenceRepository, SqliteProviderRepository, SqliteSettingsRepository, init_database_memory,
 };
 use aionui_system::{
-    ClientPrefService, ModelFetchService, ProtocolDetectionService, ProviderService,
-    SettingsService, SystemRouterState, VersionCheckService, system_routes,
+    ClientPrefService, ModelFetchService, ProtocolDetectionService, ProviderService, SettingsService,
+    SystemRouterState, VersionCheckService, system_routes,
 };
 
 // ---------------------------------------------------------------------------
@@ -31,18 +30,10 @@ fn build_state(db: &aionui_db::Database) -> SystemRouterState {
     let provider_repo = Arc::new(SqliteProviderRepository::new(db.pool().clone()));
     let http_client = reqwest::Client::new();
     SystemRouterState {
-        settings_service: SettingsService::new(Arc::new(SqliteSettingsRepository::new(
-            db.pool().clone(),
-        ))),
-        client_pref_service: ClientPrefService::new(Arc::new(
-            SqliteClientPreferenceRepository::new(db.pool().clone()),
-        )),
+        settings_service: SettingsService::new(Arc::new(SqliteSettingsRepository::new(db.pool().clone()))),
+        client_pref_service: ClientPrefService::new(Arc::new(SqliteClientPreferenceRepository::new(db.pool().clone()))),
         provider_service: ProviderService::new(provider_repo.clone(), TEST_ENCRYPTION_KEY),
-        model_fetch_service: ModelFetchService::new(
-            provider_repo,
-            TEST_ENCRYPTION_KEY,
-            http_client.clone(),
-        ),
+        model_fetch_service: ModelFetchService::new(provider_repo, TEST_ENCRYPTION_KEY, http_client.clone()),
         protocol_detection_service: ProtocolDetectionService::new(http_client.clone()),
         version_check_service: VersionCheckService::new(http_client, "0.1.0".to_owned()),
     }
@@ -60,11 +51,7 @@ async fn body_json(resp: axum::response::Response) -> serde_json::Value {
 }
 
 fn get_request(uri: &str) -> Request<Body> {
-    Request::builder()
-        .method("GET")
-        .uri(uri)
-        .body(Body::empty())
-        .unwrap()
+    Request::builder().method("GET").uri(uri).body(Body::empty()).unwrap()
 }
 
 fn json_request(method: &str, uri: &str, body: serde_json::Value) -> Request<Body> {
@@ -179,10 +166,7 @@ async fn create_provider_with_supplied_id() {
         "api_key": "sk-test",
         "model_enabled": {"gpt-4": true, "gpt-3.5": false}
     });
-    let resp = app
-        .oneshot(json_request("POST", "/api/providers", body))
-        .await
-        .unwrap();
+    let resp = app.oneshot(json_request("POST", "/api/providers", body)).await.unwrap();
 
     assert_eq!(resp.status(), StatusCode::CREATED);
     let json = body_json(resp).await;
@@ -229,10 +213,7 @@ async fn create_provider_with_invalid_id_rejected() {
         "base_url": "https://api.openai.com",
         "api_key": "sk-test"
     });
-    let resp = app
-        .oneshot(json_request("POST", "/api/providers", body))
-        .await
-        .unwrap();
+    let resp = app.oneshot(json_request("POST", "/api/providers", body)).await.unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
@@ -256,10 +237,7 @@ async fn create_provider_with_optional_fields() {
         }
     });
 
-    let resp = app
-        .oneshot(json_request("POST", "/api/providers", body))
-        .await
-        .unwrap();
+    let resp = app.oneshot(json_request("POST", "/api/providers", body)).await.unwrap();
 
     assert_eq!(resp.status(), StatusCode::CREATED);
     let json = body_json(resp).await;
@@ -280,10 +258,7 @@ async fn create_provider_missing_platform() {
         "base_url": "https://api.example.com",
         "api_key": "sk-test"
     });
-    let resp = app
-        .oneshot(json_request("POST", "/api/providers", body))
-        .await
-        .unwrap();
+    let resp = app.oneshot(json_request("POST", "/api/providers", body)).await.unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
@@ -295,10 +270,7 @@ async fn create_provider_missing_name() {
         "base_url": "https://api.example.com",
         "api_key": "sk-test"
     });
-    let resp = app
-        .oneshot(json_request("POST", "/api/providers", body))
-        .await
-        .unwrap();
+    let resp = app.oneshot(json_request("POST", "/api/providers", body)).await.unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
@@ -310,10 +282,7 @@ async fn create_provider_missing_base_url() {
         "name": "Test",
         "api_key": "sk-test"
     });
-    let resp = app
-        .oneshot(json_request("POST", "/api/providers", body))
-        .await
-        .unwrap();
+    let resp = app.oneshot(json_request("POST", "/api/providers", body)).await.unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
@@ -325,10 +294,7 @@ async fn create_provider_missing_api_key() {
         "name": "Test",
         "base_url": "https://api.example.com"
     });
-    let resp = app
-        .oneshot(json_request("POST", "/api/providers", body))
-        .await
-        .unwrap();
+    let resp = app.oneshot(json_request("POST", "/api/providers", body)).await.unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
@@ -341,10 +307,7 @@ async fn create_provider_invalid_url() {
         "base_url": "not-a-url",
         "api_key": "sk-test"
     });
-    let resp = app
-        .oneshot(json_request("POST", "/api/providers", body))
-        .await
-        .unwrap();
+    let resp = app.oneshot(json_request("POST", "/api/providers", body)).await.unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
@@ -398,11 +361,7 @@ async fn update_provider_api_key_returns_plaintext() {
 async fn update_provider_nonexistent() {
     let (app, _db) = setup().await;
     let resp = app
-        .oneshot(json_request(
-            "PUT",
-            "/api/providers/nonexistent",
-            json!({"name": "X"}),
-        ))
+        .oneshot(json_request("PUT", "/api/providers/nonexistent", json!({"name": "X"})))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
@@ -449,10 +408,7 @@ async fn delete_provider_then_list_excludes_deleted() {
 #[tokio::test]
 async fn delete_provider_nonexistent() {
     let (app, _db) = setup().await;
-    let resp = app
-        .oneshot(delete_request("/api/providers/nonexistent"))
-        .await
-        .unwrap();
+    let resp = app.oneshot(delete_request("/api/providers/nonexistent")).await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
 

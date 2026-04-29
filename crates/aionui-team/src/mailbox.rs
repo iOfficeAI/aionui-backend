@@ -53,19 +53,10 @@ impl Mailbox {
             .ok_or_else(|| TeamError::InvalidRequest(format!("invalid message type: {msg_type}")))
     }
 
-    pub async fn read_unread(
-        &self,
-        team_id: &str,
-        agent_id: &str,
-    ) -> Result<Vec<MailboxMessage>, TeamError> {
+    pub async fn read_unread(&self, team_id: &str, agent_id: &str) -> Result<Vec<MailboxMessage>, TeamError> {
         let rows = self.repo.read_unread_and_mark(team_id, agent_id).await?;
 
-        debug!(
-            team_id,
-            agent_id,
-            count = rows.len(),
-            "mailbox unread messages read"
-        );
+        debug!(team_id, agent_id, count = rows.len(), "mailbox unread messages read");
 
         let messages = rows.iter().filter_map(MailboxMessage::from_row).collect();
         Ok(messages)
@@ -221,25 +212,11 @@ mod tests {
         let mailbox = Mailbox::new(repo);
 
         mailbox
-            .write(
-                "t1",
-                "a1",
-                "user",
-                MailboxMessageType::Message,
-                "for-a1",
-                None,
-            )
+            .write("t1", "a1", "user", MailboxMessageType::Message, "for-a1", None)
             .await
             .unwrap();
         mailbox
-            .write(
-                "t1",
-                "a2",
-                "user",
-                MailboxMessageType::Message,
-                "for-a2",
-                None,
-            )
+            .write("t1", "a2", "user", MailboxMessageType::Message, "for-a2", None)
             .await
             .unwrap();
 

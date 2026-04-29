@@ -271,10 +271,7 @@ mod tests {
 
     #[test]
     fn test_agent_type_display_names() {
-        assert_eq!(
-            AgentType::OpenclawGateway.display_name(),
-            "OpenClaw Gateway"
-        );
+        assert_eq!(AgentType::OpenclawGateway.display_name(), "OpenClaw Gateway");
         assert_eq!(AgentType::Aionrs.display_name(), "Aion CLI");
         assert_eq!(AgentType::Nanobot.display_name(), "Nanobot");
         assert_eq!(AgentType::Remote.display_name(), "Remote");
@@ -414,10 +411,7 @@ mod tests {
 
     #[test]
     fn agent_type_full_auto_mode_id_supports_non_acp_agents() {
-        assert_eq!(
-            AgentType::Acp.full_auto_mode_id(Some("codex")),
-            "full-access"
-        );
+        assert_eq!(AgentType::Acp.full_auto_mode_id(Some("codex")), "full-access");
         assert_eq!(AgentType::Acp.full_auto_mode_id(Some("claude")), "bypassPermissions");
         assert_eq!(AgentType::Acp.full_auto_mode_id(Some("gemini")), "yolo");
         assert_eq!(AgentType::Acp.full_auto_mode_id(None), "yolo");

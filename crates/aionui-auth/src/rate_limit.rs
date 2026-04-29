@@ -73,13 +73,10 @@ impl RateLimiter {
         let now = now_ms();
         let window_ms = self.window.as_millis() as u64;
 
-        let mut entry = self
-            .entries
-            .entry(key.to_owned())
-            .or_insert(RateLimitEntry {
-                count: 0,
-                reset_time_ms: now + window_ms,
-            });
+        let mut entry = self.entries.entry(key.to_owned()).or_insert(RateLimitEntry {
+            count: 0,
+            reset_time_ms: now + window_ms,
+        });
 
         if now >= entry.reset_time_ms {
             entry.count = 0;
@@ -101,13 +98,10 @@ impl RateLimiter {
         let now = now_ms();
         let window_ms = self.window.as_millis() as u64;
 
-        let mut entry = self
-            .entries
-            .entry(key.to_owned())
-            .or_insert(RateLimitEntry {
-                count: 0,
-                reset_time_ms: now + window_ms,
-            });
+        let mut entry = self.entries.entry(key.to_owned()).or_insert(RateLimitEntry {
+            count: 0,
+            reset_time_ms: now + window_ms,
+        });
 
         if now >= entry.reset_time_ms {
             entry.count = 0;

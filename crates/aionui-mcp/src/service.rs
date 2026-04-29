@@ -54,10 +54,7 @@ impl McpConfigService {
     ///
     /// If a server with the same name already exists, it is updated
     /// (transport, description, original_json) rather than creating a duplicate.
-    pub async fn add_server(
-        &self,
-        req: CreateMcpServerRequest,
-    ) -> Result<McpServerResponse, McpError> {
+    pub async fn add_server(&self, req: CreateMcpServerRequest) -> Result<McpServerResponse, McpError> {
         let transport = McpServerTransport::from(req.transport);
         let config_json = transport.to_config_json()?;
 
@@ -91,11 +88,7 @@ impl McpConfigService {
     }
 
     /// Edit an existing MCP server (partial update).
-    pub async fn edit_server(
-        &self,
-        id: &str,
-        req: UpdateMcpServerRequest,
-    ) -> Result<McpServerResponse, McpError> {
+    pub async fn edit_server(&self, id: &str, req: UpdateMcpServerRequest) -> Result<McpServerResponse, McpError> {
         // Verify the server exists
         self.repo
             .find_by_id(id)
@@ -112,10 +105,7 @@ impl McpConfigService {
 
         // Build transport fields if provided
         let transport = req.transport.map(McpServerTransport::from);
-        let config_json = transport
-            .as_ref()
-            .map(McpServerTransport::to_config_json)
-            .transpose()?;
+        let config_json = transport.as_ref().map(McpServerTransport::to_config_json).transpose()?;
 
         let params = UpdateMcpServerParams {
             name: req.name.as_deref(),
@@ -170,10 +160,7 @@ impl McpConfigService {
     ///
     /// Each server is processed individually: existing names are updated,
     /// new names are created.
-    pub async fn batch_import(
-        &self,
-        req: BatchImportMcpServersRequest,
-    ) -> Result<Vec<McpServerResponse>, McpError> {
+    pub async fn batch_import(&self, req: BatchImportMcpServersRequest) -> Result<Vec<McpServerResponse>, McpError> {
         let mut params_data: Vec<(McpServerTransport, String)> = Vec::new();
         for server_req in &req.servers {
             let transport = McpServerTransport::from(server_req.transport.clone());
@@ -185,18 +172,16 @@ impl McpConfigService {
             .servers
             .iter()
             .zip(params_data.iter())
-            .map(
-                |(server_req, (transport, config_json))| CreateMcpServerParams {
-                    name: &server_req.name,
-                    description: server_req.description.as_deref(),
-                    enabled: false,
-                    transport_type: transport.transport_type(),
-                    transport_config: config_json.as_str(),
-                    tools: None,
-                    original_json: server_req.original_json.as_deref(),
-                    builtin: server_req.builtin,
-                },
-            )
+            .map(|(server_req, (transport, config_json))| CreateMcpServerParams {
+                name: &server_req.name,
+                description: server_req.description.as_deref(),
+                enabled: false,
+                transport_type: transport.transport_type(),
+                transport_config: config_json.as_str(),
+                tools: None,
+                original_json: server_req.original_json.as_deref(),
+                builtin: server_req.builtin,
+            })
             .collect();
 
         let rows = self.repo.batch_upsert(&create_params).await?;
@@ -291,11 +276,7 @@ mod tests {
             Ok(row)
         }
 
-        async fn update(
-            &self,
-            id: &str,
-            params: UpdateMcpServerParams<'_>,
-        ) -> Result<McpServerRow, DbError> {
+        async fn update(&self, id: &str, params: UpdateMcpServerParams<'_>) -> Result<McpServerRow, DbError> {
             let mut servers = self.servers.lock().unwrap();
             let idx = servers
                 .iter()
@@ -346,10 +327,7 @@ mod tests {
             Ok(())
         }
 
-        async fn batch_upsert(
-            &self,
-            params_list: &[CreateMcpServerParams<'_>],
-        ) -> Result<Vec<McpServerRow>, DbError> {
+        async fn batch_upsert(&self, params_list: &[CreateMcpServerParams<'_>]) -> Result<Vec<McpServerRow>, DbError> {
             let mut results = Vec::new();
             for params in params_list {
                 let mut servers = self.servers.lock().unwrap();
@@ -497,16 +475,10 @@ mod tests {
     #[tokio::test]
     async fn add_server_upserts_existing() {
         let svc = make_service();
-        let first = svc
-            .add_server(stdio_create_req("upsert-test"))
-            .await
-            .unwrap();
+        let first = svc.add_server(stdio_create_req("upsert-test")).await.unwrap();
 
         // Second add with same name updates existing
-        let updated = svc
-            .add_server(http_create_req("upsert-test"))
-            .await
-            .unwrap();
+        let updated = svc.add_server(http_create_req("upsert-test")).await.unwrap();
         assert_eq!(updated.id, first.id);
         // Transport should be updated to http
         match updated.transport {
@@ -536,10 +508,7 @@ mod tests {
             .unwrap();
         assert_eq!(resp.name, "stdio-full");
         assert!(resp.builtin);
-        assert_eq!(
-            resp.original_json.as_deref(),
-            Some(r#"{"name":"stdio-full"}"#)
-        );
+        assert_eq!(resp.original_json.as_deref(), Some(r#"{"name":"stdio-full"}"#));
     }
 
     // -- edit_server ---------------------------------------------------------

@@ -20,8 +20,7 @@ pub use jwt::{JwtService, TokenPayload, generate_random_secret_string, resolve_j
 
 // Password service
 pub use password::{
-    dummy_password_hash, generate_user_credentials, hash_password, verify_password,
-    verify_password_timed,
+    dummy_password_hash, generate_user_credentials, hash_password, verify_password, verify_password_timed,
 };
 
 // Validation
@@ -29,14 +28,13 @@ pub use validation::{validate_password, validate_username};
 
 // Rate limiting
 pub use rate_limit::{
-    RateLimiter, api_rate_limit_middleware, auth_rate_limit_middleware,
-    authenticated_action_rate_limit_middleware,
+    RateLimiter, api_rate_limit_middleware, auth_rate_limit_middleware, authenticated_action_rate_limit_middleware,
 };
 
 // Token / IP extraction
 pub use extract::{
-    extract_client_ip, extract_client_ip_from_headers, extract_cookie_value,
-    extract_token_from_headers, extract_token_from_ws_headers,
+    extract_client_ip, extract_client_ip_from_headers, extract_cookie_value, extract_token_from_headers,
+    extract_token_from_ws_headers,
 };
 
 // Cookie configuration

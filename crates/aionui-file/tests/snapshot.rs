@@ -254,10 +254,7 @@ async fn git_repo_baseline_content_missing_file() {
     let ws = tmp.path().to_str().unwrap();
     svc.init(ws).await.unwrap();
 
-    let content = svc
-        .get_baseline_content(ws, "nonexistent.txt")
-        .await
-        .unwrap();
+    let content = svc.get_baseline_content(ws, "nonexistent.txt").await.unwrap();
     assert!(content.is_none());
 }
 
@@ -415,11 +412,7 @@ async fn snapshot_excludes_node_modules() {
     let tmp = tempfile::tempdir().unwrap();
     std::fs::write(tmp.path().join("app.js"), "console.log('hi')").unwrap();
     std::fs::create_dir(tmp.path().join("node_modules")).unwrap();
-    std::fs::write(
-        tmp.path().join("node_modules/dep.js"),
-        "module.exports = {}",
-    )
-    .unwrap();
+    std::fs::write(tmp.path().join("node_modules/dep.js"), "module.exports = {}").unwrap();
 
     let svc = SnapshotService::new();
     let ws = tmp.path().to_str().unwrap();
@@ -477,11 +470,7 @@ async fn compare_result_contains_full_paths() {
     svc.init(ws).await.unwrap();
 
     // Modify the file
-    std::fs::write(
-        tmp.path().join("src/main.rs"),
-        "fn main() { println!(\"hi\") }",
-    )
-    .unwrap();
+    std::fs::write(tmp.path().join("src/main.rs"), "fn main() { println!(\"hi\") }").unwrap();
 
     let result = svc.compare(ws).await.unwrap();
     assert_eq!(result.unstaged.len(), 1);
@@ -491,11 +480,7 @@ async fn compare_result_contains_full_paths() {
 
     // file_path should contain the workspace prefix
     let canonical = std::fs::canonicalize(tmp.path()).unwrap();
-    assert!(
-        result.unstaged[0]
-            .file_path
-            .starts_with(canonical.to_str().unwrap())
-    );
+    assert!(result.unstaged[0].file_path.starts_with(canonical.to_str().unwrap()));
 }
 
 // =======================================================================
@@ -558,18 +543,10 @@ async fn git_repo_stage_all_includes_deletions() {
     assert_eq!(result.staged.len(), 2);
     assert!(result.unstaged.is_empty());
 
-    let del = result
-        .staged
-        .iter()
-        .find(|e| e.relative_path == "a.txt")
-        .unwrap();
+    let del = result.staged.iter().find(|e| e.relative_path == "a.txt").unwrap();
     assert_eq!(del.operation, FileChangeOperation::Delete);
 
-    let add = result
-        .staged
-        .iter()
-        .find(|e| e.relative_path == "b.txt")
-        .unwrap();
+    let add = result.staged.iter().find(|e| e.relative_path == "b.txt").unwrap();
     assert_eq!(add.operation, FileChangeOperation::Create);
 }
 
@@ -716,9 +693,7 @@ async fn git_repo_reset_staged_modified_file() {
     svc.stage_file(ws, "a.txt").await.unwrap();
 
     // Reset: should unstage AND restore
-    svc.reset_file(ws, "a.txt", FileChangeOperation::Modify)
-        .await
-        .unwrap();
+    svc.reset_file(ws, "a.txt", FileChangeOperation::Modify).await.unwrap();
 
     let content = std::fs::read_to_string(tmp.path().join("a.txt")).unwrap();
     assert_eq!(content, "original");
@@ -767,9 +742,7 @@ async fn git_repo_reset_staged_deleted_file() {
     svc.stage_file(ws, "a.txt").await.unwrap();
 
     // Reset: should unstage AND restore
-    svc.reset_file(ws, "a.txt", FileChangeOperation::Delete)
-        .await
-        .unwrap();
+    svc.reset_file(ws, "a.txt", FileChangeOperation::Delete).await.unwrap();
 
     assert!(tmp.path().join("a.txt").exists());
     let content = std::fs::read_to_string(tmp.path().join("a.txt")).unwrap();

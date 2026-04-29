@@ -11,10 +11,7 @@ use axum::http::StatusCode;
 use serde_json::json;
 use tower::ServiceExt;
 
-use common::{
-    body_json, build_app, delete_with_token, get_request, get_with_token, json_with_token,
-    setup_and_login,
-};
+use common::{body_json, build_app, delete_with_token, get_request, get_with_token, json_with_token, setup_and_login};
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -52,12 +49,7 @@ fn create_cron_job_body(name: &str, expr: &str) -> serde_json::Value {
     })
 }
 
-async fn create_job(
-    app: &mut axum::Router,
-    token: &str,
-    csrf: &str,
-    body: serde_json::Value,
-) -> serde_json::Value {
+async fn create_job(app: &mut axum::Router, token: &str, csrf: &str, body: serde_json::Value) -> serde_json::Value {
     let req = json_with_token("POST", "/api/cron/jobs", body, token, csrf);
     let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
@@ -136,13 +128,7 @@ async fn cj2_create_three_schedule_types() {
 
     let now = aionui_common::now_ms();
 
-    let at = create_job(
-        &mut app,
-        &token,
-        &csrf,
-        create_at_job_body("At Job", now + 3_600_000),
-    )
-    .await;
+    let at = create_job(&mut app, &token, &csrf, create_at_job_body("At Job", now + 3_600_000)).await;
     assert_eq!(at["schedule"]["kind"], "at");
     assert!(at["state"]["next_run_at_ms"].as_i64().unwrap() > now);
 
@@ -226,13 +212,7 @@ async fn cj6_list_all_jobs() {
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
     for i in 0..3 {
-        create_job(
-            &mut app,
-            &token,
-            &csrf,
-            create_job_body(&format!("Job {i}")),
-        )
-        .await;
+        create_job(&mut app, &token, &csrf, create_job_body(&format!("Job {i}"))).await;
     }
 
     let req = get_with_token("/api/cron/jobs", &token);
@@ -283,13 +263,7 @@ async fn cj8_update_job() {
     let job_id = created["id"].as_str().unwrap();
 
     let update_body = json!({"name": "Updated Name", "enabled": false});
-    let req = json_with_token(
-        "PUT",
-        &format!("/api/cron/jobs/{job_id}"),
-        update_body,
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("PUT", &format!("/api/cron/jobs/{job_id}"), update_body, &token, &csrf);
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
@@ -297,8 +271,7 @@ async fn cj8_update_job() {
     assert_eq!(json["data"]["name"], "Updated Name");
     assert_eq!(json["data"]["enabled"], false);
     assert!(
-        json["data"]["metadata"]["updated_at"].as_i64().unwrap()
-            >= created["metadata"]["created_at"].as_i64().unwrap()
+        json["data"]["metadata"]["updated_at"].as_i64().unwrap() >= created["metadata"]["created_at"].as_i64().unwrap()
     );
 }
 
@@ -313,13 +286,7 @@ async fn cj9_update_schedule_type() {
     let job_id = created["id"].as_str().unwrap();
 
     let update_body = json!({"schedule": {"kind": "cron", "expr": "0 */5 * * * *"}});
-    let req = json_with_token(
-        "PUT",
-        &format!("/api/cron/jobs/{job_id}"),
-        update_body,
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("PUT", &format!("/api/cron/jobs/{job_id}"), update_body, &token, &csrf);
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
@@ -336,13 +303,7 @@ async fn cj10_update_nonexistent() {
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
     let update_body = json!({"name": "X"});
-    let req = json_with_token(
-        "PUT",
-        "/api/cron/jobs/cron_nonexistent",
-        update_body,
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("PUT", "/api/cron/jobs/cron_nonexistent", update_body, &token, &csrf);
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
@@ -426,13 +387,7 @@ async fn rn2_run_now_nonexistent() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
-    let req = json_with_token(
-        "POST",
-        "/api/cron/jobs/cron_nonexistent/run",
-        json!({}),
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("POST", "/api/cron/jobs/cron_nonexistent/run", json!({}), &token, &csrf);
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
@@ -447,8 +402,7 @@ async fn sk1_save_skill() {
     let created = create_job(&mut app, &token, &csrf, create_job_body("Skill Job")).await;
     let job_id = created["id"].as_str().unwrap();
 
-    let skill_body =
-        json!({"content": "---\nname: test\ndescription: test skill\n---\nDo something"});
+    let skill_body = json!({"content": "---\nname: test\ndescription: test skill\n---\nDo something"});
     let req = json_with_token(
         "POST",
         &format!("/api/cron/jobs/{job_id}/skill"),
@@ -535,13 +489,7 @@ async fn sk5_save_placeholder_skill() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
-    let created = create_job(
-        &mut app,
-        &token,
-        &csrf,
-        create_job_body("Placeholder Skill"),
-    )
-    .await;
+    let created = create_job(&mut app, &token, &csrf, create_job_body("Placeholder Skill")).await;
     let job_id = created["id"].as_str().unwrap();
 
     let skill_body = json!({"content": "TODO: fill in later"});

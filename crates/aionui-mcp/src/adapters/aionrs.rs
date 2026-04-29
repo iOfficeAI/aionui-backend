@@ -57,18 +57,14 @@ impl McpAgentAdapter for AionrsAdapter {
             return Ok(Vec::new());
         }
 
-        let content = tokio::fs::read_to_string(path).await.map_err(|e| {
-            McpError::AgentOperationFailed(format!("failed to read {config_path}: {e}"))
-        })?;
+        let content = tokio::fs::read_to_string(path)
+            .await
+            .map_err(|e| McpError::AgentOperationFailed(format!("failed to read {config_path}: {e}")))?;
 
         parse_toml_servers(&content)
     }
 
-    async fn install_server(
-        &self,
-        name: &str,
-        transport: &McpServerTransport,
-    ) -> Result<(), McpError> {
+    async fn install_server(&self, name: &str, transport: &McpServerTransport) -> Result<(), McpError> {
         if !self.is_installed().await? {
             return Err(McpError::AgentNotInstalled(CLI_NAME.into()));
         }
@@ -77,18 +73,18 @@ impl McpAgentAdapter for AionrsAdapter {
         let path = std::path::Path::new(&config_path);
 
         let mut doc = if path.exists() {
-            let content = tokio::fs::read_to_string(path).await.map_err(|e| {
-                McpError::AgentOperationFailed(format!("failed to read {config_path}: {e}"))
-            })?;
+            let content = tokio::fs::read_to_string(path)
+                .await
+                .map_err(|e| McpError::AgentOperationFailed(format!("failed to read {config_path}: {e}")))?;
             content
                 .parse::<toml::Value>()
                 .map_err(|e| McpError::AgentOperationFailed(format!("failed to parse TOML: {e}")))?
         } else {
             // Ensure parent directory exists
             if let Some(parent) = path.parent() {
-                tokio::fs::create_dir_all(parent).await.map_err(|e| {
-                    McpError::AgentOperationFailed(format!("failed to create dir: {e}"))
-                })?;
+                tokio::fs::create_dir_all(parent)
+                    .await
+                    .map_err(|e| McpError::AgentOperationFailed(format!("failed to create dir: {e}")))?;
             }
             toml::Value::Table(toml::map::Map::new())
         };
@@ -116,13 +112,12 @@ impl McpAgentAdapter for AionrsAdapter {
 
         servers_table.insert(name.to_owned(), transport_to_toml(transport));
 
-        let output = toml::to_string_pretty(&doc).map_err(|e| {
-            McpError::AgentOperationFailed(format!("failed to serialize TOML: {e}"))
-        })?;
+        let output = toml::to_string_pretty(&doc)
+            .map_err(|e| McpError::AgentOperationFailed(format!("failed to serialize TOML: {e}")))?;
 
-        tokio::fs::write(path, output).await.map_err(|e| {
-            McpError::AgentOperationFailed(format!("failed to write {config_path}: {e}"))
-        })?;
+        tokio::fs::write(path, output)
+            .await
+            .map_err(|e| McpError::AgentOperationFailed(format!("failed to write {config_path}: {e}")))?;
 
         Ok(())
     }
@@ -139,9 +134,9 @@ impl McpAgentAdapter for AionrsAdapter {
             return Ok(());
         }
 
-        let content = tokio::fs::read_to_string(path).await.map_err(|e| {
-            McpError::AgentOperationFailed(format!("failed to read {config_path}: {e}"))
-        })?;
+        let content = tokio::fs::read_to_string(path)
+            .await
+            .map_err(|e| McpError::AgentOperationFailed(format!("failed to read {config_path}: {e}")))?;
 
         let mut doc: toml::Value = content
             .parse()
@@ -161,13 +156,12 @@ impl McpAgentAdapter for AionrsAdapter {
             return Ok(());
         }
 
-        let output = toml::to_string_pretty(&doc).map_err(|e| {
-            McpError::AgentOperationFailed(format!("failed to serialize TOML: {e}"))
-        })?;
+        let output = toml::to_string_pretty(&doc)
+            .map_err(|e| McpError::AgentOperationFailed(format!("failed to serialize TOML: {e}")))?;
 
-        tokio::fs::write(path, output).await.map_err(|e| {
-            McpError::AgentOperationFailed(format!("failed to write {config_path}: {e}"))
-        })?;
+        tokio::fs::write(path, output)
+            .await
+            .map_err(|e| McpError::AgentOperationFailed(format!("failed to write {config_path}: {e}")))?;
 
         Ok(())
     }
@@ -220,10 +214,7 @@ fn parse_toml_servers(content: &str) -> Result<Vec<DetectedServer>, McpError> {
 fn parse_toml_server_entry(name: &str, config: &toml::Value) -> Option<DetectedServer> {
     let table = config.as_table()?;
 
-    let transport_type = table
-        .get("type")
-        .and_then(|v| v.as_str())
-        .unwrap_or("stdio");
+    let transport_type = table.get("type").and_then(|v| v.as_str()).unwrap_or("stdio");
 
     let transport = match transport_type {
         "stdio" => {
@@ -231,11 +222,7 @@ fn parse_toml_server_entry(name: &str, config: &toml::Value) -> Option<DetectedS
             let args = table
                 .get("args")
                 .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_str().map(String::from))
-                        .collect()
-                })
+                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
                 .unwrap_or_default();
             let env = table
                 .get("env")
@@ -291,11 +278,7 @@ fn transport_to_toml(transport: &McpServerTransport) -> toml::Value {
             if !args.is_empty() {
                 table.insert(
                     "args".into(),
-                    toml::Value::Array(
-                        args.iter()
-                            .map(|a| toml::Value::String(a.clone()))
-                            .collect(),
-                    ),
+                    toml::Value::Array(args.iter().map(|a| toml::Value::String(a.clone())).collect()),
                 );
             }
             if !env.is_empty() {
@@ -322,10 +305,7 @@ fn transport_to_toml(transport: &McpServerTransport) -> toml::Value {
 }
 
 /// Insert headers into a TOML table if non-empty.
-fn insert_toml_headers(
-    table: &mut toml::map::Map<String, toml::Value>,
-    headers: &HashMap<String, String>,
-) {
+fn insert_toml_headers(table: &mut toml::map::Map<String, toml::Value>, headers: &HashMap<String, String>) {
     if !headers.is_empty() {
         let headers_table: toml::map::Map<String, toml::Value> = headers
             .iter()
@@ -450,10 +430,7 @@ url = "https://example.com/api"
 "#;
         let servers = parse_toml_servers(toml).unwrap();
         assert_eq!(servers.len(), 1);
-        assert!(matches!(
-            servers[0].transport,
-            McpServerTransport::Http { .. }
-        ));
+        assert!(matches!(servers[0].transport, McpServerTransport::Http { .. }));
     }
 
     #[test]
@@ -506,10 +483,7 @@ args = ["srv.js"]
 "#;
         let servers = parse_toml_servers(toml).unwrap();
         assert_eq!(servers.len(), 1);
-        assert!(matches!(
-            servers[0].transport,
-            McpServerTransport::Stdio { .. }
-        ));
+        assert!(matches!(servers[0].transport, McpServerTransport::Stdio { .. }));
     }
 
     // -- transport_to_toml roundtrip ------------------------------------------

@@ -148,7 +148,8 @@ pub fn all_tool_descriptors() -> Vec<ToolDescriptor> {
         },
         ToolDescriptor {
             name: "team_shutdown_agent".into(),
-            description: "Initiate shutdown of a teammate (Lead only). Sends a shutdown_request to the target agent.".into(),
+            description: "Initiate shutdown of a teammate (Lead only). Sends a shutdown_request to the target agent."
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -546,9 +547,10 @@ mod tests {
             desc.description
                 .starts_with("Get detailed information about a preset assistant")
         );
-        assert!(desc.description.contains(
-            "After confirming a match, call team_spawn_agent with the same custom_agent_id."
-        ));
+        assert!(
+            desc.description
+                .contains("After confirming a match, call team_spawn_agent with the same custom_agent_id.")
+        );
     }
 
     // ---- D4 handlers return non-error payloads ----

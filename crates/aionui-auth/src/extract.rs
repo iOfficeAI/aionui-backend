@@ -60,11 +60,7 @@ pub fn extract_token_from_ws_headers(headers: &HeaderMap) -> Option<String> {
         .and_then(|v| v.to_str().ok())
         .and_then(|protocols| {
             let first = protocols.split(',').next()?.trim();
-            if first.is_empty() {
-                None
-            } else {
-                Some(first.to_owned())
-            }
+            if first.is_empty() { None } else { Some(first.to_owned()) }
         })
 }
 
@@ -89,11 +85,7 @@ pub fn extract_cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
 fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
     let auth = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
     let token = auth.strip_prefix("Bearer ")?;
-    if token.is_empty() {
-        None
-    } else {
-        Some(token.to_owned())
-    }
+    if token.is_empty() { None } else { Some(token.to_owned()) }
 }
 
 #[cfg(test)]
@@ -143,19 +135,13 @@ mod tests {
     #[test]
     fn token_from_authorization_header() {
         let headers = headers_with(&[("authorization", "Bearer my_jwt_token")]);
-        assert_eq!(
-            extract_token_from_headers(&headers),
-            Some("my_jwt_token".into())
-        );
+        assert_eq!(extract_token_from_headers(&headers), Some("my_jwt_token".into()));
     }
 
     #[test]
     fn token_from_cookie() {
         let headers = headers_with(&[("cookie", "aionui-session=cookie_token; other=val")]);
-        assert_eq!(
-            extract_token_from_headers(&headers),
-            Some("cookie_token".into())
-        );
+        assert_eq!(extract_token_from_headers(&headers), Some("cookie_token".into()));
     }
 
     #[test]
@@ -164,10 +150,7 @@ mod tests {
             ("authorization", "Bearer header_token"),
             ("cookie", "aionui-session=cookie_token"),
         ]);
-        assert_eq!(
-            extract_token_from_headers(&headers),
-            Some("header_token".into())
-        );
+        assert_eq!(extract_token_from_headers(&headers), Some("header_token".into()));
     }
 
     #[test]
@@ -193,28 +176,19 @@ mod tests {
     #[test]
     fn ws_token_from_authorization() {
         let headers = headers_with(&[("authorization", "Bearer ws_token")]);
-        assert_eq!(
-            extract_token_from_ws_headers(&headers),
-            Some("ws_token".into())
-        );
+        assert_eq!(extract_token_from_ws_headers(&headers), Some("ws_token".into()));
     }
 
     #[test]
     fn ws_token_from_cookie() {
         let headers = headers_with(&[("cookie", "aionui-session=ws_cookie")]);
-        assert_eq!(
-            extract_token_from_ws_headers(&headers),
-            Some("ws_cookie".into())
-        );
+        assert_eq!(extract_token_from_ws_headers(&headers), Some("ws_cookie".into()));
     }
 
     #[test]
     fn ws_token_from_sec_websocket_protocol() {
         let headers = headers_with(&[("sec-websocket-protocol", "my_ws_token, graphql-ws")]);
-        assert_eq!(
-            extract_token_from_ws_headers(&headers),
-            Some("my_ws_token".into())
-        );
+        assert_eq!(extract_token_from_ws_headers(&headers), Some("my_ws_token".into()));
     }
 
     #[test]
@@ -224,10 +198,7 @@ mod tests {
             ("cookie", "aionui-session=cookie_token"),
             ("sec-websocket-protocol", "proto_token"),
         ]);
-        assert_eq!(
-            extract_token_from_ws_headers(&headers),
-            Some("auth_token".into())
-        );
+        assert_eq!(extract_token_from_ws_headers(&headers), Some("auth_token".into()));
     }
 
     #[test]
@@ -237,10 +208,7 @@ mod tests {
             ("cookie", "aionui-session=cookie_token"),
             ("sec-websocket-protocol", "proto_token"),
         ]);
-        assert_eq!(
-            extract_token_from_ws_headers(&headers),
-            Some("cookie_token".into())
-        );
+        assert_eq!(extract_token_from_ws_headers(&headers), Some("cookie_token".into()));
     }
 
     // --- extract_cookie_value ---
@@ -248,10 +216,7 @@ mod tests {
     #[test]
     fn cookie_value_extracted() {
         let headers = headers_with(&[("cookie", "a=1; target=hello; b=2")]);
-        assert_eq!(
-            extract_cookie_value(&headers, "target"),
-            Some("hello".into())
-        );
+        assert_eq!(extract_cookie_value(&headers, "target"), Some("hello".into()));
     }
 
     #[test]
@@ -270,10 +235,7 @@ mod tests {
     fn cookie_value_skips_malformed_entries() {
         // Entry without '=' should be skipped, not abort the entire search
         let headers = headers_with(&[("cookie", "malformed; target=found; also_bad")]);
-        assert_eq!(
-            extract_cookie_value(&headers, "target"),
-            Some("found".into())
-        );
+        assert_eq!(extract_cookie_value(&headers, "target"), Some("found".into()));
     }
 
     #[test]
@@ -286,10 +248,7 @@ mod tests {
     fn cookie_value_malformed_before_target() {
         // Malformed entry appears before the target cookie
         let headers = headers_with(&[("cookie", "bad_entry; aionui-session=tok123")]);
-        assert_eq!(
-            extract_cookie_value(&headers, "aionui-session"),
-            Some("tok123".into())
-        );
+        assert_eq!(extract_cookie_value(&headers, "aionui-session"), Some("tok123".into()));
     }
 
     #[test]

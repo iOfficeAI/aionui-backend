@@ -12,10 +12,7 @@ fn service() -> ShellService {
 // ---------------------------------------------------------------------------
 #[tokio::test]
 async fn sh2_open_file_not_found() {
-    let err = service()
-        .open_file("/nonexistent/file.txt")
-        .await
-        .unwrap_err();
+    let err = service().open_file("/nonexistent/file.txt").await.unwrap_err();
     let msg = err.to_string();
     assert!(
         msg.contains("not found") || msg.contains("does not exist"),
@@ -28,15 +25,9 @@ async fn sh2_open_file_not_found() {
 // ---------------------------------------------------------------------------
 #[tokio::test]
 async fn sh4_show_item_in_folder_not_found() {
-    let err = service()
-        .show_item_in_folder("/nonexistent/path")
-        .await
-        .unwrap_err();
+    let err = service().show_item_in_folder("/nonexistent/path").await.unwrap_err();
     let msg = err.to_string();
-    assert!(
-        msg.contains("not found"),
-        "expected 'not found', got: {msg}"
-    );
+    assert!(msg.contains("not found"), "expected 'not found', got: {msg}");
 }
 
 // ---------------------------------------------------------------------------
@@ -57,10 +48,7 @@ async fn sh6_open_external_command_injection() {
 // ---------------------------------------------------------------------------
 #[tokio::test]
 async fn sh7_open_external_file_scheme() {
-    let err = service()
-        .open_external("file:///etc/passwd")
-        .await
-        .unwrap_err();
+    let err = service().open_external("file:///etc/passwd").await.unwrap_err();
     let msg = err.to_string();
     assert!(
         msg.contains("scheme") || msg.to_lowercase().contains("not allowed"),
@@ -102,10 +90,7 @@ async fn sh12_open_folder_with_dir_not_found() {
         .await
         .unwrap_err();
     let msg = err.to_string();
-    assert!(
-        msg.contains("not found"),
-        "expected 'not found', got: {msg}"
-    );
+    assert!(msg.contains("not found"), "expected 'not found', got: {msg}");
 }
 
 // ---------------------------------------------------------------------------
@@ -158,10 +143,7 @@ async fn open_folder_with_file_path_rejected() {
 // ---------------------------------------------------------------------------
 #[tokio::test]
 async fn open_external_ftp_scheme_rejected() {
-    let err = service()
-        .open_external("ftp://evil.com/file")
-        .await
-        .unwrap_err();
+    let err = service().open_external("ftp://evil.com/file").await.unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("scheme"), "expected scheme error, got: {msg}");
 }
@@ -171,10 +153,7 @@ async fn open_external_ftp_scheme_rejected() {
 // ---------------------------------------------------------------------------
 #[tokio::test]
 async fn open_external_javascript_scheme_rejected() {
-    let err = service()
-        .open_external("javascript:alert(1)")
-        .await
-        .unwrap_err();
+    let err = service().open_external("javascript:alert(1)").await.unwrap_err();
     let msg = err.to_string();
     assert!(
         msg.contains("scheme") || msg.to_lowercase().contains("invalid"),

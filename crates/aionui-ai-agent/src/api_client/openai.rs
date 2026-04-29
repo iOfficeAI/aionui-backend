@@ -47,10 +47,7 @@ impl OpenAIRotatingClient {
     }
 
     /// POST /v1/images/generations
-    pub async fn create_image(
-        &self,
-        request: &serde_json::Value,
-    ) -> Result<serde_json::Value, ApiClientError> {
+    pub async fn create_image(&self, request: &serde_json::Value) -> Result<serde_json::Value, ApiClientError> {
         self.inner
             .execute_with_retry(|client, base_url, api_key| {
                 client
@@ -62,10 +59,7 @@ impl OpenAIRotatingClient {
     }
 
     /// POST /v1/embeddings
-    pub async fn create_embedding(
-        &self,
-        request: &serde_json::Value,
-    ) -> Result<serde_json::Value, ApiClientError> {
+    pub async fn create_embedding(&self, request: &serde_json::Value) -> Result<serde_json::Value, ApiClientError> {
         self.inner
             .execute_with_retry(|client, base_url, api_key| {
                 client

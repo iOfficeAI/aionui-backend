@@ -3,8 +3,8 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use aionui_api_types::{
-    CreateCronJobRequest, CronJobResponse, CronScheduleDto, HasSkillResponse, ListCronJobsQuery,
-    RunNowResponse, SaveCronSkillRequest, UpdateCronJobRequest,
+    CreateCronJobRequest, CronJobResponse, CronScheduleDto, HasSkillResponse, ListCronJobsQuery, RunNowResponse,
+    SaveCronSkillRequest, UpdateCronJobRequest,
 };
 use aionui_common::{AgentType, ProviderWithModel, generate_prefixed_id, now_ms};
 use aionui_db::{ICronRepository, UpdateCronJobParams};
@@ -15,12 +15,10 @@ use crate::events::CronEventEmitter;
 use crate::error::CronError;
 use crate::executor::{ExecutionResult, JobExecutor, RETRY_INTERVAL_MS};
 use crate::scheduler::{CronScheduler, compute_next_run, validate_schedule};
-use crate::skill_file::{
-    delete_skill_file, has_skill_file, write_raw_skill_file, write_skill_file,
-};
+use crate::skill_file::{delete_skill_file, has_skill_file, write_raw_skill_file, write_skill_file};
 use crate::types::{
-    CreatedBy, CronAgentConfig, CronJob, CronSchedule, ExecutionMode, cron_job_from_row,
-    cron_job_to_response, cron_job_to_row, schedule_from_dto,
+    CreatedBy, CronAgentConfig, CronJob, CronSchedule, ExecutionMode, cron_job_from_row, cron_job_to_response,
+    cron_job_to_row, schedule_from_dto,
 };
 
 const PLACEHOLDER_PATTERNS: &[&str] = &[
@@ -125,11 +123,7 @@ impl CronService {
         Ok(job)
     }
 
-    pub async fn update_job(
-        &self,
-        job_id: &str,
-        req: UpdateCronJobRequest,
-    ) -> Result<CronJob, CronError> {
+    pub async fn update_job(&self, job_id: &str, req: UpdateCronJobRequest) -> Result<CronJob, CronError> {
         let existing_row = self
             .repo
             .get_by_id(job_id)
@@ -361,11 +355,7 @@ impl CronService {
     // Skill management
     // -----------------------------------------------------------------------
 
-    pub async fn save_skill(
-        &self,
-        job_id: &str,
-        req: SaveCronSkillRequest,
-    ) -> Result<(), CronError> {
+    pub async fn save_skill(&self, job_id: &str, req: SaveCronSkillRequest) -> Result<(), CronError> {
         let row = self
             .repo
             .get_by_id(job_id)
@@ -381,9 +371,7 @@ impl CronService {
             ..Default::default()
         };
         self.repo.update(job_id, &params).await?;
-        self.executor
-            .mark_skill_suggest_artifacts_saved(job_id)
-            .await?;
+        self.executor.mark_skill_suggest_artifacts_saved(job_id).await?;
 
         info!(job_id, "Skill content saved");
         Ok(())
@@ -397,10 +385,7 @@ impl CronService {
             .ok_or_else(|| CronError::JobNotFound(job_id.to_owned()))?;
 
         let has_skill = has_skill_file(&self.data_dir, job_id).await?
-            || row
-                .skill_content
-                .as_ref()
-                .is_some_and(|s| !s.trim().is_empty());
+            || row.skill_content.as_ref().is_some_and(|s| !s.trim().is_empty());
 
         Ok(HasSkillResponse { has_skill })
     }
@@ -432,9 +417,7 @@ impl CronService {
     }
 
     async fn bind_existing_conversation_if_needed(&self, job: &CronJob) {
-        if !matches!(job.execution_mode, ExecutionMode::Existing)
-            || job.conversation_id.trim().is_empty()
-        {
+        if !matches!(job.execution_mode, ExecutionMode::Existing) || job.conversation_id.trim().is_empty() {
             return;
         }
 
@@ -461,11 +444,7 @@ impl CronService {
             return true;
         }
 
-        match self
-            .executor
-            .conversation_exists(&job.conversation_id)
-            .await
-        {
+        match self.executor.conversation_exists(&job.conversation_id).await {
             Ok(exists) => !exists,
             Err(err) => {
                 warn!(
@@ -484,8 +463,7 @@ impl CronService {
 
         match result {
             ExecutionResult::Success { conversation_id } => {
-                self.update_job_after_success(job_id, &conversation_id)
-                    .await;
+                self.update_job_after_success(job_id, &conversation_id).await;
                 self.reschedule_after_execution(&job).await;
                 self.emitter.emit_job_executed(job_id, "ok", None);
             }
@@ -514,8 +492,7 @@ impl CronService {
             ExecutionResult::Error { message } => {
                 self.update_job_after_error(job_id, &message).await;
                 self.reschedule_after_execution(&job).await;
-                self.emitter
-                    .emit_job_executed(job_id, "error", Some(&message));
+                self.emitter.emit_job_executed(job_id, "error", Some(&message));
             }
         }
     }
@@ -523,14 +500,12 @@ impl CronService {
     async fn handle_run_now_result(&self, job_id: &str, result: ExecutionResult) {
         match result {
             ExecutionResult::Success { conversation_id } => {
-                self.update_job_after_success(job_id, &conversation_id)
-                    .await;
+                self.update_job_after_success(job_id, &conversation_id).await;
                 self.emitter.emit_job_executed(job_id, "ok", None);
             }
             ExecutionResult::Error { message } => {
                 self.update_job_after_error(job_id, &message).await;
-                self.emitter
-                    .emit_job_executed(job_id, "error", Some(&message));
+                self.emitter.emit_job_executed(job_id, "error", Some(&message));
             }
             ExecutionResult::Retrying { attempt } => {
                 let params = UpdateCronJobParams {
@@ -627,8 +602,7 @@ impl CronService {
                 next_run_at: None,
                 ..job.clone()
             };
-            self.emitter
-                .emit_job_updated(&cron_job_to_response(&disabled));
+            self.emitter.emit_job_updated(&cron_job_to_response(&disabled));
 
             info!(job_id = %job.id, "At-type job executed, auto-disabled");
             return;
@@ -681,10 +655,9 @@ impl CronService {
             .insert_tips_message(&job.conversation_id, &content, "warning")
             .await
         {
-            Ok(()) => {
-                self.emitter
-                    .emit_conversation_tips(&job.conversation_id, &content, "warning")
-            }
+            Ok(()) => self
+                .emitter
+                .emit_conversation_tips(&job.conversation_id, &content, "warning"),
             Err(err) => {
                 warn!(
                     job_id = %job.id,
@@ -823,26 +796,23 @@ impl aionui_ai_agent::middleware::ICronService for CronService {
             description: Some(params.schedule_description.clone()),
         };
 
-        let (agent_type, conversation_title, agent_config) = match self
-            .executor
-            .get_conversation_row(conversation_id)
-            .await
-        {
-            Ok(Some(row)) => {
-                let title = Some(row.name.clone());
-                let (agent_type, agent_config) = build_agent_config_from_conversation(&row);
-                (agent_type, title, agent_config)
-            }
-            Ok(None) => ("acp".to_owned(), None, None),
-            Err(err) => {
-                warn!(
-                    conversation_id,
-                    error = %err,
-                    "Failed to load conversation context for cron create; falling back to defaults"
-                );
-                ("acp".to_owned(), None, None)
-            }
-        };
+        let (agent_type, conversation_title, agent_config) =
+            match self.executor.get_conversation_row(conversation_id).await {
+                Ok(Some(row)) => {
+                    let title = Some(row.name.clone());
+                    let (agent_type, agent_config) = build_agent_config_from_conversation(&row);
+                    (agent_type, title, agent_config)
+                }
+                Ok(None) => ("acp".to_owned(), None, None),
+                Err(err) => {
+                    warn!(
+                        conversation_id,
+                        error = %err,
+                        "Failed to load conversation context for cron create; falling back to defaults"
+                    );
+                    ("acp".to_owned(), None, None)
+                }
+            };
 
         let req = CreateCronJobRequest {
             name: params.name.clone(),
@@ -934,11 +904,7 @@ impl aionui_ai_agent::middleware::ICronService for CronService {
         }
     }
 
-    async fn list_jobs(
-        &self,
-        _user_id: &str,
-        conversation_id: &str,
-    ) -> aionui_ai_agent::middleware::CronCommandResult {
+    async fn list_jobs(&self, _user_id: &str, conversation_id: &str) -> aionui_ai_agent::middleware::CronCommandResult {
         let query = ListCronJobsQuery {
             conversation_id: Some(conversation_id.to_owned()),
         };
@@ -947,10 +913,7 @@ impl aionui_ai_agent::middleware::ICronService for CronService {
                 if jobs.is_empty() {
                     return aionui_ai_agent::middleware::CronCommandResult {
                         success: true,
-                        message: format!(
-                            "No cron jobs found for conversation '{}'.",
-                            conversation_id
-                        ),
+                        message: format!("No cron jobs found for conversation '{}'.", conversation_id),
                     };
                 }
 
@@ -979,11 +942,7 @@ impl aionui_ai_agent::middleware::ICronService for CronService {
         }
     }
 
-    async fn delete_job(
-        &self,
-        _user_id: &str,
-        job_id: &str,
-    ) -> aionui_ai_agent::middleware::CronCommandResult {
+    async fn delete_job(&self, _user_id: &str, job_id: &str) -> aionui_ai_agent::middleware::CronCommandResult {
         match self.remove_job(job_id).await {
             Ok(()) => aionui_ai_agent::middleware::CronCommandResult {
                 success: true,
@@ -1000,8 +959,7 @@ impl aionui_ai_agent::middleware::ICronService for CronService {
 fn build_agent_config_from_conversation(
     row: &aionui_db::models::ConversationRow,
 ) -> (String, Option<aionui_api_types::CronAgentConfigDto>) {
-    let extra = serde_json::from_str::<serde_json::Value>(&row.extra)
-        .unwrap_or_else(|_| serde_json::json!({}));
+    let extra = serde_json::from_str::<serde_json::Value>(&row.extra).unwrap_or_else(|_| serde_json::json!({}));
     let model = parse_provider_with_model_loose(row.model.as_deref());
 
     let backend = if row.r#type == "aionrs" {
@@ -1023,8 +981,7 @@ fn build_agent_config_from_conversation(
     };
 
     let preset_assistant_id = get_string(&extra, &["preset_assistant_id", "presetAssistantId"]);
-    let custom_agent_id =
-        get_string(&extra, &["custom_agent_id", "customAgentId"]).or(preset_assistant_id.clone());
+    let custom_agent_id = get_string(&extra, &["custom_agent_id", "customAgentId"]).or(preset_assistant_id.clone());
     let is_preset = preset_assistant_id.as_ref().map(|_| true);
     let preset_agent_type = if preset_assistant_id.is_some() {
         Some(backend.clone())
@@ -1032,8 +989,7 @@ fn build_agent_config_from_conversation(
         None
     };
 
-    let agent_type_enum =
-        serde_json::from_value::<AgentType>(serde_json::Value::String(row.r#type.clone())).ok();
+    let agent_type_enum = serde_json::from_value::<AgentType>(serde_json::Value::String(row.r#type.clone())).ok();
     // Backend is now the vendor label (e.g. "claude"); pass through as
     // &str so `full_auto_mode_id` can key on it without re-parsing.
     let full_auto_mode = agent_type_enum
@@ -1130,9 +1086,7 @@ fn validate_skill_body_content(content: &str) -> Result<(), CronError> {
     let trimmed = content.trim();
 
     if trimmed.is_empty() {
-        return Err(CronError::InvalidSkillContent(
-            "content must not be empty".into(),
-        ));
+        return Err(CronError::InvalidSkillContent("content must not be empty".into()));
     }
 
     let lower = trimmed.to_lowercase();
@@ -1155,11 +1109,7 @@ fn schedule_description(schedule: &CronSchedule) -> Option<&str> {
     }
 }
 
-async fn persist_skill_file(
-    data_dir: &Path,
-    job: &CronJob,
-    raw_content: &str,
-) -> Result<(), CronError> {
+async fn persist_skill_file(data_dir: &Path, job: &CronJob, raw_content: &str) -> Result<(), CronError> {
     match write_raw_skill_file(data_dir, &job.id, raw_content).await {
         Ok(_) => Ok(()),
         Err(CronError::InvalidSkillContent(_)) => {
@@ -1183,13 +1133,12 @@ async fn persist_skill_file(
 }
 
 fn build_update_params(job: &CronJob, req: &UpdateCronJobRequest) -> UpdateCronJobParams {
-    let (schedule_kind, schedule_value, schedule_tz, schedule_description) =
-        if req.schedule.is_some() {
-            let (k, v, tz, d) = schedule_to_row_fields(&job.schedule);
-            (Some(k), Some(v), Some(tz), Some(d))
-        } else {
-            (None, None, None, None)
-        };
+    let (schedule_kind, schedule_value, schedule_tz, schedule_description) = if req.schedule.is_some() {
+        let (k, v, tz, d) = schedule_to_row_fields(&job.schedule);
+        (Some(k), Some(v), Some(tz), Some(d))
+    } else {
+        (None, None, None, None)
+    };
 
     let agent_config = req.agent_config.as_ref().map(|c| {
         let config = CronAgentConfig {
@@ -1235,35 +1184,15 @@ fn build_update_params(job: &CronJob, req: &UpdateCronJobRequest) -> UpdateCronJ
     }
 }
 
-fn schedule_to_row_fields(
-    schedule: &CronSchedule,
-) -> (String, String, Option<String>, Option<String>) {
+fn schedule_to_row_fields(schedule: &CronSchedule) -> (String, String, Option<String>, Option<String>) {
     match schedule {
-        CronSchedule::At { at_ms, description } => (
-            "at".to_owned(),
-            at_ms.to_string(),
-            None,
-            description.clone(),
-        ),
-        CronSchedule::Every {
-            every_ms,
-            description,
-        } => (
-            "every".to_owned(),
-            every_ms.to_string(),
-            None,
-            description.clone(),
-        ),
-        CronSchedule::Cron {
-            expr,
-            tz,
-            description,
-        } => (
-            "cron".to_owned(),
-            expr.clone(),
-            tz.clone(),
-            description.clone(),
-        ),
+        CronSchedule::At { at_ms, description } => ("at".to_owned(), at_ms.to_string(), None, description.clone()),
+        CronSchedule::Every { every_ms, description } => {
+            ("every".to_owned(), every_ms.to_string(), None, description.clone())
+        }
+        CronSchedule::Cron { expr, tz, description } => {
+            ("cron".to_owned(), expr.clone(), tz.clone(), description.clone())
+        }
     }
 }
 
@@ -1326,10 +1255,7 @@ mod tests {
 
     #[test]
     fn parse_mode_existing() {
-        assert_eq!(
-            parse_execution_mode(Some("existing")).unwrap(),
-            ExecutionMode::Existing
-        );
+        assert_eq!(parse_execution_mode(Some("existing")).unwrap(), ExecutionMode::Existing);
     }
 
     #[test]
@@ -1466,10 +1392,7 @@ mod tests {
         };
         let params = build_update_params(&job, &req);
         assert_eq!(
-            params
-                .description
-                .as_ref()
-                .and_then(|value| value.as_deref()),
+            params.description.as_ref().and_then(|value| value.as_deref()),
             Some("Updated description")
         );
     }

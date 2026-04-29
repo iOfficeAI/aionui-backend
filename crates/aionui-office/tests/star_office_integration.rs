@@ -86,9 +86,7 @@ async fn so1_no_service_returns_none() {
 #[tokio::test]
 async fn so2_preferred_url_no_service() {
     let detector = StarOfficeDetector::new(reqwest::Client::new());
-    let result = detector
-        .detect(Some("http://localhost:59990"), true, Some(50))
-        .await;
+    let result = detector.detect(Some("http://localhost:59990"), true, Some(50)).await;
     assert!(result.is_none());
 }
 
@@ -282,13 +280,8 @@ async fn detect_with_writing_status() {
 #[tokio::test]
 async fn cache_stores_hit_after_success() {
     let port = allocate_port();
-    let handle = mock_star_office_server(
-        port,
-        true,
-        r#"idle"#,
-        "<html><body>star office dashboard</body></html>",
-    )
-    .await;
+    let handle =
+        mock_star_office_server(port, true, r#"idle"#, "<html><body>star office dashboard</body></html>").await;
 
     let detector = StarOfficeDetector::new(reqwest::Client::new());
     let url = format!("http://localhost:{port}");
@@ -316,8 +309,7 @@ async fn cache_miss_ttl_expires() {
     tokio::time::sleep(std::time::Duration::from_millis(1600)).await;
 
     let port2 = allocate_port();
-    let handle =
-        mock_star_office_server(port2, true, "idle", "<html><body>star office</body></html>").await;
+    let handle = mock_star_office_server(port2, true, "idle", "<html><body>star office</body></html>").await;
 
     let url2 = format!("http://localhost:{port2}");
     let result = detector.detect(Some(&url2), false, Some(2000)).await;

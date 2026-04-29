@@ -304,10 +304,7 @@ pub(crate) struct GenericResponse {
 ///
 /// All Lark responses use interactive cards because Lark only supports
 /// editing card messages (not plain text messages).
-pub(crate) fn build_interactive_card(
-    text: &str,
-    buttons: Option<&[Vec<crate::types::ActionButton>]>,
-) -> String {
+pub(crate) fn build_interactive_card(text: &str, buttons: Option<&[Vec<crate::types::ActionButton>]>) -> String {
     let mut elements = vec![serde_json::json!({
         "tag": "markdown",
         "content": text
@@ -344,10 +341,7 @@ pub(crate) fn build_interactive_card(
 ///
 /// Format: `"category:action"` or `"category:action:k=v,k=v"`
 /// (same wire format as Telegram callback_data for consistency).
-fn format_lark_callback(
-    action: &str,
-    params: Option<&std::collections::HashMap<String, String>>,
-) -> String {
+fn format_lark_callback(action: &str, params: Option<&std::collections::HashMap<String, String>>) -> String {
     let category = action_category_prefix(action);
     match params {
         Some(p) if !p.is_empty() => {
@@ -373,11 +367,7 @@ fn action_category_prefix(action: &str) -> &'static str {
 }
 
 /// Parsed callback data: (category, action, params).
-pub(crate) type ParsedLarkCallback = (
-    String,
-    String,
-    Option<std::collections::HashMap<String, String>>,
-);
+pub(crate) type ParsedLarkCallback = (String, String, Option<std::collections::HashMap<String, String>>);
 
 /// Parse a Lark card button value string back to (category, action, params).
 ///
@@ -678,18 +668,9 @@ mod tests {
     #[test]
     fn format_callback_no_params() {
         assert_eq!(format_lark_callback("help.show", None), "system:help.show");
-        assert_eq!(
-            format_lark_callback("pairing.show", None),
-            "platform:pairing.show"
-        );
-        assert_eq!(
-            format_lark_callback("chat.regenerate", None),
-            "chat:chat.regenerate"
-        );
-        assert_eq!(
-            format_lark_callback("system.confirm", None),
-            "chat:system.confirm"
-        );
+        assert_eq!(format_lark_callback("pairing.show", None), "platform:pairing.show");
+        assert_eq!(format_lark_callback("chat.regenerate", None), "chat:chat.regenerate");
+        assert_eq!(format_lark_callback("system.confirm", None), "chat:system.confirm");
     }
 
     #[test]

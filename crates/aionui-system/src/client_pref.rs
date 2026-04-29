@@ -19,10 +19,7 @@ impl ClientPrefService {
     }
 
     /// Get all client preferences, or only the specified keys.
-    pub async fn get_preferences(
-        &self,
-        keys: Option<&[&str]>,
-    ) -> Result<ClientPreferencesResponse, AppError> {
+    pub async fn get_preferences(&self, keys: Option<&[&str]>) -> Result<ClientPreferencesResponse, AppError> {
         let rows = match keys {
             Some(k) if !k.is_empty() => self.repo.get_by_keys(k).await,
             _ => self.repo.get_all().await,
@@ -39,10 +36,7 @@ impl ClientPrefService {
     }
 
     /// Batch update client preferences. Null values delete the key.
-    pub async fn update_preferences(
-        &self,
-        req: UpdateClientPreferencesRequest,
-    ) -> Result<(), AppError> {
+    pub async fn update_preferences(&self, req: UpdateClientPreferencesRequest) -> Result<(), AppError> {
         let mut upserts: Vec<(String, String)> = Vec::new();
         let mut deletes: Vec<String> = Vec::new();
 
@@ -54,18 +48,14 @@ impl ClientPrefService {
             } else {
                 upserts.push((
                     key,
-                    serde_json::to_string(&value).map_err(|e| {
-                        AppError::Internal(format!("Failed to serialize value: {e}"))
-                    })?,
+                    serde_json::to_string(&value)
+                        .map_err(|e| AppError::Internal(format!("Failed to serialize value: {e}")))?,
                 ));
             }
         }
 
         if !upserts.is_empty() {
-            let entries: Vec<(&str, &str)> = upserts
-                .iter()
-                .map(|(k, v)| (k.as_str(), v.as_str()))
-                .collect();
+            let entries: Vec<(&str, &str)> = upserts.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
             self.repo
                 .upsert_batch(&entries)
                 .await
@@ -86,9 +76,7 @@ impl ClientPrefService {
 
 fn validate_key(key: &str) -> Result<(), AppError> {
     if key.is_empty() {
-        return Err(AppError::BadRequest(
-            "Preference key must not be empty".into(),
-        ));
+        return Err(AppError::BadRequest("Preference key must not be empty".into()));
     }
     if key.len() > MAX_KEY_LENGTH {
         return Err(AppError::BadRequest(format!(

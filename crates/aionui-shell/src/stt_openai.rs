@@ -33,9 +33,7 @@ pub async fn transcribe(
         .part("file", file_part)
         .text("model", config.model.clone());
 
-    let language = language_hint
-        .or(config.language.as_deref())
-        .filter(|s| !s.is_empty());
+    let language = language_hint.or(config.language.as_deref()).filter(|s| !s.is_empty());
     if let Some(lang) = language {
         form = form.text("language", lang.to_owned());
     }
@@ -58,13 +56,8 @@ pub async fn transcribe(
 
     let status = response.status();
     if !status.is_success() {
-        let body = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "<unreadable>".to_owned());
-        return Err(SttError::RequestFailed(format!(
-            "OpenAI API returned {status}: {body}"
-        )));
+        let body = response.text().await.unwrap_or_else(|_| "<unreadable>".to_owned());
+        return Err(SttError::RequestFailed(format!("OpenAI API returned {status}: {body}")));
     }
 
     let body: serde_json::Value = response
@@ -101,15 +94,7 @@ mod tests {
             prompt: None,
             temperature: None,
         };
-        let result = transcribe(
-            &Client::new(),
-            &config,
-            vec![0u8; 10],
-            "test.wav",
-            "audio/wav",
-            None,
-        )
-        .await;
+        let result = transcribe(&Client::new(), &config, vec![0u8; 10], "test.wav", "audio/wav", None).await;
         assert!(matches!(result, Err(SttError::OpenaiNotConfigured)));
     }
 }

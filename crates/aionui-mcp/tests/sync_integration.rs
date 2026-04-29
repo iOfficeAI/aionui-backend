@@ -9,9 +9,7 @@ use std::sync::Arc;
 use aionui_api_types::{CreateMcpServerRequest, McpTransport};
 use aionui_common::McpSource;
 use aionui_db::SqliteMcpServerRepository;
-use aionui_mcp::{
-    DetectedServer, McpAgentAdapter, McpConfigService, McpError, McpServerTransport, McpSyncService,
-};
+use aionui_mcp::{DetectedServer, McpAgentAdapter, McpConfigService, McpError, McpServerTransport, McpSyncService};
 
 // ---------------------------------------------------------------------------
 // Mock adapter for integration tests
@@ -62,11 +60,7 @@ impl McpAgentAdapter for MockAdapter {
         Ok(self.servers.lock().unwrap().clone())
     }
 
-    async fn install_server(
-        &self,
-        name: &str,
-        transport: &McpServerTransport,
-    ) -> Result<(), McpError> {
+    async fn install_server(&self, name: &str, transport: &McpServerTransport) -> Result<(), McpError> {
         if !self.installed {
             return Err(McpError::AgentNotInstalled(format!("{:?}", self.source)));
         }
@@ -93,12 +87,9 @@ impl McpAgentAdapter for MockAdapter {
 // Helpers
 // ---------------------------------------------------------------------------
 
-async fn make_services(
-    adapters: Vec<Arc<dyn McpAgentAdapter>>,
-) -> (McpConfigService, McpSyncService) {
+async fn make_services(adapters: Vec<Arc<dyn McpAgentAdapter>>) -> (McpConfigService, McpSyncService) {
     let db = aionui_db::init_database_memory().await.unwrap();
-    let repo: Arc<dyn aionui_db::IMcpServerRepository> =
-        Arc::new(SqliteMcpServerRepository::new(db.pool().clone()));
+    let repo: Arc<dyn aionui_db::IMcpServerRepository> = Arc::new(SqliteMcpServerRepository::new(db.pool().clone()));
     let config_svc = McpConfigService::new(repo.clone());
     let sync_svc = McpSyncService::new(repo, adapters);
     (config_svc, sync_svc)
@@ -194,8 +185,7 @@ async fn get_agent_configs_empty_when_none_installed() {
 #[tokio::test]
 async fn sync_to_agents_installs_servers() {
     let adapter: Arc<MockAdapter> = Arc::new(MockAdapter::new(McpSource::Claude, true));
-    let (config_svc, sync_svc) =
-        make_services(vec![adapter.clone() as Arc<dyn McpAgentAdapter>]).await;
+    let (config_svc, sync_svc) = make_services(vec![adapter.clone() as Arc<dyn McpAgentAdapter>]).await;
 
     // Create a server in DB
     let server = config_svc.add_server(stdio_req("test-srv")).await.unwrap();
@@ -244,11 +234,7 @@ impl McpAgentAdapter for FailingAdapter {
     async fn detect_existing(&self) -> Result<Vec<DetectedServer>, McpError> {
         Ok(vec![])
     }
-    async fn install_server(
-        &self,
-        _name: &str,
-        _transport: &McpServerTransport,
-    ) -> Result<(), McpError> {
+    async fn install_server(&self, _name: &str, _transport: &McpServerTransport) -> Result<(), McpError> {
         Err(McpError::AgentOperationFailed("CLI not found".into()))
     }
     async fn remove_server(&self, _name: &str) -> Result<(), McpError> {
@@ -287,13 +273,9 @@ async fn remove_from_agents_removes_servers() {
             transport: stdio_transport(),
         }],
     ));
-    let (_config_svc, sync_svc) =
-        make_services(vec![adapter.clone() as Arc<dyn McpAgentAdapter>]).await;
+    let (_config_svc, sync_svc) = make_services(vec![adapter.clone() as Arc<dyn McpAgentAdapter>]).await;
 
-    let result = sync_svc
-        .remove_from_agents(&["srv-to-remove".into()])
-        .await
-        .unwrap();
+    let result = sync_svc.remove_from_agents(&["srv-to-remove".into()]).await.unwrap();
 
     assert!(result.success);
     assert!(adapter.current_servers().is_empty());
@@ -308,10 +290,7 @@ async fn remove_nonexistent_server_name_succeeds() {
     let adapter: Arc<dyn McpAgentAdapter> = Arc::new(MockAdapter::new(McpSource::Claude, true));
     let (_config_svc, sync_svc) = make_services(vec![adapter]).await;
 
-    let result = sync_svc
-        .remove_from_agents(&["does-not-exist".into()])
-        .await
-        .unwrap();
+    let result = sync_svc.remove_from_agents(&["does-not-exist".into()]).await.unwrap();
 
     // remove_server is idempotent → success
     assert!(result.success);
@@ -331,20 +310,13 @@ async fn sync_skips_identical_and_replaces_changed() {
         }],
     ));
 
-    let (config_svc, sync_svc) =
-        make_services(vec![adapter.clone() as Arc<dyn McpAgentAdapter>]).await;
+    let (config_svc, sync_svc) = make_services(vec![adapter.clone() as Arc<dyn McpAgentAdapter>]).await;
 
     // Create two servers: one with same transport (should skip), one new
-    let srv_same = config_svc
-        .add_server(stdio_req("unchanged-srv"))
-        .await
-        .unwrap();
+    let srv_same = config_svc.add_server(stdio_req("unchanged-srv")).await.unwrap();
     let srv_new = config_svc.add_server(http_req("new-srv")).await.unwrap();
 
-    let result = sync_svc
-        .sync_to_agents(&[srv_same.id, srv_new.id])
-        .await
-        .unwrap();
+    let result = sync_svc.sync_to_agents(&[srv_same.id, srv_new.id]).await.unwrap();
     assert!(result.success);
 
     let current = adapter.current_servers();

@@ -101,51 +101,31 @@ pub(super) fn init_snapshot_repo(workspace: &Path, temp_dir: &Path) -> Result<()
             ))
         })?;
     }
-    std::fs::create_dir_all(temp_dir).map_err(|e| {
-        AppError::Internal(format!(
-            "Failed to create snapshot dir {}: {}",
-            temp_dir.display(),
-            e
-        ))
-    })?;
+    std::fs::create_dir_all(temp_dir)
+        .map_err(|e| AppError::Internal(format!("Failed to create snapshot dir {}: {}", temp_dir.display(), e)))?;
 
     // Init a standard repo (creates .git/ inside temp_dir)
-    let repo = Repository::init(temp_dir).map_err(|e| {
-        AppError::Internal(format!(
-            "Failed to init snapshot repo at {}: {}",
-            temp_dir.display(),
-            e
-        ))
-    })?;
+    let repo = Repository::init(temp_dir)
+        .map_err(|e| AppError::Internal(format!("Failed to init snapshot repo at {}: {}", temp_dir.display(), e)))?;
 
     // Set workdir to the actual workspace (in-memory)
-    repo.set_workdir(workspace, false).map_err(|e| {
-        AppError::Internal(format!(
-            "Failed to set workdir to {}: {}",
-            workspace.display(),
-            e
-        ))
-    })?;
+    repo.set_workdir(workspace, false)
+        .map_err(|e| AppError::Internal(format!("Failed to set workdir to {}: {}", workspace.display(), e)))?;
 
     // Persist core.worktree in config so future opens resolve the workdir
     let mut config = repo
         .config()
         .map_err(|e| AppError::Internal(format!("Failed to open repo config: {}", e)))?;
     let ws_str = workspace.to_string_lossy();
-    config.set_str("core.worktree", &ws_str).map_err(|e| {
-        AppError::Internal(format!("Failed to set core.worktree to {}: {}", ws_str, e))
-    })?;
+    config
+        .set_str("core.worktree", &ws_str)
+        .map_err(|e| AppError::Internal(format!("Failed to set core.worktree to {}: {}", ws_str, e)))?;
 
     // Write exclude rules to .git/info/exclude (avoids polluting the workspace)
     let git_dir = repo.path(); // .git/ directory
     let info_dir = git_dir.join("info");
-    std::fs::create_dir_all(&info_dir).map_err(|e| {
-        AppError::Internal(format!(
-            "Failed to create info dir {}: {}",
-            info_dir.display(),
-            e
-        ))
-    })?;
+    std::fs::create_dir_all(&info_dir)
+        .map_err(|e| AppError::Internal(format!("Failed to create info dir {}: {}", info_dir.display(), e)))?;
     std::fs::write(info_dir.join("exclude"), SNAPSHOT_EXCLUDE_RULES)
         .map_err(|e| AppError::Internal(format!("Failed to write exclude rules: {}", e)))?;
 
@@ -178,9 +158,7 @@ pub(super) fn init_snapshot_repo(workspace: &Path, temp_dir: &Path) -> Result<()
 /// Get the current branch name from a repository.
 /// Returns `None` if HEAD is detached or the repo has no commits.
 pub(super) fn current_branch(repo: &Repository) -> Option<String> {
-    repo.head()
-        .ok()
-        .and_then(|head| head.shorthand().map(String::from))
+    repo.head().ok().and_then(|head| head.shorthand().map(String::from))
 }
 
 /// Build a `SnapshotInfo` from mode and repository.
@@ -219,10 +197,7 @@ pub(super) fn worktree_operation(status: Status) -> Option<FileChangeOperation> 
 }
 
 /// Parse git2 statuses into staged and unstaged change lists.
-pub(super) fn parse_statuses(
-    repo: &Repository,
-    workspace: &Path,
-) -> Result<CompareResult, AppError> {
+pub(super) fn parse_statuses(repo: &Repository, workspace: &Path) -> Result<CompareResult, AppError> {
     let mut opts = StatusOptions::new();
     opts.include_untracked(true)
         .recurse_untracked_dirs(true)
@@ -296,17 +271,10 @@ pub(super) fn read_baseline(repo: &Repository, rel_path: &str) -> Result<Option<
 pub(super) fn resolve_workspace(workspace: &str) -> Result<PathBuf, AppError> {
     let path = Path::new(workspace);
     if !path.exists() {
-        return Err(AppError::NotFound(format!(
-            "Workspace not found: {}",
-            workspace
-        )));
+        return Err(AppError::NotFound(format!("Workspace not found: {}", workspace)));
     }
-    std::fs::canonicalize(path).map_err(|e| {
-        AppError::Internal(format!(
-            "Failed to canonicalize workspace path {}: {}",
-            workspace, e
-        ))
-    })
+    std::fs::canonicalize(path)
+        .map_err(|e| AppError::Internal(format!("Failed to canonicalize workspace path {}: {}", workspace, e)))
 }
 
 /// Stage all changes including deletions.
@@ -333,12 +301,9 @@ pub(super) fn stage_all_with_deletions(repo: &Repository) -> Result<(), AppError
         if entry.status().intersects(Status::WT_DELETED)
             && let Some(path) = entry.path()
         {
-            index.remove_path(Path::new(path)).map_err(|e| {
-                AppError::Internal(format!(
-                    "Failed to remove deleted file {} from index: {}",
-                    path, e
-                ))
-            })?;
+            index
+                .remove_path(Path::new(path))
+                .map_err(|e| AppError::Internal(format!("Failed to remove deleted file {} from index: {}", path, e)))?;
         }
     }
 
@@ -368,9 +333,9 @@ pub(super) fn stage_single_file(repo: &Repository, rel_path: &str) -> Result<(),
             .map_err(|e| AppError::Internal(format!("Failed to stage file {}: {}", rel_path, e)))?;
     } else {
         // File was deleted from disk; remove from index
-        index.remove_path(Path::new(rel_path)).map_err(|e| {
-            AppError::Internal(format!("Failed to stage deleted file {}: {}", rel_path, e))
-        })?;
+        index
+            .remove_path(Path::new(rel_path))
+            .map_err(|e| AppError::Internal(format!("Failed to stage deleted file {}: {}", rel_path, e)))?;
     }
 
     index
@@ -422,13 +387,8 @@ pub(super) fn discard_single_file(
             // New/untracked file: just delete it
             let abs_path = workspace.join(rel_path);
             if abs_path.exists() {
-                std::fs::remove_file(&abs_path).map_err(|e| {
-                    AppError::Internal(format!(
-                        "Failed to delete file {}: {}",
-                        abs_path.display(),
-                        e
-                    ))
-                })?;
+                std::fs::remove_file(&abs_path)
+                    .map_err(|e| AppError::Internal(format!("Failed to delete file {}: {}", abs_path.display(), e)))?;
             }
             Ok(())
         }
@@ -462,9 +422,8 @@ fn checkout_path_from_head(repo: &Repository, rel_path: &str) -> Result<(), AppE
     let mut cb = git2::build::CheckoutBuilder::new();
     cb.force().path(rel_path);
 
-    repo.checkout_head(Some(&mut cb)).map_err(|e| {
-        AppError::Internal(format!("Failed to checkout {} from HEAD: {}", rel_path, e))
-    })?;
+    repo.checkout_head(Some(&mut cb))
+        .map_err(|e| AppError::Internal(format!("Failed to checkout {} from HEAD: {}", rel_path, e)))?;
     Ok(())
 }
 
@@ -476,8 +435,7 @@ pub(super) fn list_branches(repo: &Repository) -> Result<Vec<String>, AppError> 
 
     let mut names = Vec::new();
     for branch_result in branches {
-        let (branch, _) = branch_result
-            .map_err(|e| AppError::Internal(format!("Failed to read branch: {}", e)))?;
+        let (branch, _) = branch_result.map_err(|e| AppError::Internal(format!("Failed to read branch: {}", e)))?;
         if let Some(name) = branch
             .name()
             .map_err(|e| AppError::Internal(format!("Failed to get branch name: {}", e)))?
@@ -523,10 +481,7 @@ mod tests {
 
     #[test]
     fn index_operation_new() {
-        assert_eq!(
-            index_operation(Status::INDEX_NEW),
-            Some(FileChangeOperation::Create)
-        );
+        assert_eq!(index_operation(Status::INDEX_NEW), Some(FileChangeOperation::Create));
     }
 
     #[test]
@@ -552,10 +507,7 @@ mod tests {
 
     #[test]
     fn worktree_operation_new() {
-        assert_eq!(
-            worktree_operation(Status::WT_NEW),
-            Some(FileChangeOperation::Create)
-        );
+        assert_eq!(worktree_operation(Status::WT_NEW), Some(FileChangeOperation::Create));
     }
 
     #[test]
@@ -609,8 +561,7 @@ mod tests {
         let tree_oid = index.write_tree().unwrap();
         let tree = repo.find_tree(tree_oid).unwrap();
         let sig = Signature::now("test", "test@test.com").unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-            .unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[]).unwrap();
 
         let branch = current_branch(&repo);
         assert!(branch.is_some());
@@ -628,8 +579,7 @@ mod tests {
         let tree_oid = index.write_tree().unwrap();
         let tree = repo.find_tree(tree_oid).unwrap();
         let sig = Signature::now("test", "test@test.com").unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-            .unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[]).unwrap();
 
         let info = build_info(SnapshotMode::GitRepo, &repo);
         assert_eq!(info.mode, SnapshotMode::GitRepo);
@@ -645,8 +595,7 @@ mod tests {
         let tree_oid = index.write_tree().unwrap();
         let tree = repo.find_tree(tree_oid).unwrap();
         let sig = Signature::now("test", "test@test.com").unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-            .unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[]).unwrap();
 
         let info = build_info(SnapshotMode::Snapshot, &repo);
         assert_eq!(info.mode, SnapshotMode::Snapshot);
@@ -675,8 +624,7 @@ mod tests {
         let tree_oid = index.write_tree().unwrap();
         let tree = repo.find_tree(tree_oid).unwrap();
         let sig = Signature::now("test", "test@test.com").unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "add hello", &tree, &[])
-            .unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "add hello", &tree, &[]).unwrap();
 
         let content = read_baseline(&repo, "hello.txt").unwrap();
         assert_eq!(content.as_deref(), Some("Hello, world!"));
@@ -691,8 +639,7 @@ mod tests {
         let tree_oid = index.write_tree().unwrap();
         let tree = repo.find_tree(tree_oid).unwrap();
         let sig = Signature::now("test", "test@test.com").unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-            .unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[]).unwrap();
 
         let content = read_baseline(&repo, "missing.txt").unwrap();
         assert!(content.is_none());
@@ -712,8 +659,7 @@ mod tests {
         let tree_oid = index.write_tree().unwrap();
         let tree = repo.find_tree(tree_oid).unwrap();
         let sig = Signature::now("test", "test@test.com").unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-            .unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[]).unwrap();
 
         let result = parse_statuses(&repo, tmp.path()).unwrap();
         assert!(result.staged.is_empty());
@@ -732,8 +678,7 @@ mod tests {
         let tree_oid = index.write_tree().unwrap();
         let tree = repo.find_tree(tree_oid).unwrap();
         let sig = Signature::now("test", "test@test.com").unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-            .unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[]).unwrap();
 
         std::fs::write(tmp.path().join("b.txt"), "b").unwrap();
 
@@ -756,8 +701,7 @@ mod tests {
         let tree_oid = index.write_tree().unwrap();
         let tree = repo.find_tree(tree_oid).unwrap();
         let sig = Signature::now("test", "test@test.com").unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-            .unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[]).unwrap();
 
         std::fs::write(tmp.path().join("a.txt"), "modified").unwrap();
 
@@ -779,8 +723,7 @@ mod tests {
         let tree_oid = index.write_tree().unwrap();
         let tree = repo.find_tree(tree_oid).unwrap();
         let sig = Signature::now("test", "test@test.com").unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-            .unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[]).unwrap();
 
         std::fs::remove_file(tmp.path().join("a.txt")).unwrap();
 
@@ -799,8 +742,7 @@ mod tests {
         let tree_oid = index.write_tree().unwrap();
         let tree = repo.find_tree(tree_oid).unwrap();
         let sig = Signature::now("test", "test@test.com").unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-            .unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[]).unwrap();
 
         std::fs::write(tmp.path().join("new.txt"), "new content").unwrap();
         let mut index = repo.index().unwrap();
@@ -826,8 +768,7 @@ mod tests {
         let tree_oid = index.write_tree().unwrap();
         let tree = repo.find_tree(tree_oid).unwrap();
         let sig = Signature::now("test", "test@test.com").unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-            .unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[]).unwrap();
 
         std::fs::write(tmp.path().join("a.txt"), "staged change").unwrap();
         let mut index = repo.index().unwrap();
@@ -860,8 +801,7 @@ mod tests {
         let tree_oid = index.write_tree().unwrap();
         let tree = repo.find_tree(tree_oid).unwrap();
         let sig = Signature::now("test", "test@test.com").unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-            .unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[]).unwrap();
 
         // Delete b.txt and modify a.txt
         std::fs::remove_file(tmp.path().join("b.txt")).unwrap();
@@ -896,8 +836,7 @@ mod tests {
         let tree_oid = index.write_tree().unwrap();
         let tree = repo.find_tree(tree_oid).unwrap();
         let sig = Signature::now("test", "test@test.com").unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-            .unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[]).unwrap();
 
         std::fs::remove_file(tmp.path().join("a.txt")).unwrap();
         stage_single_file(&repo, "a.txt").unwrap();
@@ -919,8 +858,7 @@ mod tests {
         let tree_oid = index.write_tree().unwrap();
         let tree = repo.find_tree(tree_oid).unwrap();
         let sig = Signature::now("test", "test@test.com").unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-            .unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[]).unwrap();
 
         std::fs::write(tmp.path().join("new.txt"), "new").unwrap();
         assert!(tmp.path().join("new.txt").exists());
@@ -942,8 +880,7 @@ mod tests {
         let tree_oid = index.write_tree().unwrap();
         let tree = repo.find_tree(tree_oid).unwrap();
         let sig = Signature::now("test", "test@test.com").unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-            .unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[]).unwrap();
 
         std::fs::write(tmp.path().join("a.txt"), "modified").unwrap();
 
@@ -965,8 +902,7 @@ mod tests {
         let tree_oid = index.write_tree().unwrap();
         let tree = repo.find_tree(tree_oid).unwrap();
         let sig = Signature::now("test", "test@test.com").unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-            .unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[]).unwrap();
 
         std::fs::remove_file(tmp.path().join("a.txt")).unwrap();
         assert!(!tmp.path().join("a.txt").exists());
@@ -989,8 +925,7 @@ mod tests {
         let tree_oid = index.write_tree().unwrap();
         let tree = repo.find_tree(tree_oid).unwrap();
         let sig = Signature::now("test", "test@test.com").unwrap();
-        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-            .unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[]).unwrap();
 
         let branches = list_branches(&repo).unwrap();
         assert_eq!(branches.len(), 1);
@@ -1005,9 +940,7 @@ mod tests {
         let tree_oid = index.write_tree().unwrap();
         let tree = repo.find_tree(tree_oid).unwrap();
         let sig = Signature::now("test", "test@test.com").unwrap();
-        let commit_oid = repo
-            .commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
-            .unwrap();
+        let commit_oid = repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[]).unwrap();
         let commit = repo.find_commit(commit_oid).unwrap();
 
         repo.branch("feature-a", &commit, false).unwrap();

@@ -3,9 +3,7 @@ mod url_fixer;
 
 use std::sync::Arc;
 
-use aionui_api_types::{
-    BedrockConfig, FetchModelsAnonymousRequest, FetchModelsRequest, FetchModelsResponse,
-};
+use aionui_api_types::{BedrockConfig, FetchModelsAnonymousRequest, FetchModelsRequest, FetchModelsResponse};
 use aionui_common::{AppError, decrypt_string};
 use aionui_db::IProviderRepository;
 
@@ -29,11 +27,7 @@ pub struct ModelFetchService {
 }
 
 impl ModelFetchService {
-    pub fn new(
-        repo: Arc<dyn IProviderRepository>,
-        encryption_key: [u8; 32],
-        http_client: reqwest::Client,
-    ) -> Self {
+    pub fn new(repo: Arc<dyn IProviderRepository>, encryption_key: [u8; 32], http_client: reqwest::Client) -> Self {
         Self {
             repo,
             encryption_key,
@@ -72,20 +66,14 @@ impl ModelFetchService {
 
     /// Shared fetch+try_fix branch used by both the by-id and anonymous
     /// entry points.
-    async fn fetch_with_config(
-        &self,
-        config: &FetchConfig,
-        try_fix: bool,
-    ) -> Result<FetchModelsResponse, AppError> {
+    async fn fetch_with_config(&self, config: &FetchConfig, try_fix: bool) -> Result<FetchModelsResponse, AppError> {
         match fetchers::fetch_for_platform(&self.http_client, config).await {
             Ok(models) => Ok(FetchModelsResponse {
                 models,
                 fixed_base_url: None,
             }),
             Err(err) if try_fix && supports_url_fix(&config.platform) => {
-                url_fixer::try_fix_url(&self.http_client, config)
-                    .await
-                    .map_err(|_| err)
+                url_fixer::try_fix_url(&self.http_client, config).await.map_err(|_| err)
             }
             Err(err) => Err(err),
         }
@@ -104,8 +92,7 @@ impl ModelFetchService {
             return Err(AppError::BadRequest("API key is empty".into()));
         }
 
-        let bedrock_config: Option<BedrockConfig> =
-            deserialize_opt(&row.bedrock_config, "bedrock_config")?;
+        let bedrock_config: Option<BedrockConfig> = deserialize_opt(&row.bedrock_config, "bedrock_config")?;
 
         Ok(FetchConfig {
             platform: row.platform,
@@ -136,13 +123,7 @@ fn validate_anonymous_request(req: &FetchModelsAnonymousRequest) -> Result<(), A
 fn supports_url_fix(platform: &str) -> bool {
     !matches!(
         platform,
-        "anthropic"
-            | "claude"
-            | "gemini"
-            | "bedrock"
-            | "vertex-ai"
-            | "minimax"
-            | "dashscope-coding"
+        "anthropic" | "claude" | "gemini" | "bedrock" | "vertex-ai" | "minimax" | "dashscope-coding"
     )
 }
 
@@ -161,12 +142,7 @@ mod tests {
         (svc, db)
     }
 
-    async fn create_provider(
-        db: &aionui_db::Database,
-        platform: &str,
-        base_url: &str,
-        api_key: &str,
-    ) -> String {
+    async fn create_provider(db: &aionui_db::Database, platform: &str, base_url: &str, api_key: &str) -> String {
         let repo = SqliteProviderRepository::new(db.pool().clone());
         let encrypted = encrypt_string(api_key, &TEST_KEY).unwrap();
         let row = repo

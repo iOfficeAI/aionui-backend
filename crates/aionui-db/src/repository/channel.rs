@@ -23,11 +23,7 @@ pub trait IChannelRepository: Send + Sync {
     async fn upsert_plugin(&self, row: &ChannelPluginRow) -> Result<(), DbError>;
 
     /// Updates only the `status` and `last_connected` of a plugin.
-    async fn update_plugin_status(
-        &self,
-        id: &str,
-        params: &UpdatePluginStatusParams,
-    ) -> Result<(), DbError>;
+    async fn update_plugin_status(&self, id: &str, params: &UpdatePluginStatusParams) -> Result<(), DbError>;
 
     /// Deletes a plugin by id. Returns `DbError::NotFound` if absent.
     async fn delete_plugin(&self, id: &str) -> Result<(), DbError>;
@@ -48,11 +44,7 @@ pub trait IChannelRepository: Send + Sync {
     async fn create_user(&self, row: &AssistantUserRow) -> Result<(), DbError>;
 
     /// Updates `last_active` timestamp for a user.
-    async fn update_user_last_active(
-        &self,
-        id: &str,
-        last_active: TimestampMs,
-    ) -> Result<(), DbError>;
+    async fn update_user_last_active(&self, id: &str, last_active: TimestampMs) -> Result<(), DbError>;
 
     /// Deletes a user by id. Returns `DbError::NotFound` if absent.
     /// Associated sessions are cascade-deleted by the database.
@@ -77,18 +69,10 @@ pub trait IChannelRepository: Send + Sync {
     ) -> Result<AssistantSessionRow, DbError>;
 
     /// Updates `last_activity` timestamp for a session.
-    async fn update_session_activity(
-        &self,
-        id: &str,
-        last_activity: TimestampMs,
-    ) -> Result<(), DbError>;
+    async fn update_session_activity(&self, id: &str, last_activity: TimestampMs) -> Result<(), DbError>;
 
     /// Updates the `conversation_id` of a session.
-    async fn update_session_conversation(
-        &self,
-        id: &str,
-        conversation_id: &str,
-    ) -> Result<(), DbError>;
+    async fn update_session_conversation(&self, id: &str, conversation_id: &str) -> Result<(), DbError>;
 
     /// Updates the `agent_type` of a session.
     async fn update_session_agent_type(&self, id: &str, agent_type: &str) -> Result<(), DbError>;
@@ -97,11 +81,7 @@ pub trait IChannelRepository: Send + Sync {
     async fn delete_sessions_by_user(&self, user_id: &str) -> Result<(), DbError>;
 
     /// Deletes the session for a specific user + chat pair.
-    async fn delete_session_by_user_chat(
-        &self,
-        user_id: &str,
-        chat_id: &str,
-    ) -> Result<(), DbError>;
+    async fn delete_session_by_user_chat(&self, user_id: &str, chat_id: &str) -> Result<(), DbError>;
 
     // ── Pairing Codes ────────────────────────────────────────────────
 

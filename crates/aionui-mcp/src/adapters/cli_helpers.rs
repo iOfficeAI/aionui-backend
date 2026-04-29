@@ -19,9 +19,7 @@ pub async fn is_cli_installed(name: &str) -> Result<bool, McpError> {
         .arg(name)
         .output()
         .await
-        .map_err(|e| {
-            McpError::AgentOperationFailed(format!("failed to run `which {name}`: {e}"))
-        })?;
+        .map_err(|e| McpError::AgentOperationFailed(format!("failed to run `which {name}`: {e}")))?;
 
     Ok(output.status.success())
 }
@@ -30,11 +28,7 @@ pub async fn is_cli_installed(name: &str) -> Result<bool, McpError> {
 ///
 /// Returns `(stdout, stderr)` on success. Returns an error if the command
 /// fails to start, times out, or exits with a non-zero status.
-pub async fn run_cli(
-    program: &str,
-    args: &[&str],
-    timeout: Duration,
-) -> Result<(String, String), McpError> {
+pub async fn run_cli(program: &str, args: &[&str], timeout: Duration) -> Result<(String, String), McpError> {
     let result = tokio::time::timeout(timeout, {
         Command::new(program)
             .args(args)
@@ -69,11 +63,7 @@ pub async fn run_cli(
 }
 
 /// Run a CLI command and require zero exit status.
-pub async fn run_cli_strict(
-    program: &str,
-    args: &[&str],
-    timeout: Duration,
-) -> Result<String, McpError> {
+pub async fn run_cli_strict(program: &str, args: &[&str], timeout: Duration) -> Result<String, McpError> {
     let result = tokio::time::timeout(timeout, {
         Command::new(program)
             .args(args)
@@ -108,11 +98,7 @@ pub async fn run_cli_strict(
             "`{program} {}` exited with {}: {}",
             args.join(" "),
             output.status,
-            if stderr.is_empty() {
-                &stdout
-            } else {
-                stderr.as_ref()
-            }
+            if stderr.is_empty() { &stdout } else { stderr.as_ref() }
         )));
     }
 

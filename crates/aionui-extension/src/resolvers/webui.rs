@@ -43,10 +43,7 @@ pub fn resolve_webui(
         validate_route(&route.path, extension_name)?;
     }
 
-    let directory = ext_dir
-        .join(&webui.directory)
-        .to_string_lossy()
-        .into_owned();
+    let directory = ext_dir.join(&webui.directory).to_string_lossy().into_owned();
 
     Ok(WebuiContribution {
         extension_name: extension_name.to_owned(),
@@ -101,10 +98,7 @@ mod tests {
     #[test]
     fn test_validate_route_wrong_namespace() {
         let err = validate_route("/other-ext/api", "my-ext").unwrap_err();
-        assert!(matches!(
-            err,
-            ExtensionError::InvalidWebuiRouteNamespace { .. }
-        ));
+        assert!(matches!(err, ExtensionError::InvalidWebuiRouteNamespace { .. }));
     }
 
     #[test]
@@ -138,10 +132,7 @@ mod tests {
         };
 
         let err = resolve_webui(&webui, "my-ext", Path::new("/ext/my-ext")).unwrap_err();
-        assert!(matches!(
-            err,
-            ExtensionError::InvalidWebuiRouteNamespace { .. }
-        ));
+        assert!(matches!(err, ExtensionError::InvalidWebuiRouteNamespace { .. }));
     }
 
     #[test]

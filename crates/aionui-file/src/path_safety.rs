@@ -52,19 +52,17 @@ pub fn validate_path_for_write(path: &str, allowed_roots: &[&Path]) -> Result<Pa
         .parent()
         .ok_or_else(|| AppError::BadRequest(format!("path '{}' has no parent directory", path)))?;
 
-    let file_name = p.file_name().ok_or_else(|| {
-        AppError::BadRequest(format!("path '{}' has no file name component", path))
-    })?;
+    let file_name = p
+        .file_name()
+        .ok_or_else(|| AppError::BadRequest(format!("path '{}' has no file name component", path)))?;
 
     let canonical_parent = std::fs::canonicalize(parent)
         .map_err(|e| AppError::BadRequest(format!("cannot resolve parent of '{}': {}", path, e)))?;
 
-    let is_allowed = allowed_roots
-        .iter()
-        .any(|root| match std::fs::canonicalize(root) {
-            Ok(canonical_root) => canonical_parent.starts_with(&canonical_root),
-            Err(_) => false,
-        });
+    let is_allowed = allowed_roots.iter().any(|root| match std::fs::canonicalize(root) {
+        Ok(canonical_root) => canonical_parent.starts_with(&canonical_root),
+        Err(_) => false,
+    });
 
     if !is_allowed {
         return Err(AppError::BadRequest(format!(

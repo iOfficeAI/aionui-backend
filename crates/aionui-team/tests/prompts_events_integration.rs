@@ -3,15 +3,13 @@ mod common;
 use std::sync::Arc;
 
 use aionui_api_types::{
-    TeamAgentRemovedPayload, TeamAgentRenamedPayload, TeamAgentSpawnedPayload,
-    TeamAgentStatusPayload, WebSocketMessage,
+    TeamAgentRemovedPayload, TeamAgentRenamedPayload, TeamAgentSpawnedPayload, TeamAgentStatusPayload, WebSocketMessage,
 };
 use aionui_realtime::EventBroadcaster;
 use aionui_team::events::TeamEventEmitter;
 use aionui_team::prompts::{build_lead_prompt, build_teammate_prompt, build_wake_payload};
 use aionui_team::types::{
-    MailboxMessage, MailboxMessageType, TaskStatus, TeamAgent, TeamTask, TeammateRole,
-    TeammateStatus,
+    MailboxMessage, MailboxMessageType, TaskStatus, TeamAgent, TeamTask, TeammateRole, TeammateStatus,
 };
 use aionui_team::{Mailbox, TaskBoard, TeammateManager};
 use common::MockTeamRepo;
@@ -109,14 +107,8 @@ fn lp3_lead_prompt_contains_task_management_guidance() {
 
     assert!(prompt.contains("Break down"), "missing decompose guidance");
     assert!(prompt.contains("Assign tasks"), "missing assign guidance");
-    assert!(
-        prompt.contains("dependencies"),
-        "missing dependency guidance"
-    );
-    assert!(
-        prompt.contains("Monitor progress"),
-        "missing monitoring guidance"
-    );
+    assert!(prompt.contains("dependencies"), "missing dependency guidance");
+    assert!(prompt.contains("Monitor progress"), "missing monitoring guidance");
 }
 
 // -- TP-1: Teammate prompt contains execution guidance -----------------------
@@ -126,26 +118,11 @@ fn tp1_teammate_prompt_contains_execution_guidance() {
     let agent = make_agent("w1", "Worker1", TeammateRole::Teammate);
     let prompt = build_teammate_prompt(&agent, "Alpha");
 
-    assert!(
-        prompt.contains("execute tasks"),
-        "missing execution guidance"
-    );
-    assert!(
-        prompt.contains("team_send_message"),
-        "missing communication tool"
-    );
-    assert!(
-        prompt.contains("team_task_update"),
-        "missing task update tool"
-    );
-    assert!(
-        prompt.contains("shutdown_request"),
-        "missing shutdown protocol"
-    );
-    assert!(
-        prompt.contains("shutdown_approved"),
-        "missing shutdown_approved"
-    );
+    assert!(prompt.contains("execute tasks"), "missing execution guidance");
+    assert!(prompt.contains("team_send_message"), "missing communication tool");
+    assert!(prompt.contains("team_task_update"), "missing task update tool");
+    assert!(prompt.contains("shutdown_request"), "missing shutdown protocol");
+    assert!(prompt.contains("shutdown_approved"), "missing shutdown_approved");
 }
 
 // -- TP-2: Teammate prompt contains team name --------------------------------

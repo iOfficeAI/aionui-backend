@@ -5,8 +5,7 @@ use sqlx::SqlitePool;
 
 use crate::error::DbError;
 use crate::models::{
-    AssistantOverrideRow, AssistantRow, CreateAssistantParams, UpdateAssistantParams,
-    UpsertOverrideParams,
+    AssistantOverrideRow, AssistantRow, CreateAssistantParams, UpdateAssistantParams, UpsertOverrideParams,
 };
 use crate::repository::assistant::{IAssistantOverrideRepository, IAssistantRepository};
 
@@ -29,10 +28,9 @@ fn is_unique_violation(err: &dyn sqlx::error::DatabaseError) -> bool {
 #[async_trait::async_trait]
 impl IAssistantRepository for SqliteAssistantRepository {
     async fn list(&self) -> Result<Vec<AssistantRow>, DbError> {
-        let rows =
-            sqlx::query_as::<_, AssistantRow>("SELECT * FROM assistants ORDER BY updated_at DESC")
-                .fetch_all(&self.pool)
-                .await?;
+        let rows = sqlx::query_as::<_, AssistantRow>("SELECT * FROM assistants ORDER BY updated_at DESC")
+            .fetch_all(&self.pool)
+            .await?;
         Ok(rows)
     }
 
@@ -97,11 +95,7 @@ impl IAssistantRepository for SqliteAssistantRepository {
         })
     }
 
-    async fn update(
-        &self,
-        id: &str,
-        params: &UpdateAssistantParams<'_>,
-    ) -> Result<Option<AssistantRow>, DbError> {
+    async fn update(&self, id: &str, params: &UpdateAssistantParams<'_>) -> Result<Option<AssistantRow>, DbError> {
         let Some(existing) = self.get(id).await? else {
             return Ok(None);
         };
@@ -186,9 +180,10 @@ impl IAssistantRepository for SqliteAssistantRepository {
         .execute(&self.pool)
         .await?;
 
-        let row = self.get(params.id).await?.ok_or_else(|| {
-            DbError::Init(format!("upsert did not produce row for id '{}'", params.id))
-        })?;
+        let row = self
+            .get(params.id)
+            .await?
+            .ok_or_else(|| DbError::Init(format!("upsert did not produce row for id '{}'", params.id)))?;
         Ok(row)
     }
 }
@@ -198,12 +193,8 @@ fn merge_update(existing: AssistantRow, params: &UpdateAssistantParams<'_>) -> A
     AssistantRow {
         id: existing.id,
         name: params.name.map(String::from).unwrap_or(existing.name),
-        description: params
-            .description
-            .map_or(existing.description, |v| v.map(String::from)),
-        avatar: params
-            .avatar
-            .map_or(existing.avatar, |v| v.map(String::from)),
+        description: params.description.map_or(existing.description, |v| v.map(String::from)),
+        avatar: params.avatar.map_or(existing.avatar, |v| v.map(String::from)),
         preset_agent_type: params
             .preset_agent_type
             .map(String::from)
@@ -217,15 +208,9 @@ fn merge_update(existing: AssistantRow, params: &UpdateAssistantParams<'_>) -> A
         disabled_builtin_skills: params
             .disabled_builtin_skills
             .map_or(existing.disabled_builtin_skills, |v| v.map(String::from)),
-        prompts: params
-            .prompts
-            .map_or(existing.prompts, |v| v.map(String::from)),
-        models: params
-            .models
-            .map_or(existing.models, |v| v.map(String::from)),
-        name_i18n: params
-            .name_i18n
-            .map_or(existing.name_i18n, |v| v.map(String::from)),
+        prompts: params.prompts.map_or(existing.prompts, |v| v.map(String::from)),
+        models: params.models.map_or(existing.models, |v| v.map(String::from)),
+        name_i18n: params.name_i18n.map_or(existing.name_i18n, |v| v.map(String::from)),
         description_i18n: params
             .description_i18n
             .map_or(existing.description_i18n, |v| v.map(String::from)),
@@ -252,12 +237,10 @@ impl SqliteAssistantOverrideRepository {
 #[async_trait::async_trait]
 impl IAssistantOverrideRepository for SqliteAssistantOverrideRepository {
     async fn get(&self, assistant_id: &str) -> Result<Option<AssistantOverrideRow>, DbError> {
-        let row = sqlx::query_as::<_, AssistantOverrideRow>(
-            "SELECT * FROM assistant_overrides WHERE assistant_id = ?",
-        )
-        .bind(assistant_id)
-        .fetch_optional(&self.pool)
-        .await?;
+        let row = sqlx::query_as::<_, AssistantOverrideRow>("SELECT * FROM assistant_overrides WHERE assistant_id = ?")
+            .bind(assistant_id)
+            .fetch_optional(&self.pool)
+            .await?;
         Ok(row)
     }
 
@@ -268,10 +251,7 @@ impl IAssistantOverrideRepository for SqliteAssistantOverrideRepository {
         Ok(rows)
     }
 
-    async fn upsert(
-        &self,
-        params: &UpsertOverrideParams<'_>,
-    ) -> Result<AssistantOverrideRow, DbError> {
+    async fn upsert(&self, params: &UpsertOverrideParams<'_>) -> Result<AssistantOverrideRow, DbError> {
         let now = now_ms();
         let last_used_at: Option<TimestampMs> = params.last_used_at;
 
@@ -318,11 +298,8 @@ impl IAssistantOverrideRepository for SqliteAssistantOverrideRepository {
             return Ok(result.rows_affected());
         }
 
-        let placeholders = std::iter::repeat_n("?", valid_ids.len())
-            .collect::<Vec<_>>()
-            .join(",");
-        let sql =
-            format!("DELETE FROM assistant_overrides WHERE assistant_id NOT IN ({placeholders})");
+        let placeholders = std::iter::repeat_n("?", valid_ids.len()).collect::<Vec<_>>().join(",");
+        let sql = format!("DELETE FROM assistant_overrides WHERE assistant_id NOT IN ({placeholders})");
         let mut q = sqlx::query(&sql);
         for id in valid_ids {
             q = q.bind(*id);
@@ -600,13 +577,7 @@ mod tests {
         }
         let removed = o.delete_orphans(&["a", "c"]).await.unwrap();
         assert_eq!(removed, 1);
-        let remaining: Vec<String> = o
-            .get_all()
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|r| r.assistant_id)
-            .collect();
+        let remaining: Vec<String> = o.get_all().await.unwrap().into_iter().map(|r| r.assistant_id).collect();
         assert!(remaining.contains(&"a".to_string()));
         assert!(remaining.contains(&"c".to_string()));
         assert!(!remaining.contains(&"b".to_string()));

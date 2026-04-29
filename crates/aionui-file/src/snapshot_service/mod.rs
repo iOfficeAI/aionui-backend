@@ -14,10 +14,9 @@ use git2::Repository;
 use crate::types::{CompareResult, SnapshotInfo, SnapshotMode};
 
 use helpers::{
-    SNAPSHOT_DIR_PREFIX, WorkspaceState, build_info, discard_single_file, init_snapshot_repo,
-    list_branches, open_repo, parse_statuses, read_baseline, reset_single_file, resolve_workspace,
-    stage_all_with_deletions, stage_single_file, temp_repo_path, unstage_all_files,
-    unstage_single_file,
+    SNAPSHOT_DIR_PREFIX, WorkspaceState, build_info, discard_single_file, init_snapshot_repo, list_branches, open_repo,
+    parse_statuses, read_baseline, reset_single_file, resolve_workspace, stage_all_with_deletions, stage_single_file,
+    temp_repo_path, unstage_all_files, unstage_single_file,
 };
 
 // ---------------------------------------------------------------------------
@@ -84,10 +83,7 @@ impl SnapshotService {
 // Helper: get workspace state or return error
 // ---------------------------------------------------------------------------
 
-fn get_state(
-    workspaces: &DashMap<String, WorkspaceState>,
-    workspace: &str,
-) -> Result<WorkspaceState, AppError> {
+fn get_state(workspaces: &DashMap<String, WorkspaceState>, workspace: &str) -> Result<WorkspaceState, AppError> {
     workspaces
         .get(workspace)
         .map(|r| r.clone())
@@ -134,9 +130,8 @@ impl crate::traits::ISnapshotService for SnapshotService {
                 workspace_path: canonical,
             };
 
-            let repo = Repository::open(&repo_path).map_err(|e| {
-                AppError::Internal(format!("Failed to open repo after init: {}", e))
-            })?;
+            let repo = Repository::open(&repo_path)
+                .map_err(|e| AppError::Internal(format!("Failed to open repo after init: {}", e)))?;
             let info = build_info(mode, &repo);
 
             Ok::<(WorkspaceState, SnapshotInfo), AppError>((state, info))
@@ -171,11 +166,7 @@ impl crate::traits::ISnapshotService for SnapshotService {
         .map_err(|e| AppError::Internal(format!("Blocking task failed: {}", e)))?
     }
 
-    async fn get_baseline_content(
-        &self,
-        workspace: &str,
-        file_path: &str,
-    ) -> Result<Option<String>, AppError> {
+    async fn get_baseline_content(&self, workspace: &str, file_path: &str) -> Result<Option<String>, AppError> {
         let state = get_state(&self.workspaces, workspace)?;
         let rel = file_path.to_owned();
 
@@ -290,11 +281,7 @@ impl crate::traits::ISnapshotService for SnapshotService {
             tokio::task::spawn_blocking(move || {
                 if repo_path.exists() {
                     std::fs::remove_dir_all(&repo_path).map_err(|e| {
-                        AppError::Internal(format!(
-                            "Failed to remove snapshot dir {}: {}",
-                            repo_path.display(),
-                            e
-                        ))
+                        AppError::Internal(format!("Failed to remove snapshot dir {}: {}", repo_path.display(), e))
                     })?;
                 }
                 Ok(())

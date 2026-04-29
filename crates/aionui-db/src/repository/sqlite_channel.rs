@@ -21,20 +21,17 @@ impl IChannelRepository for SqliteChannelRepository {
     // ── Plugin CRUD ──────────────────────────────────────────────────
 
     async fn get_all_plugins(&self) -> Result<Vec<ChannelPluginRow>, DbError> {
-        let rows = sqlx::query_as::<_, ChannelPluginRow>(
-            "SELECT * FROM assistant_plugins ORDER BY created_at ASC",
-        )
-        .fetch_all(&self.pool)
-        .await?;
+        let rows = sqlx::query_as::<_, ChannelPluginRow>("SELECT * FROM assistant_plugins ORDER BY created_at ASC")
+            .fetch_all(&self.pool)
+            .await?;
         Ok(rows)
     }
 
     async fn get_plugin(&self, id: &str) -> Result<Option<ChannelPluginRow>, DbError> {
-        let row =
-            sqlx::query_as::<_, ChannelPluginRow>("SELECT * FROM assistant_plugins WHERE id = ?")
-                .bind(id)
-                .fetch_optional(&self.pool)
-                .await?;
+        let row = sqlx::query_as::<_, ChannelPluginRow>("SELECT * FROM assistant_plugins WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
         Ok(row)
     }
 
@@ -66,11 +63,7 @@ impl IChannelRepository for SqliteChannelRepository {
         Ok(())
     }
 
-    async fn update_plugin_status(
-        &self,
-        id: &str,
-        params: &UpdatePluginStatusParams,
-    ) -> Result<(), DbError> {
+    async fn update_plugin_status(&self, id: &str, params: &UpdatePluginStatusParams) -> Result<(), DbError> {
         let mut set_clauses = Vec::new();
         if params.status.is_some() {
             set_clauses.push("status = ?");
@@ -87,10 +80,7 @@ impl IChannelRepository for SqliteChannelRepository {
         }
 
         set_clauses.push("updated_at = ?");
-        let sql = format!(
-            "UPDATE assistant_plugins SET {} WHERE id = ?",
-            set_clauses.join(", ")
-        );
+        let sql = format!("UPDATE assistant_plugins SET {} WHERE id = ?", set_clauses.join(", "));
 
         let now = aionui_common::now_ms();
         let mut query = sqlx::query(&sql);
@@ -128,11 +118,9 @@ impl IChannelRepository for SqliteChannelRepository {
     // ── User CRUD ────────────────────────────────────────────────────
 
     async fn get_all_users(&self) -> Result<Vec<AssistantUserRow>, DbError> {
-        let rows = sqlx::query_as::<_, AssistantUserRow>(
-            "SELECT * FROM assistant_users ORDER BY authorized_at DESC",
-        )
-        .fetch_all(&self.pool)
-        .await?;
+        let rows = sqlx::query_as::<_, AssistantUserRow>("SELECT * FROM assistant_users ORDER BY authorized_at DESC")
+            .fetch_all(&self.pool)
+            .await?;
         Ok(rows)
     }
 
@@ -181,11 +169,7 @@ impl IChannelRepository for SqliteChannelRepository {
         Ok(())
     }
 
-    async fn update_user_last_active(
-        &self,
-        id: &str,
-        last_active: aionui_common::TimestampMs,
-    ) -> Result<(), DbError> {
+    async fn update_user_last_active(&self, id: &str, last_active: aionui_common::TimestampMs) -> Result<(), DbError> {
         let result = sqlx::query("UPDATE assistant_users SET last_active = ? WHERE id = ?")
             .bind(last_active)
             .bind(id)
@@ -211,21 +195,18 @@ impl IChannelRepository for SqliteChannelRepository {
     // ── Session CRUD ─────────────────────────────────────────────────
 
     async fn get_all_sessions(&self) -> Result<Vec<AssistantSessionRow>, DbError> {
-        let rows = sqlx::query_as::<_, AssistantSessionRow>(
-            "SELECT * FROM assistant_sessions ORDER BY last_activity DESC",
-        )
-        .fetch_all(&self.pool)
-        .await?;
+        let rows =
+            sqlx::query_as::<_, AssistantSessionRow>("SELECT * FROM assistant_sessions ORDER BY last_activity DESC")
+                .fetch_all(&self.pool)
+                .await?;
         Ok(rows)
     }
 
     async fn get_session(&self, id: &str) -> Result<Option<AssistantSessionRow>, DbError> {
-        let row = sqlx::query_as::<_, AssistantSessionRow>(
-            "SELECT * FROM assistant_sessions WHERE id = ?",
-        )
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await?;
+        let row = sqlx::query_as::<_, AssistantSessionRow>("SELECT * FROM assistant_sessions WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
         Ok(row)
     }
 
@@ -297,11 +278,7 @@ impl IChannelRepository for SqliteChannelRepository {
         Ok(())
     }
 
-    async fn update_session_conversation(
-        &self,
-        id: &str,
-        conversation_id: &str,
-    ) -> Result<(), DbError> {
+    async fn update_session_conversation(&self, id: &str, conversation_id: &str) -> Result<(), DbError> {
         let now = aionui_common::now_ms();
         let result = sqlx::query(
             "UPDATE assistant_sessions \
@@ -345,11 +322,7 @@ impl IChannelRepository for SqliteChannelRepository {
         Ok(())
     }
 
-    async fn delete_session_by_user_chat(
-        &self,
-        user_id: &str,
-        chat_id: &str,
-    ) -> Result<(), DbError> {
+    async fn delete_session_by_user_chat(&self, user_id: &str, chat_id: &str) -> Result<(), DbError> {
         sqlx::query(
             "DELETE FROM assistant_sessions \
              WHERE user_id = ? AND chat_id = ?",
@@ -401,12 +374,10 @@ impl IChannelRepository for SqliteChannelRepository {
     }
 
     async fn get_pairing_by_code(&self, code: &str) -> Result<Option<PairingCodeRow>, DbError> {
-        let row = sqlx::query_as::<_, PairingCodeRow>(
-            "SELECT * FROM assistant_pairing_codes WHERE code = ?",
-        )
-        .bind(code)
-        .fetch_optional(&self.pool)
-        .await?;
+        let row = sqlx::query_as::<_, PairingCodeRow>("SELECT * FROM assistant_pairing_codes WHERE code = ?")
+            .bind(code)
+            .fetch_optional(&self.pool)
+            .await?;
         Ok(row)
     }
 
@@ -417,17 +388,12 @@ impl IChannelRepository for SqliteChannelRepository {
             .execute(&self.pool)
             .await?;
         if result.rows_affected() == 0 {
-            return Err(DbError::NotFound(format!(
-                "Pairing code '{code}' not found"
-            )));
+            return Err(DbError::NotFound(format!("Pairing code '{code}' not found")));
         }
         Ok(())
     }
 
-    async fn cleanup_expired_pairings(
-        &self,
-        now: aionui_common::TimestampMs,
-    ) -> Result<u64, DbError> {
+    async fn cleanup_expired_pairings(&self, now: aionui_common::TimestampMs) -> Result<u64, DbError> {
         let result = sqlx::query(
             "UPDATE assistant_pairing_codes \
              SET status = 'expired' \
@@ -682,12 +648,7 @@ mod tests {
     #[tokio::test]
     async fn get_user_by_platform_not_found() {
         let (repo, _db) = setup().await;
-        assert!(
-            repo.get_user_by_platform("nope", "telegram")
-                .await
-                .unwrap()
-                .is_none()
-        );
+        assert!(repo.get_user_by_platform("nope", "telegram").await.unwrap().is_none());
     }
 
     #[tokio::test]
@@ -739,9 +700,7 @@ mod tests {
         repo.create_user(&sample_user()).await.unwrap();
 
         let session = sample_session("usr-1");
-        repo.get_or_create_session("usr-1", "chat-abc", &session)
-            .await
-            .unwrap();
+        repo.get_or_create_session("usr-1", "chat-abc", &session).await.unwrap();
 
         // Sessions exist before delete.
         assert_eq!(repo.get_all_sessions().await.unwrap().len(), 1);
@@ -766,10 +725,7 @@ mod tests {
         repo.create_user(&sample_user()).await.unwrap();
 
         let new = sample_session("usr-1");
-        let result = repo
-            .get_or_create_session("usr-1", "chat-abc", &new)
-            .await
-            .unwrap();
+        let result = repo.get_or_create_session("usr-1", "chat-abc", &new).await.unwrap();
         assert_eq!(result.id, "sess-1");
         assert_eq!(result.user_id, "usr-1");
         assert_eq!(result.chat_id.as_deref(), Some("chat-abc"));
@@ -781,20 +737,14 @@ mod tests {
         repo.create_user(&sample_user()).await.unwrap();
 
         let new = sample_session("usr-1");
-        let first = repo
-            .get_or_create_session("usr-1", "chat-abc", &new)
-            .await
-            .unwrap();
+        let first = repo.get_or_create_session("usr-1", "chat-abc", &new).await.unwrap();
 
         // Second call with different new_row id should still return the first.
         let another = AssistantSessionRow {
             id: "sess-2".into(),
             ..new
         };
-        let second = repo
-            .get_or_create_session("usr-1", "chat-abc", &another)
-            .await
-            .unwrap();
+        let second = repo.get_or_create_session("usr-1", "chat-abc", &another).await.unwrap();
         assert_eq!(second.id, first.id);
         // last_activity should be updated.
         assert!(second.last_activity >= first.last_activity);
@@ -806,18 +756,14 @@ mod tests {
         repo.create_user(&sample_user()).await.unwrap();
 
         let s1 = sample_session("usr-1");
-        repo.get_or_create_session("usr-1", "chat-abc", &s1)
-            .await
-            .unwrap();
+        repo.get_or_create_session("usr-1", "chat-abc", &s1).await.unwrap();
 
         let s2 = AssistantSessionRow {
             id: "sess-2".into(),
             chat_id: Some("chat-xyz".into()),
             ..sample_session("usr-1")
         };
-        repo.get_or_create_session("usr-1", "chat-xyz", &s2)
-            .await
-            .unwrap();
+        repo.get_or_create_session("usr-1", "chat-xyz", &s2).await.unwrap();
 
         assert_eq!(repo.get_all_sessions().await.unwrap().len(), 2);
     }
@@ -828,9 +774,7 @@ mod tests {
         repo.create_user(&sample_user()).await.unwrap();
 
         let new = sample_session("usr-1");
-        repo.get_or_create_session("usr-1", "chat-abc", &new)
-            .await
-            .unwrap();
+        repo.get_or_create_session("usr-1", "chat-abc", &new).await.unwrap();
 
         let found = repo.get_session("sess-1").await.unwrap().unwrap();
         assert_eq!(found.agent_type, "gemini");
@@ -848,14 +792,10 @@ mod tests {
         repo.create_user(&sample_user()).await.unwrap();
 
         let new = sample_session("usr-1");
-        repo.get_or_create_session("usr-1", "chat-abc", &new)
-            .await
-            .unwrap();
+        repo.get_or_create_session("usr-1", "chat-abc", &new).await.unwrap();
 
         let new_ts = aionui_common::now_ms() + 5000;
-        repo.update_session_activity("sess-1", new_ts)
-            .await
-            .unwrap();
+        repo.update_session_activity("sess-1", new_ts).await.unwrap();
 
         let found = repo.get_session("sess-1").await.unwrap().unwrap();
         assert_eq!(found.last_activity, new_ts);
@@ -874,18 +814,14 @@ mod tests {
         repo.create_user(&sample_user()).await.unwrap();
 
         let s1 = sample_session("usr-1");
-        repo.get_or_create_session("usr-1", "chat-abc", &s1)
-            .await
-            .unwrap();
+        repo.get_or_create_session("usr-1", "chat-abc", &s1).await.unwrap();
 
         let s2 = AssistantSessionRow {
             id: "sess-2".into(),
             chat_id: Some("chat-xyz".into()),
             ..sample_session("usr-1")
         };
-        repo.get_or_create_session("usr-1", "chat-xyz", &s2)
-            .await
-            .unwrap();
+        repo.get_or_create_session("usr-1", "chat-xyz", &s2).await.unwrap();
 
         repo.delete_sessions_by_user("usr-1").await.unwrap();
         assert!(repo.get_all_sessions().await.unwrap().is_empty());
@@ -929,15 +865,11 @@ mod tests {
         repo.create_user(&sample_user()).await.unwrap();
 
         let new = sample_session("usr-1");
-        repo.get_or_create_session("usr-1", "chat-abc", &new)
-            .await
-            .unwrap();
+        repo.get_or_create_session("usr-1", "chat-abc", &new).await.unwrap();
 
         create_stub_conversation(db.pool(), "conv-42").await;
 
-        repo.update_session_conversation("sess-1", "conv-42")
-            .await
-            .unwrap();
+        repo.update_session_conversation("sess-1", "conv-42").await.unwrap();
 
         let found = repo.get_session("sess-1").await.unwrap().unwrap();
         assert_eq!(found.conversation_id.as_deref(), Some("conv-42"));
@@ -946,10 +878,7 @@ mod tests {
     #[tokio::test]
     async fn update_session_conversation_not_found() {
         let (repo, _db) = setup().await;
-        let err = repo
-            .update_session_conversation("nope", "conv-1")
-            .await
-            .unwrap_err();
+        let err = repo.update_session_conversation("nope", "conv-1").await.unwrap_err();
         assert!(matches!(err, DbError::NotFound(_)));
     }
 
@@ -959,22 +888,11 @@ mod tests {
         repo.create_user(&sample_user()).await.unwrap();
 
         let new = sample_session("usr-1");
-        repo.get_or_create_session("usr-1", "chat-abc", &new)
-            .await
-            .unwrap();
+        repo.get_or_create_session("usr-1", "chat-abc", &new).await.unwrap();
 
-        assert_eq!(
-            repo.get_session("sess-1")
-                .await
-                .unwrap()
-                .unwrap()
-                .agent_type,
-            "gemini"
-        );
+        assert_eq!(repo.get_session("sess-1").await.unwrap().unwrap().agent_type, "gemini");
 
-        repo.update_session_agent_type("sess-1", "acp")
-            .await
-            .unwrap();
+        repo.update_session_agent_type("sess-1", "acp").await.unwrap();
 
         let found = repo.get_session("sess-1").await.unwrap().unwrap();
         assert_eq!(found.agent_type, "acp");
@@ -983,10 +901,7 @@ mod tests {
     #[tokio::test]
     async fn update_session_agent_type_not_found() {
         let (repo, _db) = setup().await;
-        let err = repo
-            .update_session_agent_type("nope", "acp")
-            .await
-            .unwrap_err();
+        let err = repo.update_session_agent_type("nope", "acp").await.unwrap_err();
         assert!(matches!(err, DbError::NotFound(_)));
     }
 
@@ -996,22 +911,16 @@ mod tests {
         repo.create_user(&sample_user()).await.unwrap();
 
         let s1 = sample_session("usr-1");
-        repo.get_or_create_session("usr-1", "chat-abc", &s1)
-            .await
-            .unwrap();
+        repo.get_or_create_session("usr-1", "chat-abc", &s1).await.unwrap();
 
         let s2 = AssistantSessionRow {
             id: "sess-2".into(),
             chat_id: Some("chat-xyz".into()),
             ..sample_session("usr-1")
         };
-        repo.get_or_create_session("usr-1", "chat-xyz", &s2)
-            .await
-            .unwrap();
+        repo.get_or_create_session("usr-1", "chat-xyz", &s2).await.unwrap();
 
-        repo.delete_session_by_user_chat("usr-1", "chat-abc")
-            .await
-            .unwrap();
+        repo.delete_session_by_user_chat("usr-1", "chat-abc").await.unwrap();
 
         let remaining = repo.get_all_sessions().await.unwrap();
         assert_eq!(remaining.len(), 1);
@@ -1022,9 +931,7 @@ mod tests {
     async fn delete_session_by_user_chat_no_match_is_ok() {
         let (repo, _db) = setup().await;
         // No sessions exist — should not error.
-        repo.delete_session_by_user_chat("usr-1", "chat-abc")
-            .await
-            .unwrap();
+        repo.delete_session_by_user_chat("usr-1", "chat-abc").await.unwrap();
     }
 
     // ── Pairing tests ────────────────────────────────────────────────
@@ -1077,9 +984,7 @@ mod tests {
         let (repo, _db) = setup().await;
         repo.create_pairing(&sample_pairing()).await.unwrap();
 
-        repo.update_pairing_status("123456", "approved")
-            .await
-            .unwrap();
+        repo.update_pairing_status("123456", "approved").await.unwrap();
 
         let found = repo.get_pairing_by_code("123456").await.unwrap().unwrap();
         assert_eq!(found.status, "approved");
@@ -1088,10 +993,7 @@ mod tests {
     #[tokio::test]
     async fn update_pairing_status_not_found() {
         let (repo, _db) = setup().await;
-        let err = repo
-            .update_pairing_status("000000", "approved")
-            .await
-            .unwrap_err();
+        let err = repo.update_pairing_status("000000", "approved").await.unwrap_err();
         assert!(matches!(err, DbError::NotFound(_)));
     }
 

@@ -4,8 +4,7 @@ use axum::extract::{Json, State};
 use axum::routing::{get, post};
 
 use aionui_api_types::{
-    ApiResponse, HubExtensionListItem, HubOperationResponse, HubUpdateInfo as ApiHubUpdateInfo,
-    InstallExtensionRequest,
+    ApiResponse, HubExtensionListItem, HubOperationResponse, HubUpdateInfo as ApiHubUpdateInfo, InstallExtensionRequest,
 };
 use aionui_common::AppError;
 

@@ -11,9 +11,8 @@ use tracing::{debug, warn};
 /// Regex for `<think>...</think>` and `<thinking>...</thinking>` tags.
 ///
 /// Uses `(?s)` (dot-all) so `.` matches newlines within the tag body.
-static THINK_TAG_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?s)<think(?:ing)?>.*?</think(?:ing)?>").expect("valid think-tag regex")
-});
+static THINK_TAG_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?s)<think(?:ing)?>.*?</think(?:ing)?>").expect("valid think-tag regex"));
 
 /// Remove `<think>...</think>` and `<thinking>...</thinking>` tags from text.
 pub fn strip_think_tags(text: &str) -> String {
@@ -25,19 +24,16 @@ pub fn strip_think_tags(text: &str) -> String {
 // ---------------------------------------------------------------------------
 
 /// Regex for `[CRON_CREATE]...[/CRON_CREATE]` blocks (dot-all).
-static CRON_CREATE_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?s)\[CRON_CREATE\]\s*(.*?)\s*\[/CRON_CREATE\]").expect("valid cron-create regex")
-});
+static CRON_CREATE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?s)\[CRON_CREATE\]\s*(.*?)\s*\[/CRON_CREATE\]").expect("valid cron-create regex"));
 
 /// Regex for `[CRON_UPDATE: <id>]...[/CRON_UPDATE]` blocks (dot-all).
 static CRON_UPDATE_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?s)\[CRON_UPDATE:\s*([^\]]+)\]\s*(.*?)\s*\[/CRON_UPDATE\]")
-        .expect("valid cron-update regex")
+    Regex::new(r"(?s)\[CRON_UPDATE:\s*([^\]]+)\]\s*(.*?)\s*\[/CRON_UPDATE\]").expect("valid cron-update regex")
 });
 
 /// Regex for `[CRON_LIST]`.
-static CRON_LIST_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\[CRON_LIST\]").expect("valid cron-list regex"));
+static CRON_LIST_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[CRON_LIST\]").expect("valid cron-list regex"));
 
 /// Regex for `[CRON_DELETE: <id>]`.
 static CRON_DELETE_RE: LazyLock<Regex> =
@@ -85,8 +81,7 @@ pub fn detect_cron_commands(text: &str) -> Vec<CronCommand> {
 
     for cap in CRON_UPDATE_RE.captures_iter(text) {
         if let (Some(job_id_match), Some(body)) = (cap.get(1), cap.get(2))
-            && let Some(params) =
-                parse_cron_update_body(job_id_match.as_str().trim(), body.as_str())
+            && let Some(params) = parse_cron_update_body(job_id_match.as_str().trim(), body.as_str())
         {
             commands.push(CronCommand::Update(params));
         }
@@ -212,20 +207,10 @@ pub struct CronCommandResult {
 #[async_trait]
 pub trait ICronService: Send + Sync {
     /// Create a cron job. Returns the created job ID on success.
-    async fn create_job(
-        &self,
-        user_id: &str,
-        conversation_id: &str,
-        params: &CronCreateParams,
-    ) -> CronCommandResult;
+    async fn create_job(&self, user_id: &str, conversation_id: &str, params: &CronCreateParams) -> CronCommandResult;
 
     /// Update an existing cron job.
-    async fn update_job(
-        &self,
-        user_id: &str,
-        conversation_id: &str,
-        params: &CronUpdateParams,
-    ) -> CronCommandResult;
+    async fn update_job(&self, user_id: &str, conversation_id: &str, params: &CronUpdateParams) -> CronCommandResult;
 
     /// List cron jobs for the current conversation scope.
     /// Returns a formatted text response.
@@ -270,12 +255,7 @@ impl MessageMiddleware {
     }
 
     /// Process a completed agent message through the middleware pipeline.
-    pub async fn process(
-        &self,
-        message: &str,
-        user_id: &str,
-        conversation_id: &str,
-    ) -> MiddlewareResult {
+    pub async fn process(&self, message: &str, user_id: &str, conversation_id: &str) -> MiddlewareResult {
         // Step 1: Strip think tags
         let cleaned = strip_think_tags(message);
 
@@ -292,9 +272,7 @@ impl MessageMiddleware {
         let display_message = strip_cron_commands(&cleaned);
 
         // Step 3: Execute cron commands
-        let system_responses = self
-            .execute_cron_commands(user_id, conversation_id, &commands)
-            .await;
+        let system_responses = self.execute_cron_commands(user_id, conversation_id, &commands).await;
 
         MiddlewareResult {
             message: display_message.clone(),
@@ -319,16 +297,8 @@ impl MessageMiddleware {
 
         for command in commands {
             let result = match command {
-                CronCommand::Create(params) => {
-                    cron_service
-                        .create_job(user_id, conversation_id, params)
-                        .await
-                }
-                CronCommand::Update(params) => {
-                    cron_service
-                        .update_job(user_id, conversation_id, params)
-                        .await
-                }
+                CronCommand::Create(params) => cron_service.create_job(user_id, conversation_id, params).await,
+                CronCommand::Update(params) => cron_service.update_job(user_id, conversation_id, params).await,
                 CronCommand::List => cron_service.list_jobs(user_id, conversation_id).await,
                 CronCommand::Delete(id) => cron_service.delete_job(user_id, id).await,
             };
@@ -406,10 +376,7 @@ mod tests {
     #[test]
     fn strip_think_tags_with_code_blocks() {
         let input = "```rust\nfn main() {}\n```\n<think>private</think>\nResult";
-        assert_eq!(
-            strip_think_tags(input),
-            "```rust\nfn main() {}\n```\n\nResult"
-        );
+        assert_eq!(strip_think_tags(input), "```rust\nfn main() {}\n```\n\nResult");
     }
 
     // -----------------------------------------------------------------------
@@ -498,12 +465,8 @@ mod tests {
     fn has_cron_commands_true() {
         assert!(has_cron_commands("[CRON_LIST]"));
         assert!(has_cron_commands("[CRON_DELETE: x]"));
-        assert!(has_cron_commands(
-            "[CRON_UPDATE: x]\nschedule: *\n[/CRON_UPDATE]"
-        ));
-        assert!(has_cron_commands(
-            "[CRON_CREATE]\nschedule: *\n[/CRON_CREATE]"
-        ));
+        assert!(has_cron_commands("[CRON_UPDATE: x]\nschedule: *\n[/CRON_UPDATE]"));
+        assert!(has_cron_commands("[CRON_CREATE]\nschedule: *\n[/CRON_CREATE]"));
     }
 
     #[test]
@@ -644,11 +607,7 @@ mod tests {
     async fn middleware_strips_think_tags() {
         let mw = MessageMiddleware::new(None);
         let result = mw
-            .process(
-                "<think>reasoning</think>The answer is 42.",
-                "user1",
-                "conv1",
-            )
+            .process("<think>reasoning</think>The answer is 42.", "user1", "conv1")
             .await;
         assert_eq!(result.message, "The answer is 42.");
         assert!(result.display_message.is_none());
@@ -700,9 +659,7 @@ mod tests {
     #[tokio::test]
     async fn middleware_plain_text_passthrough() {
         let mw = MessageMiddleware::new(Some(Box::new(MockCronService)));
-        let result = mw
-            .process("Just a normal response.", "user1", "conv1")
-            .await;
+        let result = mw.process("Just a normal response.", "user1", "conv1").await;
         assert_eq!(result.message, "Just a normal response.");
         assert!(result.display_message.is_none());
         assert!(result.system_responses.is_empty());

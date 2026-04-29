@@ -48,14 +48,9 @@ mod lark_tests {
         [0x42u8; 32]
     }
 
-    async fn setup() -> (
-        ChannelManager,
-        Arc<dyn IChannelRepository>,
-        Arc<MockBroadcaster>,
-    ) {
+    async fn setup() -> (ChannelManager, Arc<dyn IChannelRepository>, Arc<MockBroadcaster>) {
         let db = init_database_memory().await.unwrap();
-        let repo: Arc<dyn IChannelRepository> =
-            Arc::new(SqliteChannelRepository::new(db.pool().clone()));
+        let repo: Arc<dyn IChannelRepository> = Arc::new(SqliteChannelRepository::new(db.pool().clone()));
         let broadcaster = Arc::new(MockBroadcaster::new());
         let (message_tx, _message_rx) = mpsc::channel(16);
         let (confirm_tx, _confirm_rx) = mpsc::channel(16);
@@ -227,9 +222,7 @@ mod lark_tests {
         let factory = lark_factory();
 
         let config = make_lark_config_value(Some("cli_123"), Some("secret"));
-        let result = manager
-            .enable_plugin("nonexistent", &config, &factory)
-            .await;
+        let result = manager.enable_plugin("nonexistent", &config, &factory).await;
         assert!(result.is_err());
     }
 

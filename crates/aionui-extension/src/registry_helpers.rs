@@ -68,14 +68,9 @@ pub(crate) fn load_and_validate(
 ///
 /// Extensions not in `load_order` are appended at the end in alphabetical
 /// order.
-pub(crate) fn sort_by_load_order(
-    extensions: Vec<LoadedExtension>,
-    load_order: &[String],
-) -> Vec<LoadedExtension> {
-    let mut by_name: HashMap<String, LoadedExtension> = extensions
-        .into_iter()
-        .map(|e| (e.manifest.name.clone(), e))
-        .collect();
+pub(crate) fn sort_by_load_order(extensions: Vec<LoadedExtension>, load_order: &[String]) -> Vec<LoadedExtension> {
+    let mut by_name: HashMap<String, LoadedExtension> =
+        extensions.into_iter().map(|e| (e.manifest.name.clone(), e)).collect();
 
     let mut sorted = Vec::with_capacity(by_name.len());
 
@@ -144,14 +139,7 @@ pub(crate) async fn run_deactivation_hooks(extensions: &[LoadedExtension]) {
         };
 
         let ext_dir = Path::new(&ext.directory);
-        if let Err(e) = execute_hook(
-            ext_dir,
-            hook_path,
-            HookKind::OnDeactivate,
-            &ext.manifest.name,
-        )
-        .await
-        {
+        if let Err(e) = execute_hook(ext_dir, hook_path, HookKind::OnDeactivate, &ext.manifest.name).await {
             warn!(
                 extension = %ext.manifest.name,
                 error = %e,

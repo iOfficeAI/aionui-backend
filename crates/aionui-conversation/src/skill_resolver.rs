@@ -22,12 +22,7 @@ pub trait SkillResolver: Send + Sync {
     /// workspace's per-backend native skills directories. `rel_dirs` is
     /// the list of relative paths (e.g. `.claude/skills`) to populate.
     /// Returns the number of symlinks successfully created.
-    async fn link_workspace_skills(
-        &self,
-        workspace: &Path,
-        rel_dirs: &[&str],
-        skills: &[ResolvedAgentSkill],
-    ) -> usize;
+    async fn link_workspace_skills(&self, workspace: &Path, rel_dirs: &[&str], skills: &[ResolvedAgentSkill]) -> usize;
 }
 
 /// Production adapter backed by `aionui_extension::skill_service`.
@@ -66,9 +61,7 @@ impl SkillResolver for ExtensionSkillResolver {
         }
         // Conversation_id is validated upstream; we don't use a real one here
         // because this resolver is purely a path-resolution helper.
-        match aionui_extension::materialize_skills_for_agent(&self.paths, "workspace-link", names)
-            .await
-        {
+        match aionui_extension::materialize_skills_for_agent(&self.paths, "workspace-link", names).await {
             Ok(list) => list,
             Err(e) => {
                 tracing::warn!(
@@ -80,12 +73,7 @@ impl SkillResolver for ExtensionSkillResolver {
         }
     }
 
-    async fn link_workspace_skills(
-        &self,
-        workspace: &Path,
-        rel_dirs: &[&str],
-        skills: &[ResolvedAgentSkill],
-    ) -> usize {
+    async fn link_workspace_skills(&self, workspace: &Path, rel_dirs: &[&str], skills: &[ResolvedAgentSkill]) -> usize {
         if rel_dirs.is_empty() || skills.is_empty() {
             return 0;
         }

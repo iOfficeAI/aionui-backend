@@ -6,8 +6,8 @@ use aionui_common::{TimestampMs, now_ms};
 use aionui_db::{IOAuthTokenRepository, UpsertOAuthTokenParams};
 use oauth2::basic::BasicClient;
 use oauth2::{
-    AuthUrl, AuthorizationCode, ClientId, CsrfToken, PkceCodeChallenge, PkceCodeVerifier,
-    RedirectUrl, RefreshToken, TokenResponse, TokenUrl,
+    AuthUrl, AuthorizationCode, ClientId, CsrfToken, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, RefreshToken,
+    TokenResponse, TokenUrl,
 };
 use serde::Deserialize;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -87,10 +87,7 @@ impl McpOAuthService {
     // -----------------------------------------------------------------------
 
     /// Check whether the given server URL has a valid (non-expired) OAuth token.
-    pub async fn check_oauth_status(
-        &self,
-        server_url: &str,
-    ) -> Result<OAuthStatusResponse, McpError> {
+    pub async fn check_oauth_status(&self, server_url: &str) -> Result<OAuthStatusResponse, McpError> {
         let authenticated = self.has_valid_token(server_url).await?;
         Ok(OAuthStatusResponse { authenticated })
     }
@@ -202,10 +199,7 @@ impl McpOAuthService {
 
     /// Discover endpoints, build OAuth client, generate PKCE, bind callback
     /// server, store pending state, and return the authorization URL + listener.
-    async fn prepare_login_flow(
-        &self,
-        server_url: &str,
-    ) -> Result<(String, TcpListener), McpError> {
+    async fn prepare_login_flow(&self, server_url: &str) -> Result<(String, TcpListener), McpError> {
         let metadata = self.discover_endpoints(server_url).await?;
 
         let auth_url_str = metadata.authorization_endpoint.clone();
@@ -213,8 +207,8 @@ impl McpOAuthService {
 
         let auth_url = AuthUrl::new(metadata.authorization_endpoint)
             .map_err(|e| McpError::OAuth(format!("Invalid auth URL: {e}")))?;
-        let token_url = TokenUrl::new(metadata.token_endpoint)
-            .map_err(|e| McpError::OAuth(format!("Invalid token URL: {e}")))?;
+        let token_url =
+            TokenUrl::new(metadata.token_endpoint).map_err(|e| McpError::OAuth(format!("Invalid token URL: {e}")))?;
 
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
@@ -306,10 +300,7 @@ impl McpOAuthService {
             .map_err(|e| McpError::OAuth(format!("HTTP request failed: {e}")))?;
 
         if !resp.status().is_success() {
-            return Err(McpError::OAuth(format!(
-                "Metadata endpoint returned {}",
-                resp.status()
-            )));
+            return Err(McpError::OAuth(format!("Metadata endpoint returned {}", resp.status())));
         }
 
         resp.json()
@@ -329,9 +320,7 @@ impl McpOAuthService {
 
         match tokio::time::timeout(CALLBACK_TIMEOUT, code_rx).await {
             Ok(Ok(result)) => result,
-            Ok(Err(_)) => Err(McpError::OAuth(
-                "Callback channel closed unexpectedly".to_string(),
-            )),
+            Ok(Err(_)) => Err(McpError::OAuth("Callback channel closed unexpectedly".to_string())),
             Err(_) => Err(McpError::OAuth(
                 "OAuth callback timed out — no redirect received within 120s".to_string(),
             )),
@@ -403,12 +392,10 @@ impl McpOAuthService {
             )
         };
 
-        let auth_url = AuthUrl::new(auth_url_str)
-            .map_err(|e| McpError::OAuth(format!("Invalid auth URL: {e}")))?;
-        let token_url = TokenUrl::new(token_url_str)
-            .map_err(|e| McpError::OAuth(format!("Invalid token URL: {e}")))?;
-        let redirect = RedirectUrl::new(redirect_url_str)
-            .map_err(|e| McpError::OAuth(format!("Invalid redirect URL: {e}")))?;
+        let auth_url = AuthUrl::new(auth_url_str).map_err(|e| McpError::OAuth(format!("Invalid auth URL: {e}")))?;
+        let token_url = TokenUrl::new(token_url_str).map_err(|e| McpError::OAuth(format!("Invalid token URL: {e}")))?;
+        let redirect =
+            RedirectUrl::new(redirect_url_str).map_err(|e| McpError::OAuth(format!("Invalid redirect URL: {e}")))?;
 
         let client = BasicClient::new(ClientId::new(DEFAULT_CLIENT_ID.to_string()))
             .set_auth_uri(auth_url)
@@ -430,17 +417,12 @@ impl McpOAuthService {
     }
 
     /// Refresh an expired access token using the refresh token.
-    async fn refresh_token(
-        &self,
-        server_url: &str,
-        refresh_token_value: &str,
-    ) -> Result<String, McpError> {
+    async fn refresh_token(&self, server_url: &str, refresh_token_value: &str) -> Result<String, McpError> {
         let metadata = self.discover_endpoints(server_url).await?;
-        let token_url = TokenUrl::new(metadata.token_endpoint)
-            .map_err(|e| McpError::OAuth(format!("Invalid token URL: {e}")))?;
+        let token_url =
+            TokenUrl::new(metadata.token_endpoint).map_err(|e| McpError::OAuth(format!("Invalid token URL: {e}")))?;
 
-        let client =
-            BasicClient::new(ClientId::new(DEFAULT_CLIENT_ID.to_string())).set_token_uri(token_url);
+        let client = BasicClient::new(ClientId::new(DEFAULT_CLIENT_ID.to_string())).set_token_uri(token_url);
 
         let http_client = Self::build_no_redirect_client()?;
 
@@ -453,9 +435,7 @@ impl McpOAuthService {
 
         let new_access_token = token_result.access_token().secret().clone();
 
-        let expires_at: Option<TimestampMs> = token_result
-            .expires_in()
-            .map(|d| now_ms() + d.as_millis() as i64);
+        let expires_at: Option<TimestampMs> = token_result.expires_in().map(|d| now_ms() + d.as_millis() as i64);
 
         // Prefer new refresh_token if provided, otherwise keep the old one.
         let new_refresh = token_result
@@ -478,14 +458,8 @@ impl McpOAuthService {
     }
 
     /// Persist token response to DB.
-    async fn persist_token<TR: TokenResponse>(
-        &self,
-        server_url: &str,
-        token_result: &TR,
-    ) -> Result<(), McpError> {
-        let expires_at: Option<TimestampMs> = token_result
-            .expires_in()
-            .map(|d| now_ms() + d.as_millis() as i64);
+    async fn persist_token<TR: TokenResponse>(&self, server_url: &str, token_result: &TR) -> Result<(), McpError> {
+        let expires_at: Option<TimestampMs> = token_result.expires_in().map(|d| now_ms() + d.as_millis() as i64);
 
         self.token_repo
             .upsert(UpsertOAuthTokenParams {
@@ -685,10 +659,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl IOAuthTokenRepository for MockTokenRepo {
-        async fn get_by_url(
-            &self,
-            _: &str,
-        ) -> Result<Option<aionui_db::models::OAuthTokenRow>, aionui_db::DbError> {
+        async fn get_by_url(&self, _: &str) -> Result<Option<aionui_db::models::OAuthTokenRow>, aionui_db::DbError> {
             Ok(None)
         }
 
@@ -712,10 +683,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl IOAuthTokenRepository for IdempotentDeleteRepo {
-        async fn get_by_url(
-            &self,
-            _: &str,
-        ) -> Result<Option<aionui_db::models::OAuthTokenRow>, aionui_db::DbError> {
+        async fn get_by_url(&self, _: &str) -> Result<Option<aionui_db::models::OAuthTokenRow>, aionui_db::DbError> {
             Ok(None)
         }
 
@@ -741,10 +709,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl IOAuthTokenRepository for ValidTokenRepo {
-        async fn get_by_url(
-            &self,
-            _: &str,
-        ) -> Result<Option<aionui_db::models::OAuthTokenRow>, aionui_db::DbError> {
+        async fn get_by_url(&self, _: &str) -> Result<Option<aionui_db::models::OAuthTokenRow>, aionui_db::DbError> {
             Ok(Some(aionui_db::models::OAuthTokenRow {
                 server_url: "https://example.com".to_string(),
                 access_token: "valid_access_token".to_string(),
@@ -776,10 +741,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl IOAuthTokenRepository for ExpiredTokenRepo {
-        async fn get_by_url(
-            &self,
-            _: &str,
-        ) -> Result<Option<aionui_db::models::OAuthTokenRow>, aionui_db::DbError> {
+        async fn get_by_url(&self, _: &str) -> Result<Option<aionui_db::models::OAuthTokenRow>, aionui_db::DbError> {
             Ok(Some(aionui_db::models::OAuthTokenRow {
                 server_url: "https://example.com".to_string(),
                 access_token: "expired_token".to_string(),
@@ -811,10 +773,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl IOAuthTokenRepository for NoExpiryTokenRepo {
-        async fn get_by_url(
-            &self,
-            _: &str,
-        ) -> Result<Option<aionui_db::models::OAuthTokenRow>, aionui_db::DbError> {
+        async fn get_by_url(&self, _: &str) -> Result<Option<aionui_db::models::OAuthTokenRow>, aionui_db::DbError> {
             Ok(Some(aionui_db::models::OAuthTokenRow {
                 server_url: "https://example.com".to_string(),
                 access_token: "no_expiry_token".to_string(),

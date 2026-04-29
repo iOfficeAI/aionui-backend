@@ -31,9 +31,7 @@ fn mv2_reserved_prefix_aion_rejected() {
     let json = serde_json::json!({"name": "aion-my-ext", "version": "1.0.0"});
     let bytes = serde_json::to_vec(&json).unwrap();
     let err = parse_manifest(&bytes).unwrap_err();
-    assert!(
-        matches!(err, ExtensionError::ReservedNamePrefix { ref prefix, .. } if prefix == "aion-")
-    );
+    assert!(matches!(err, ExtensionError::ReservedNamePrefix { ref prefix, .. } if prefix == "aion-"));
 }
 
 #[test]

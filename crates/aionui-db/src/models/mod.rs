@@ -18,8 +18,7 @@ mod user;
 pub use acp_session::AcpSessionRow;
 pub use agent_metadata::{AgentMetadataRow, UpdateAgentHandshakeParams, UpsertAgentMetadataParams};
 pub use assistant::{
-    AssistantOverrideRow, AssistantRow, CreateAssistantParams, UpdateAssistantParams,
-    UpsertOverrideParams,
+    AssistantOverrideRow, AssistantRow, CreateAssistantParams, UpdateAssistantParams, UpsertOverrideParams,
 };
 pub use channel::{AssistantSessionRow, AssistantUserRow, ChannelPluginRow, PairingCodeRow};
 pub use client_preference::ClientPreference;

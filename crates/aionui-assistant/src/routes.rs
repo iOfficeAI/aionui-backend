@@ -9,8 +9,8 @@ use axum::response::Response;
 use axum::routing::{get, patch, post};
 
 use aionui_api_types::{
-    ApiResponse, AssistantResponse, CreateAssistantRequest, ImportAssistantsRequest,
-    ImportAssistantsResult, SetAssistantStateRequest, UpdateAssistantRequest,
+    ApiResponse, AssistantResponse, CreateAssistantRequest, ImportAssistantsRequest, ImportAssistantsResult,
+    SetAssistantStateRequest, UpdateAssistantRequest,
 };
 use aionui_common::AppError;
 
@@ -20,10 +20,7 @@ pub use crate::state::AssistantRouterState;
 pub fn assistant_routes(state: AssistantRouterState) -> Router {
     Router::new()
         .route("/api/assistants", get(list).post(create))
-        .route(
-            "/api/assistants/{id}",
-            axum::routing::put(update).delete(delete_one),
-        )
+        .route("/api/assistants/{id}", axum::routing::put(update).delete(delete_one))
         .route("/api/assistants/{id}/state", patch(set_state))
         .route("/api/assistants/{id}/avatar", get(get_avatar))
         .route("/api/assistants/import", post(import))
@@ -86,10 +83,7 @@ async fn import(
 /// Serve the raw avatar bytes for an assistant. Content-Type inferred from the
 /// file extension (png/jpg/svg default). Extensions return 404 — the frontend
 /// serves those via `aion-asset://`.
-async fn get_avatar(
-    State(state): State<AssistantRouterState>,
-    Path(id): Path<String>,
-) -> Result<Response, AppError> {
+async fn get_avatar(State(state): State<AssistantRouterState>, Path(id): Path<String>) -> Result<Response, AppError> {
     let asset = state
         .service
         .avatar_asset(&id)

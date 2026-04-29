@@ -28,16 +28,10 @@ pub trait IAgentMetadataRepository: Send + Sync {
     /// Look up the first `builtin` row whose vendor label matches.
     /// Useful when the caller only has the legacy `backend` string and
     /// not a full agent id.
-    async fn find_builtin_by_backend(
-        &self,
-        backend: &str,
-    ) -> Result<Option<AgentMetadataRow>, DbError>;
+    async fn find_builtin_by_backend(&self, backend: &str) -> Result<Option<AgentMetadataRow>, DbError>;
 
     /// Insert or replace a row. Returns the row as stored.
-    async fn upsert(
-        &self,
-        params: &UpsertAgentMetadataParams<'_>,
-    ) -> Result<AgentMetadataRow, DbError>;
+    async fn upsert(&self, params: &UpsertAgentMetadataParams<'_>) -> Result<AgentMetadataRow, DbError>;
 
     /// Apply handshake-derived fields on top of an existing row.
     /// Returns `Ok(None)` if no row matches `id`.

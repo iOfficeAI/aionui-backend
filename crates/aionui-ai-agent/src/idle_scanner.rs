@@ -56,10 +56,7 @@ fn scan_and_cleanup(manager: &Arc<dyn IWorkerTaskManager>, threshold_ms: i64) {
     let idle_ids = manager.collect_idle(threshold_ms);
 
     if idle_ids.is_empty() {
-        debug!(
-            active = manager.active_count(),
-            "Idle scan: no idle agents found"
-        );
+        debug!(active = manager.active_count(), "Idle scan: no idle agents found");
         return;
     }
 

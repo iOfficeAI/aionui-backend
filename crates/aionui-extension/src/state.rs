@@ -162,8 +162,7 @@ impl ExtensionStateStore {
 
                 // Debounce: wait for the configured duration, collapsing
                 // additional notifications.
-                tokio::time::sleep(std::time::Duration::from_millis(STATE_PERSIST_DEBOUNCE_MS))
-                    .await;
+                tokio::time::sleep(std::time::Duration::from_millis(STATE_PERSIST_DEBOUNCE_MS)).await;
 
                 let snapshot = {
                     let guard = inner.states.lock().await;
@@ -187,9 +186,7 @@ impl ExtensionStateStore {
 /// Load extension states from a JSON file.
 ///
 /// Returns an empty map if the file does not exist.
-pub fn load_states_from_file(
-    path: &Path,
-) -> Result<HashMap<String, ExtensionState>, ExtensionError> {
+pub fn load_states_from_file(path: &Path) -> Result<HashMap<String, ExtensionState>, ExtensionError> {
     match std::fs::read(path) {
         Ok(bytes) => {
             let states: Vec<ExtensionState> = serde_json::from_slice(&bytes)?;
@@ -209,10 +206,7 @@ pub fn load_states_from_file(
 /// Write extension states to a JSON file atomically.
 ///
 /// Creates parent directories if they do not exist.
-pub fn save_states_to_file(
-    path: &Path,
-    states: &HashMap<String, ExtensionState>,
-) -> Result<(), ExtensionError> {
+pub fn save_states_to_file(path: &Path, states: &HashMap<String, ExtensionState>) -> Result<(), ExtensionError> {
     // Ensure parent directory exists.
     if let Some(parent) = path.parent()
         && !parent.exists()
@@ -436,16 +430,11 @@ mod tests {
 
         // Multiple rapid writes should be collapsed.
         for i in 0..5 {
-            store
-                .set(make_state(&format!("ext-{i}"), "1.0.0", true))
-                .await;
+            store.set(make_state(&format!("ext-{i}"), "1.0.0", true)).await;
         }
 
         // Wait for debounce to settle.
-        tokio::time::sleep(std::time::Duration::from_millis(
-            STATE_PERSIST_DEBOUNCE_MS + 200,
-        ))
-        .await;
+        tokio::time::sleep(std::time::Duration::from_millis(STATE_PERSIST_DEBOUNCE_MS + 200)).await;
 
         let loaded = load_states_from_file(&path).unwrap();
         assert_eq!(loaded.len(), 5);

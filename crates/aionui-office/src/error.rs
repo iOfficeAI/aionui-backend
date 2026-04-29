@@ -34,22 +34,14 @@ impl From<OfficeError> for AppError {
     fn from(err: OfficeError) -> Self {
         match err {
             OfficeError::OfficecliNotFound => AppError::BadRequest("officecli not found".into()),
-            OfficeError::InstallFailed(msg) => {
-                AppError::Internal(format!("officecli install failed: {msg}"))
-            }
-            OfficeError::StartFailed(msg) => {
-                AppError::Internal(format!("preview start failed: {msg}"))
-            }
-            OfficeError::PortTimeout(path) => {
-                AppError::Timeout(format!("port readiness timeout for {path}"))
-            }
+            OfficeError::InstallFailed(msg) => AppError::Internal(format!("officecli install failed: {msg}")),
+            OfficeError::StartFailed(msg) => AppError::Internal(format!("preview start failed: {msg}")),
+            OfficeError::PortTimeout(path) => AppError::Timeout(format!("port readiness timeout for {path}")),
             OfficeError::Io(e) => AppError::Internal(format!("IO error: {e}")),
             OfficeError::Snapshot(msg) => AppError::Internal(format!("snapshot error: {msg}")),
             OfficeError::Json(e) => AppError::Internal(format!("JSON error: {e}")),
             OfficeError::Conversion(msg) => AppError::Internal(format!("conversion error: {msg}")),
-            OfficeError::ToolNotFound(tool) => {
-                AppError::BadRequest(format!("{tool} is not installed"))
-            }
+            OfficeError::ToolNotFound(tool) => AppError::BadRequest(format!("{tool} is not installed")),
         }
     }
 }
@@ -103,10 +95,7 @@ mod tests {
 
     #[test]
     fn display_messages() {
-        assert_eq!(
-            OfficeError::OfficecliNotFound.to_string(),
-            "officecli not found"
-        );
+        assert_eq!(OfficeError::OfficecliNotFound.to_string(), "officecli not found");
         assert_eq!(
             OfficeError::InstallFailed("npm error".into()).to_string(),
             "officecli install failed: npm error"

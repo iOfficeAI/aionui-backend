@@ -47,16 +47,13 @@ async fn run() -> Result<(), String> {
     let (tcp_reader, tcp_writer) = tcp.into_split();
 
     if std::io::stdin().is_terminal() {
-        return Err(
-            "stdin is a TTY; mcp-bridge must be spawned by an MCP-capable agent CLI".into(),
-        );
+        return Err("stdin is a TTY; mcp-bridge must be spawned by an MCP-capable agent CLI".into());
     }
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
     let env_for_stdin = env.clone();
-    let stdin_task =
-        tokio::spawn(async move { forward_stdin_to_tcp(stdin, tcp_writer, env_for_stdin).await });
+    let stdin_task = tokio::spawn(async move { forward_stdin_to_tcp(stdin, tcp_writer, env_for_stdin).await });
     let tcp_task = tokio::spawn(async move { forward_tcp_to_stdout(tcp_reader, stdout).await });
 
     // First task to return decides the exit path; we treat clean EOF from
@@ -87,21 +84,14 @@ impl BridgeEnv {
     fn from_env() -> Result<Self, String> {
         let port_raw = std::env::var(TeamMcpStdioConfig::ENV_PORT)
             .map_err(|_| format!("missing env var {}", TeamMcpStdioConfig::ENV_PORT))?;
-        let port: u16 = port_raw.parse().map_err(|e| {
-            format!(
-                "invalid {} value {port_raw:?}: {e}",
-                TeamMcpStdioConfig::ENV_PORT
-            )
-        })?;
+        let port: u16 = port_raw
+            .parse()
+            .map_err(|e| format!("invalid {} value {port_raw:?}: {e}", TeamMcpStdioConfig::ENV_PORT))?;
         let token = std::env::var(TeamMcpStdioConfig::ENV_TOKEN)
             .map_err(|_| format!("missing env var {}", TeamMcpStdioConfig::ENV_TOKEN))?;
         let slot_id = std::env::var(TeamMcpStdioConfig::ENV_SLOT_ID)
             .map_err(|_| format!("missing env var {}", TeamMcpStdioConfig::ENV_SLOT_ID))?;
-        Ok(Self {
-            port,
-            token,
-            slot_id,
-        })
+        Ok(Self { port, token, slot_id })
     }
 }
 
@@ -109,11 +99,7 @@ impl BridgeEnv {
 // stdin → TCP: read newline-delimited JSON, inject auth on `initialize`, frame to TCP
 // ---------------------------------------------------------------------------
 
-async fn forward_stdin_to_tcp<R, W>(
-    stdin: R,
-    mut tcp_writer: W,
-    env: BridgeEnv,
-) -> Result<(), String>
+async fn forward_stdin_to_tcp<R, W>(stdin: R, mut tcp_writer: W, env: BridgeEnv) -> Result<(), String>
 where
     R: tokio::io::AsyncRead + Unpin,
     W: tokio::io::AsyncWrite + Unpin,
@@ -131,15 +117,14 @@ where
         };
 
         eprintln!("[mcp-bridge] stdin received: {} bytes", body.len());
-        let mut value: Value = serde_json::from_slice(&body)
-            .map_err(|e| format!("stdin payload is not valid JSON: {e}"))?;
+        let mut value: Value =
+            serde_json::from_slice(&body).map_err(|e| format!("stdin payload is not valid JSON: {e}"))?;
 
         if value.get("method").and_then(Value::as_str) == Some("initialize") {
             inject_auth(&mut value, &env);
         }
 
-        let bytes =
-            serde_json::to_vec(&value).map_err(|e| format!("serialize outgoing frame: {e}"))?;
+        let bytes = serde_json::to_vec(&value).map_err(|e| format!("serialize outgoing frame: {e}"))?;
         write_frame(&mut tcp_writer, &bytes)
             .await
             .map_err(|e| format!("tcp write error: {e}"))?;
@@ -149,9 +134,7 @@ where
 
 /// Read one MCP stdio message (Content-Length framing).
 /// Returns None on clean EOF.
-async fn read_mcp_stdio_message<R: tokio::io::AsyncBufRead + Unpin>(
-    reader: &mut R,
-) -> Result<Option<Vec<u8>>, String> {
+async fn read_mcp_stdio_message<R: tokio::io::AsyncBufRead + Unpin>(reader: &mut R) -> Result<Option<Vec<u8>>, String> {
     let mut content_length: Option<usize> = None;
     let mut header_line = String::new();
     loop {
@@ -228,10 +211,7 @@ where
             .write_all(&frame)
             .await
             .map_err(|e| format!("stdout write error: {e}"))?;
-        stdout
-            .flush()
-            .await
-            .map_err(|e| format!("stdout flush error: {e}"))?;
+        stdout.flush().await.map_err(|e| format!("stdout flush error: {e}"))?;
     }
 }
 
@@ -294,9 +274,7 @@ mod tests {
             "\n",
         );
         let mut out = Vec::<u8>::new();
-        forward_stdin_to_tcp(input.as_bytes(), &mut out, env())
-            .await
-            .unwrap();
+        forward_stdin_to_tcp(input.as_bytes(), &mut out, env()).await.unwrap();
 
         // Parse two frames back out.
         let mut cursor = std::io::Cursor::new(out);

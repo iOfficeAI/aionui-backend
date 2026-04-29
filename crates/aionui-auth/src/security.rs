@@ -1,7 +1,5 @@
 use axum::extract::Request;
-use axum::http::header::{
-    HeaderValue, REFERRER_POLICY, X_CONTENT_TYPE_OPTIONS, X_FRAME_OPTIONS, X_XSS_PROTECTION,
-};
+use axum::http::header::{HeaderValue, REFERRER_POLICY, X_CONTENT_TYPE_OPTIONS, X_FRAME_OPTIONS, X_XSS_PROTECTION};
 use axum::middleware::Next;
 use axum::response::Response;
 
@@ -42,24 +40,13 @@ mod tests {
             .layer(middleware::from_fn(security_headers_middleware));
 
         let response = app
-            .oneshot(
-                axum::http::Request::builder()
-                    .uri("/test")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(axum::http::Request::builder().uri("/test").body(Body::empty()).unwrap())
             .await
             .unwrap();
 
         assert_eq!(response.headers().get("x-frame-options").unwrap(), "DENY");
-        assert_eq!(
-            response.headers().get("x-content-type-options").unwrap(),
-            "nosniff"
-        );
-        assert_eq!(
-            response.headers().get("x-xss-protection").unwrap(),
-            "1; mode=block"
-        );
+        assert_eq!(response.headers().get("x-content-type-options").unwrap(), "nosniff");
+        assert_eq!(response.headers().get("x-xss-protection").unwrap(), "1; mode=block");
         assert_eq!(
             response.headers().get("referrer-policy").unwrap(),
             "strict-origin-when-cross-origin"
@@ -85,10 +72,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(
-            response.status(),
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR
-        );
+        assert_eq!(response.status(), axum::http::StatusCode::INTERNAL_SERVER_ERROR);
         // Security headers still present even on error responses
         assert_eq!(response.headers().get("x-frame-options").unwrap(), "DENY");
     }

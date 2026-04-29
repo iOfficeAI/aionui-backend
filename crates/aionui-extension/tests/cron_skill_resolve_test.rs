@@ -6,10 +6,7 @@ fn unique_temp_dir(label: &str) -> std::path::PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    std::env::temp_dir().join(format!(
-        "aionui-extension-{label}-{}-{nanos}",
-        std::process::id()
-    ))
+    std::env::temp_dir().join(format!("aionui-extension-{label}-{}-{nanos}", std::process::id()))
 }
 
 #[tokio::test]
@@ -35,10 +32,9 @@ async fn materialize_resolves_saved_cron_skill() {
     .unwrap();
 
     let paths = resolve_skill_paths(&base, &base);
-    let resolved =
-        skill_service::materialize_skills_for_agent(&paths, "conv-1", &["cron-job-123".to_owned()])
-            .await
-            .unwrap();
+    let resolved = skill_service::materialize_skills_for_agent(&paths, "conv-1", &["cron-job-123".to_owned()])
+        .await
+        .unwrap();
 
     assert_eq!(resolved.len(), 1);
     assert_eq!(resolved[0].name, "cron-job-123");

@@ -7,9 +7,8 @@ use std::collections::HashMap;
 
 use aionui_common::McpServerStatus;
 use aionui_mcp::{
-    AcpMcpCapabilities, AcpSessionMcpServer, ImageGenConfig, McpServer, McpServerTransport,
-    NameValuePair, build_builtin_image_gen_server, build_session_mcp_servers,
-    parse_acp_mcp_capabilities,
+    AcpMcpCapabilities, AcpSessionMcpServer, ImageGenConfig, McpServer, McpServerTransport, NameValuePair,
+    build_builtin_image_gen_server, build_session_mcp_servers, parse_acp_mcp_capabilities,
 };
 
 // ---------------------------------------------------------------------------
@@ -375,9 +374,7 @@ fn si_7_builtin_image_gen_injection() {
     let mut session_servers = build_session_mcp_servers(&user_servers, &caps);
 
     // Inject builtin image gen server
-    if let Some(builtin) =
-        build_builtin_image_gen_server(&caps, "/usr/local/bin/aionui-img-gen", &img_config)
-    {
+    if let Some(builtin) = build_builtin_image_gen_server(&caps, "/usr/local/bin/aionui-img-gen", &img_config) {
         session_servers.push(builtin);
     }
 
@@ -386,19 +383,14 @@ fn si_7_builtin_image_gen_injection() {
     // Verify the builtin server
     let builtin = &session_servers[1];
     match builtin {
-        AcpSessionMcpServer::Stdio {
-            name, command, env, ..
-        } => {
+        AcpSessionMcpServer::Stdio { name, command, env, .. } => {
             assert_eq!(name, "aionui-image-generation");
             assert_eq!(command, "/usr/local/bin/aionui-img-gen");
 
             // Verify all 6 env vars are present
             assert_eq!(env.len(), 6);
 
-            let env_map: HashMap<&str, &str> = env
-                .iter()
-                .map(|p| (p.name.as_str(), p.value.as_str()))
-                .collect();
+            let env_map: HashMap<&str, &str> = env.iter().map(|p| (p.name.as_str(), p.value.as_str())).collect();
             assert_eq!(env_map["AIONUI_IMG_MODEL"], "dall-e-3");
             assert_eq!(env_map["AIONUI_IMG_API_URL"], "https://api.openai.com/v1");
             assert_eq!(env_map["AIONUI_IMG_API_KEY"], "sk-test-key");

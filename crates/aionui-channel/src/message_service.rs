@@ -60,10 +60,7 @@ impl ChannelMessageService {
         // Ensure conversation exists
         let conversation_id = match &session.conversation_id {
             Some(cid) => cid.clone(),
-            None => {
-                self.create_conversation_for_session(session, platform)
-                    .await?
-            }
+            None => self.create_conversation_for_session(session, platform).await?,
         };
 
         let msg_id = generate_id();
@@ -377,54 +374,36 @@ fn channel_conversation_name(
 mod tests {
     use super::*;
     use aionui_ai_agent::stream_event::{
-        ErrorEventData, FinishEventData, StartEventData, TextEventData, ThinkingEventData,
-        ToolCallEventData, ToolCallStatus,
+        ErrorEventData, FinishEventData, StartEventData, TextEventData, ThinkingEventData, ToolCallEventData,
+        ToolCallStatus,
     };
 
     // ── platform_to_source ─────────────────────────────────────────────
 
     #[test]
     fn platform_to_source_telegram() {
-        assert_eq!(
-            platform_to_source(PluginType::Telegram),
-            ConversationSource::Telegram
-        );
+        assert_eq!(platform_to_source(PluginType::Telegram), ConversationSource::Telegram);
     }
 
     #[test]
     fn platform_to_source_lark() {
-        assert_eq!(
-            platform_to_source(PluginType::Lark),
-            ConversationSource::Lark
-        );
+        assert_eq!(platform_to_source(PluginType::Lark), ConversationSource::Lark);
     }
 
     #[test]
     fn platform_to_source_dingtalk() {
-        assert_eq!(
-            platform_to_source(PluginType::Dingtalk),
-            ConversationSource::Dingtalk
-        );
+        assert_eq!(platform_to_source(PluginType::Dingtalk), ConversationSource::Dingtalk);
     }
 
     #[test]
     fn platform_to_source_weixin() {
-        assert_eq!(
-            platform_to_source(PluginType::Weixin),
-            ConversationSource::Weixin
-        );
+        assert_eq!(platform_to_source(PluginType::Weixin), ConversationSource::Weixin);
     }
 
     #[test]
     fn platform_to_source_reserved_defaults_to_aionui() {
-        assert_eq!(
-            platform_to_source(PluginType::Slack),
-            ConversationSource::Aionui
-        );
-        assert_eq!(
-            platform_to_source(PluginType::Discord),
-            ConversationSource::Aionui
-        );
+        assert_eq!(platform_to_source(PluginType::Slack), ConversationSource::Aionui);
+        assert_eq!(platform_to_source(PluginType::Discord), ConversationSource::Aionui);
     }
 
     // ── parse_agent_type ───────────────────────────────────────────────
@@ -432,10 +411,7 @@ mod tests {
     #[test]
     fn parse_known_agent_types() {
         assert_eq!(parse_agent_type("acp"), AgentType::Acp);
-        assert_eq!(
-            parse_agent_type("openclaw-gateway"),
-            AgentType::OpenclawGateway
-        );
+        assert_eq!(parse_agent_type("openclaw-gateway"), AgentType::OpenclawGateway);
         assert_eq!(parse_agent_type("nanobot"), AgentType::Nanobot);
         assert_eq!(parse_agent_type("remote"), AgentType::Remote);
         assert_eq!(parse_agent_type("aionrs"), AgentType::Aionrs);
@@ -593,15 +569,13 @@ mod tests {
 
     #[test]
     fn conv_name_telegram_acp_with_backend() {
-        let name =
-            channel_conversation_name(PluginType::Telegram, "acp", Some("claude"), Some("70880480"));
+        let name = channel_conversation_name(PluginType::Telegram, "acp", Some("claude"), Some("70880480"));
         assert_eq!(name, "tg-acp-claude-70880480");
     }
 
     #[test]
     fn conv_name_telegram_aionrs() {
-        let name =
-            channel_conversation_name(PluginType::Telegram, "aionrs", None, Some("70880480"));
+        let name = channel_conversation_name(PluginType::Telegram, "aionrs", None, Some("70880480"));
         assert_eq!(name, "tg-aionrs-70880480");
     }
 
@@ -613,12 +587,7 @@ mod tests {
 
     #[test]
     fn conv_name_dingtalk_truncates_long_chat_id() {
-        let name = channel_conversation_name(
-            PluginType::Dingtalk,
-            "acp",
-            Some("vertex"),
-            Some("123456789abcdef"),
-        );
+        let name = channel_conversation_name(PluginType::Dingtalk, "acp", Some("vertex"), Some("123456789abcdef"));
         assert_eq!(name, "ding-acp-vertex-12345678");
     }
 
@@ -630,12 +599,7 @@ mod tests {
 
     #[test]
     fn conv_name_non_acp_ignores_backend() {
-        let name = channel_conversation_name(
-            PluginType::Telegram,
-            "aionrs",
-            Some("claude"),
-            Some("70880480"),
-        );
+        let name = channel_conversation_name(PluginType::Telegram, "aionrs", Some("claude"), Some("70880480"));
         assert_eq!(name, "tg-aionrs-70880480");
     }
 }

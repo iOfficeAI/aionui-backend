@@ -7,9 +7,7 @@ use crate::action::{ActionExecutor, MessageResult};
 use crate::message_service::ChannelMessageService;
 use crate::session::SessionManager;
 use crate::stream_relay::{ChannelSender, ChannelStreamRelay, RelayConfig};
-use crate::types::{
-    ActionBehavior, OutgoingMessageType, UnifiedIncomingMessage, UnifiedOutgoingMessage,
-};
+use crate::types::{ActionBehavior, OutgoingMessageType, UnifiedIncomingMessage, UnifiedOutgoingMessage};
 
 /// Orchestrates the full channel message lifecycle.
 ///
@@ -132,9 +130,7 @@ async fn send_action_response(
         match response.behavior {
             ActionBehavior::Edit => {
                 if let Some(ref edit_id) = response.edit_message_id {
-                    let _ = sender
-                        .edit_message(plugin_id, chat_id, edit_id, outgoing)
-                        .await;
+                    let _ = sender.edit_message(plugin_id, chat_id, edit_id, outgoing).await;
                 }
             }
             _ => {

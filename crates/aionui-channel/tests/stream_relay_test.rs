@@ -48,9 +48,7 @@ async fn relay_sends_thinking_then_final_message() {
         }))
         .unwrap();
     event_tx
-        .send(AgentStreamEvent::Finish(FinishEventData {
-            session_id: None,
-        }))
+        .send(AgentStreamEvent::Finish(FinishEventData { session_id: None }))
         .unwrap();
 
     relay.run(rx).await;
@@ -118,13 +116,5 @@ async fn relay_handles_channel_closed() {
 
     let edits = recorder.take_edits();
     assert!(!edits.is_empty());
-    assert!(
-        edits
-            .last()
-            .unwrap()
-            .text
-            .as_deref()
-            .unwrap()
-            .contains("partial")
-    );
+    assert!(edits.last().unwrap().text.as_deref().unwrap().contains("partial"));
 }

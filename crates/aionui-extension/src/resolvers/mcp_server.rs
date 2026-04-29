@@ -16,10 +16,7 @@ pub fn resolve_mcp_server(server: &ExtMcpServer, extension_name: &str) -> Resolv
 }
 
 /// Resolve all MCP server contributions from an extension.
-pub fn resolve_mcp_servers(
-    servers: &[ExtMcpServer],
-    extension_name: &str,
-) -> Vec<ResolvedMcpServer> {
+pub fn resolve_mcp_servers(servers: &[ExtMcpServer], extension_name: &str) -> Vec<ResolvedMcpServer> {
     if servers.is_empty() {
         return Vec::new();
     }

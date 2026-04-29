@@ -54,17 +54,12 @@ pub(crate) async fn try_fix_url(
         }
     }
 
-    Err(AppError::BadGateway(
-        "All URL variants failed during auto-fix".into(),
-    ))
+    Err(AppError::BadGateway("All URL variants failed during auto-fix".into()))
 }
 
 /// Build candidate URLs from the base URL and standard path suffixes.
 fn build_candidates(base: &str) -> Vec<String> {
-    URL_VARIANTS
-        .iter()
-        .map(|suffix| format!("{base}{suffix}"))
-        .collect()
+    URL_VARIANTS.iter().map(|suffix| format!("{base}{suffix}")).collect()
 }
 
 #[cfg(test)]

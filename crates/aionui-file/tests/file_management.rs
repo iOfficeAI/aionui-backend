@@ -92,33 +92,20 @@ async fn copy_files_with_source_root_preserves_structure() {
 
     let svc = make_service(dir.path());
     let paths = vec![
-        src_dir
-            .join("utils/helper.ts")
-            .to_string_lossy()
-            .into_owned(),
+        src_dir.join("utils/helper.ts").to_string_lossy().into_owned(),
         src_dir.join("index.ts").to_string_lossy().into_owned(),
     ];
 
     let result = svc
-        .copy_files_to_workspace(
-            &paths,
-            ws_dir.to_str().unwrap(),
-            Some(src_dir.to_str().unwrap()),
-        )
+        .copy_files_to_workspace(&paths, ws_dir.to_str().unwrap(), Some(src_dir.to_str().unwrap()))
         .await
         .unwrap();
 
     assert_eq!(result.copied_files.len(), 2);
     assert!(result.failed_files.is_empty());
     // Directory structure preserved relative to source_root
-    assert_eq!(
-        fs::read_to_string(ws_dir.join("utils/helper.ts")).unwrap(),
-        "export {}"
-    );
-    assert_eq!(
-        fs::read_to_string(ws_dir.join("index.ts")).unwrap(),
-        "import {}"
-    );
+    assert_eq!(fs::read_to_string(ws_dir.join("utils/helper.ts")).unwrap(), "export {}");
+    assert_eq!(fs::read_to_string(ws_dir.join("index.ts")).unwrap(), "import {}");
 }
 
 #[tokio::test]
@@ -191,13 +178,7 @@ async fn copy_files_outside_sandbox_fails() {
     fs::write(outside.path().join("secret.txt"), "secret").unwrap();
 
     let svc = make_service(sandbox.path());
-    let paths = vec![
-        outside
-            .path()
-            .join("secret.txt")
-            .to_string_lossy()
-            .into_owned(),
-    ];
+    let paths = vec![outside.path().join("secret.txt").to_string_lossy().into_owned()];
 
     let result = svc
         .copy_files_to_workspace(&paths, ws.to_str().unwrap(), None)
@@ -270,12 +251,7 @@ async fn remove_entry_emits_delete_event() {
     assert_eq!(event.data["operation"], "delete");
     assert!(event.data.get("content").is_none());
     assert_eq!(event.data["relative_path"], "event_del.txt");
-    assert!(
-        event.data["file_path"]
-            .as_str()
-            .unwrap()
-            .contains("event_del.txt")
-    );
+    assert!(event.data["file_path"].as_str().unwrap().contains("event_del.txt"));
 }
 
 #[tokio::test]
@@ -293,9 +269,7 @@ async fn remove_entry_invalidates_cache() {
 
     // Remove a file
     let target = dir.path().join("a.txt");
-    svc.remove_entry(target.to_str().unwrap(), ws)
-        .await
-        .unwrap();
+    svc.remove_entry(target.to_str().unwrap(), ws).await.unwrap();
 
     // Cache should be invalidated, so we see only 1 file
     let files = svc.list_workspace_files(ws).await.unwrap();
@@ -327,17 +301,11 @@ async fn rename_entry_file() {
     fs::write(&old, "data").unwrap();
 
     let svc = make_service(dir.path());
-    let new_path = svc
-        .rename_entry(old.to_str().unwrap(), "new.txt")
-        .await
-        .unwrap();
+    let new_path = svc.rename_entry(old.to_str().unwrap(), "new.txt").await.unwrap();
 
     assert!(!old.exists());
     assert!(new_path.contains("new.txt"));
-    assert_eq!(
-        fs::read_to_string(dir.path().join("new.txt")).unwrap(),
-        "data"
-    );
+    assert_eq!(fs::read_to_string(dir.path().join("new.txt")).unwrap(), "data");
 }
 
 #[tokio::test]
@@ -348,10 +316,7 @@ async fn rename_entry_directory() {
     fs::write(old.join("inner.txt"), "inner").unwrap();
 
     let svc = make_service(dir.path());
-    let new_path = svc
-        .rename_entry(old.to_str().unwrap(), "new_dir")
-        .await
-        .unwrap();
+    let new_path = svc.rename_entry(old.to_str().unwrap(), "new_dir").await.unwrap();
 
     assert!(!old.exists());
     assert!(std::path::Path::new(&new_path).is_dir());
@@ -370,9 +335,7 @@ async fn rename_entry_target_exists_errors() {
     fs::write(&existing, "existing").unwrap();
 
     let svc = make_service(dir.path());
-    let result = svc
-        .rename_entry(old.to_str().unwrap(), "existing.txt")
-        .await;
+    let result = svc.rename_entry(old.to_str().unwrap(), "existing.txt").await;
 
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
@@ -409,9 +372,7 @@ async fn rename_entry_rejects_path_separator_in_name() {
     fs::write(&file, "data").unwrap();
 
     let svc = make_service(dir.path());
-    let result = svc
-        .rename_entry(file.to_str().unwrap(), "sub/new.txt")
-        .await;
+    let result = svc.rename_entry(file.to_str().unwrap(), "sub/new.txt").await;
 
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
@@ -451,10 +412,7 @@ async fn create_temp_file_path_in_aionui_dir() {
     let svc = make_service(dir.path());
     let path = svc.create_temp_file("check.txt").await.unwrap();
 
-    assert!(
-        path.contains("aionui"),
-        "temp path should be under aionui dir"
-    );
+    assert!(path.contains("aionui"), "temp path should be under aionui dir");
 }
 
 #[tokio::test]
@@ -465,10 +423,7 @@ async fn create_temp_file_rejects_traversal() {
     let result = svc.create_temp_file("../../malicious.txt").await;
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
-    assert!(
-        err.contains("traversal"),
-        "expected traversal error, got: {err}"
-    );
+    assert!(err.contains("traversal"), "expected traversal error, got: {err}");
 }
 
 #[tokio::test]
@@ -493,8 +448,5 @@ async fn create_temp_file_rejects_null_byte() {
     let result = svc.create_temp_file("evil\0name.txt").await;
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
-    assert!(
-        err.contains("traversal"),
-        "expected traversal error, got: {err}"
-    );
+    assert!(err.contains("traversal"), "expected traversal error, got: {err}");
 }

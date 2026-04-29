@@ -517,9 +517,7 @@ mod tests {
 
     #[test]
     fn test_oauth_status_response() {
-        let resp = OAuthStatusResponse {
-            authenticated: true,
-        };
+        let resp = OAuthStatusResponse { authenticated: true };
         let json = serde_json::to_value(&resp).unwrap();
         assert_eq!(json["authenticated"], true);
     }

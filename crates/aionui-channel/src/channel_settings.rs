@@ -49,10 +49,7 @@ impl ChannelSettingsService {
     /// - **Legacy:** `{"backend":"claude","name":"Claude"}` (no agent_type field)
     ///
     /// Falls back to `agent_type=aionrs, backend=None` when no config exists.
-    pub async fn get_agent_config(
-        &self,
-        platform: PluginType,
-    ) -> Result<ResolvedAgentConfig, ChannelError> {
+    pub async fn get_agent_config(&self, platform: PluginType) -> Result<ResolvedAgentConfig, ChannelError> {
         let key = agent_key(platform);
         let prefs = self.pref_repo.get_by_keys(&[&key]).await?;
 
@@ -77,32 +74,19 @@ impl ChannelSettingsService {
             });
         }
 
-        let raw_backend = parsed["backend"]
-            .as_str()
-            .unwrap_or(DEFAULT_BACKEND)
-            .to_owned();
+        let raw_backend = parsed["backend"].as_str().unwrap_or(DEFAULT_BACKEND).to_owned();
         let agent_type = backend_to_agent_type(&raw_backend);
-        let backend = if agent_type == "acp" {
-            Some(raw_backend)
-        } else {
-            None
-        };
+        let backend = if agent_type == "acp" { Some(raw_backend) } else { None };
 
         debug!(platform = %platform, agent_type = %agent_type, backend = ?backend, "resolved channel agent config (legacy format)");
 
-        Ok(ResolvedAgentConfig {
-            agent_type,
-            backend,
-        })
+        Ok(ResolvedAgentConfig { agent_type, backend })
     }
 
     /// Reads the model configuration for a platform from `client_preferences`.
     ///
     /// Returns `None` when no model is configured (common for ACP agents).
-    pub async fn get_model_config(
-        &self,
-        platform: PluginType,
-    ) -> Result<Option<ResolvedModelConfig>, ChannelError> {
+    pub async fn get_model_config(&self, platform: PluginType) -> Result<Option<ResolvedModelConfig>, ChannelError> {
         let key = model_key(platform);
         let prefs = self.pref_repo.get_by_keys(&[&key]).await?;
 
@@ -198,12 +182,7 @@ mod tests {
 
         fn with_data(entries: Vec<(&str, &str)>) -> Self {
             Self {
-                data: Mutex::new(
-                    entries
-                        .into_iter()
-                        .map(|(k, v)| (k.to_owned(), v.to_owned()))
-                        .collect(),
-                ),
+                data: Mutex::new(entries.into_iter().map(|(k, v)| (k.to_owned(), v.to_owned())).collect()),
             }
         }
     }
@@ -281,10 +260,7 @@ mod tests {
 
     #[test]
     fn non_acp_backends_map_correctly() {
-        assert_eq!(
-            backend_to_agent_type("openclaw-gateway"),
-            "openclaw-gateway"
-        );
+        assert_eq!(backend_to_agent_type("openclaw-gateway"), "openclaw-gateway");
         assert_eq!(backend_to_agent_type("nanobot"), "nanobot");
         assert_eq!(backend_to_agent_type("remote"), "remote");
     }
@@ -392,16 +368,9 @@ mod tests {
         )]));
         let svc = ChannelSettingsService::new(repo);
 
-        let config = svc
-            .get_model_config(PluginType::Weixin)
-            .await
-            .unwrap()
-            .unwrap();
+        let config = svc.get_model_config(PluginType::Weixin).await.unwrap().unwrap();
         assert_eq!(config.provider_id, "490fdb4e");
-        assert_eq!(
-            config.use_model.as_deref(),
-            Some("global.anthropic.claude-opus-4-6-v1")
-        );
+        assert_eq!(config.use_model.as_deref(), Some("global.anthropic.claude-opus-4-6-v1"));
     }
 
     #[tokio::test]

@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
-use aionui_common::{
-    AgentKillReason, AgentType, AppError, ConversationStatus, TimestampMs, now_ms,
-};
+use aionui_common::{AgentKillReason, AgentType, AppError, ConversationStatus, TimestampMs, now_ms};
 use dashmap::DashMap;
 use tracing::info;
 
@@ -13,8 +11,7 @@ use crate::types::BuildTaskOptions;
 ///
 /// This is provided at DI time by the application layer, which knows
 /// how to construct each agent type (ACP, Gemini, etc.).
-pub type AgentFactory =
-    Arc<dyn Fn(BuildTaskOptions) -> Result<AgentManagerHandle, AppError> + Send + Sync>;
+pub type AgentFactory = Arc<dyn Fn(BuildTaskOptions) -> Result<AgentManagerHandle, AppError> + Send + Sync>;
 
 /// Manages the lifecycle of active Agent tasks.
 ///
@@ -83,10 +80,7 @@ impl IWorkerTaskManager for WorkerTaskManagerImpl {
 
         // Use entry API to avoid TOCTOU race — if another thread inserted
         // between our get and this point, use the existing one.
-        let entry = self
-            .tasks
-            .entry(conversation_id.to_owned())
-            .or_insert(handle);
+        let entry = self.tasks.entry(conversation_id.to_owned()).or_insert(handle);
         Ok(Arc::clone(&entry))
     }
 
@@ -134,9 +128,7 @@ mod tests {
     use crate::agent_manager::IAgentManager;
     use crate::stream_event::AgentStreamEvent;
     use crate::types::SendMessageData;
-    use aionui_common::{
-        AgentKillReason, AgentType, Confirmation, ConversationStatus, ProviderWithModel,
-    };
+    use aionui_common::{AgentKillReason, AgentType, Confirmation, ConversationStatus, ProviderWithModel};
     use std::sync::atomic::{AtomicI64, Ordering};
     use tokio::sync::broadcast;
 
@@ -253,9 +245,7 @@ mod tests {
     #[test]
     fn get_or_build_creates_task() {
         let mgr = make_manager();
-        let handle = mgr
-            .get_or_build_task("conv-1", make_options("conv-1"))
-            .unwrap();
+        let handle = mgr.get_or_build_task("conv-1", make_options("conv-1")).unwrap();
         assert_eq!(handle.conversation_id(), "conv-1");
         assert_eq!(mgr.active_count(), 1);
     }
@@ -263,12 +253,8 @@ mod tests {
     #[test]
     fn get_or_build_returns_existing() {
         let mgr = make_manager();
-        let h1 = mgr
-            .get_or_build_task("conv-1", make_options("conv-1"))
-            .unwrap();
-        let h2 = mgr
-            .get_or_build_task("conv-1", make_options("conv-1"))
-            .unwrap();
+        let h1 = mgr.get_or_build_task("conv-1", make_options("conv-1")).unwrap();
+        let h2 = mgr.get_or_build_task("conv-1", make_options("conv-1")).unwrap();
         assert!(Arc::ptr_eq(&h1, &h2));
         assert_eq!(mgr.active_count(), 1);
     }
@@ -276,8 +262,7 @@ mod tests {
     #[test]
     fn get_task_finds_existing() {
         let mgr = make_manager();
-        mgr.get_or_build_task("conv-1", make_options("conv-1"))
-            .unwrap();
+        mgr.get_or_build_task("conv-1", make_options("conv-1")).unwrap();
         let handle = mgr.get_task("conv-1");
         assert!(handle.is_some());
         assert_eq!(handle.unwrap().conversation_id(), "conv-1");
@@ -286,12 +271,10 @@ mod tests {
     #[test]
     fn kill_removes_task() {
         let mgr = make_manager();
-        mgr.get_or_build_task("conv-1", make_options("conv-1"))
-            .unwrap();
+        mgr.get_or_build_task("conv-1", make_options("conv-1")).unwrap();
         assert_eq!(mgr.active_count(), 1);
 
-        mgr.kill("conv-1", Some(AgentKillReason::IdleTimeout))
-            .unwrap();
+        mgr.kill("conv-1", Some(AgentKillReason::IdleTimeout)).unwrap();
         assert_eq!(mgr.active_count(), 0);
         assert!(mgr.get_task("conv-1").is_none());
     }
@@ -305,10 +288,8 @@ mod tests {
     #[test]
     fn clear_removes_all() {
         let mgr = make_manager();
-        mgr.get_or_build_task("conv-1", make_options("conv-1"))
-            .unwrap();
-        mgr.get_or_build_task("conv-2", make_options("conv-2"))
-            .unwrap();
+        mgr.get_or_build_task("conv-1", make_options("conv-1")).unwrap();
+        mgr.get_or_build_task("conv-2", make_options("conv-2")).unwrap();
         assert_eq!(mgr.active_count(), 2);
 
         mgr.clear();
@@ -324,22 +305,18 @@ mod tests {
 
         // ACP + Finished + old activity → should be collected
         let stale = Arc::new(
-            MockAgent::new("conv-stale", Some(ConversationStatus::Finished))
-                .with_last_activity(now_ms() - 600_000), // 10 min ago
+            MockAgent::new("conv-stale", Some(ConversationStatus::Finished)).with_last_activity(now_ms() - 600_000), // 10 min ago
         );
         mgr.tasks.insert("conv-stale".into(), stale);
 
         // ACP + Finished + recent activity → should NOT be collected
-        let recent = Arc::new(
-            MockAgent::new("conv-recent", Some(ConversationStatus::Finished))
-                .with_last_activity(now_ms()),
-        );
+        let recent =
+            Arc::new(MockAgent::new("conv-recent", Some(ConversationStatus::Finished)).with_last_activity(now_ms()));
         mgr.tasks.insert("conv-recent".into(), recent);
 
         // ACP + Running + old activity → should NOT be collected
         let running = Arc::new(
-            MockAgent::new("conv-running", Some(ConversationStatus::Running))
-                .with_last_activity(now_ms() - 600_000),
+            MockAgent::new("conv-running", Some(ConversationStatus::Running)).with_last_activity(now_ms() - 600_000),
         );
         mgr.tasks.insert("conv-running".into(), running);
 

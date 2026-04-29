@@ -167,26 +167,20 @@ impl ICronRepository for SqliteCronRepository {
     }
 
     async fn list_all(&self) -> Result<Vec<CronJobRow>, DbError> {
-        let rows =
-            sqlx::query_as::<_, CronJobRow>("SELECT * FROM cron_jobs ORDER BY created_at ASC")
-                .fetch_all(&self.pool)
-                .await?;
+        let rows = sqlx::query_as::<_, CronJobRow>("SELECT * FROM cron_jobs ORDER BY created_at ASC")
+            .fetch_all(&self.pool)
+            .await?;
         Ok(rows)
     }
 
     async fn list_enabled(&self) -> Result<Vec<CronJobRow>, DbError> {
-        let rows = sqlx::query_as::<_, CronJobRow>(
-            "SELECT * FROM cron_jobs WHERE enabled = 1 ORDER BY created_at ASC",
-        )
-        .fetch_all(&self.pool)
-        .await?;
+        let rows = sqlx::query_as::<_, CronJobRow>("SELECT * FROM cron_jobs WHERE enabled = 1 ORDER BY created_at ASC")
+            .fetch_all(&self.pool)
+            .await?;
         Ok(rows)
     }
 
-    async fn list_by_conversation(
-        &self,
-        conversation_id: &str,
-    ) -> Result<Vec<CronJobRow>, DbError> {
+    async fn list_by_conversation(&self, conversation_id: &str) -> Result<Vec<CronJobRow>, DbError> {
         let rows = sqlx::query_as::<_, CronJobRow>(
             "SELECT * FROM cron_jobs WHERE conversation_id = ? ORDER BY created_at ASC",
         )
@@ -427,9 +421,7 @@ mod tests {
         repo.insert(&make_row("cron_noop")).await.unwrap();
 
         let before = repo.get_by_id("cron_noop").await.unwrap().unwrap();
-        repo.update("cron_noop", &UpdateCronJobParams::default())
-            .await
-            .unwrap();
+        repo.update("cron_noop", &UpdateCronJobParams::default()).await.unwrap();
         let after = repo.get_by_id("cron_noop").await.unwrap().unwrap();
 
         assert_eq!(before.updated_at, after.updated_at);

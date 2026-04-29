@@ -49,14 +49,9 @@ mod weixin_tests {
         [0x42u8; 32]
     }
 
-    async fn setup() -> (
-        ChannelManager,
-        Arc<dyn IChannelRepository>,
-        Arc<MockBroadcaster>,
-    ) {
+    async fn setup() -> (ChannelManager, Arc<dyn IChannelRepository>, Arc<MockBroadcaster>) {
         let db = init_database_memory().await.unwrap();
-        let repo: Arc<dyn IChannelRepository> =
-            Arc::new(SqliteChannelRepository::new(db.pool().clone()));
+        let repo: Arc<dyn IChannelRepository> = Arc::new(SqliteChannelRepository::new(db.pool().clone()));
         let broadcaster = Arc::new(MockBroadcaster::new());
         let (message_tx, _message_rx) = mpsc::channel(16);
         let (confirm_tx, _confirm_rx) = mpsc::channel(16);
@@ -175,8 +170,7 @@ mod weixin_tests {
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(
-            err_msg.to_lowercase().contains("bot_token")
-                || err_msg.to_lowercase().contains("bottoken"),
+            err_msg.to_lowercase().contains("bot_token") || err_msg.to_lowercase().contains("bottoken"),
             "Error should mention bot_token: {err_msg}"
         );
     }
@@ -191,8 +185,7 @@ mod weixin_tests {
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(
-            err_msg.to_lowercase().contains("account_id")
-                || err_msg.to_lowercase().contains("accountid"),
+            err_msg.to_lowercase().contains("account_id") || err_msg.to_lowercase().contains("accountid"),
             "Error should mention account_id: {err_msg}"
         );
     }
@@ -225,9 +218,7 @@ mod weixin_tests {
         let factory = weixin_factory();
 
         let config = make_config_value(Some("tok_1"), Some("acc_1"));
-        let result = manager
-            .enable_plugin("nonexistent", &config, &factory)
-            .await;
+        let result = manager.enable_plugin("nonexistent", &config, &factory).await;
         assert!(result.is_err());
     }
 

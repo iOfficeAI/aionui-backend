@@ -117,9 +117,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
-        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
         assert_eq!(
             std::str::from_utf8(&body).unwrap(),
             "system_default_user:system_default_user"

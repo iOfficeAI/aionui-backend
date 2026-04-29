@@ -3,8 +3,8 @@
 //! These test the public API surface of risk level calculation and permission summary.
 
 use aionui_extension::{
-    ExtPermissions, FilesystemScope, NetworkPermission, PermissionLevel, RiskLevel,
-    build_permission_summary, calculate_risk_level,
+    ExtPermissions, FilesystemScope, NetworkPermission, PermissionLevel, RiskLevel, build_permission_summary,
+    calculate_risk_level,
 };
 
 // -- PS-1: storage + events only → safe --
@@ -105,27 +105,15 @@ fn summary_contains_correct_risk_and_details() {
     assert_eq!(summary.details.len(), 7);
 
     // Storage should be Full
-    let storage = summary
-        .details
-        .iter()
-        .find(|d| d.permission == "storage")
-        .unwrap();
+    let storage = summary.details.iter().find(|d| d.permission == "storage").unwrap();
     assert_eq!(storage.level, PermissionLevel::Full);
 
     // Network should be Limited
-    let network = summary
-        .details
-        .iter()
-        .find(|d| d.permission == "network")
-        .unwrap();
+    let network = summary.details.iter().find(|d| d.permission == "network").unwrap();
     assert_eq!(network.level, PermissionLevel::Limited);
 
     // Shell should be None
-    let shell = summary
-        .details
-        .iter()
-        .find(|d| d.permission == "shell")
-        .unwrap();
+    let shell = summary.details.iter().find(|d| d.permission == "shell").unwrap();
     assert_eq!(shell.level, PermissionLevel::None);
 }
 
@@ -140,24 +128,12 @@ fn summary_dangerous_permissions_detail() {
     let summary = build_permission_summary(&perms);
     assert_eq!(summary.risk_level, RiskLevel::Dangerous);
 
-    let shell = summary
-        .details
-        .iter()
-        .find(|d| d.permission == "shell")
-        .unwrap();
+    let shell = summary.details.iter().find(|d| d.permission == "shell").unwrap();
     assert_eq!(shell.level, PermissionLevel::Full);
 
-    let fs = summary
-        .details
-        .iter()
-        .find(|d| d.permission == "filesystem")
-        .unwrap();
+    let fs = summary.details.iter().find(|d| d.permission == "filesystem").unwrap();
     assert_eq!(fs.level, PermissionLevel::Full);
 
-    let net = summary
-        .details
-        .iter()
-        .find(|d| d.permission == "network")
-        .unwrap();
+    let net = summary.details.iter().find(|d| d.permission == "network").unwrap();
     assert_eq!(net.level, PermissionLevel::Full);
 }

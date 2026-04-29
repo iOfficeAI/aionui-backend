@@ -93,11 +93,7 @@ impl IProviderRepository for SqliteProviderRepository {
         })
     }
 
-    async fn update(
-        &self,
-        id: &str,
-        params: UpdateProviderParams<'_>,
-    ) -> Result<Provider, DbError> {
+    async fn update(&self, id: &str, params: UpdateProviderParams<'_>) -> Result<Provider, DbError> {
         let existing = self
             .find_by_id(id)
             .await?
@@ -166,10 +162,7 @@ fn merge_update(existing: Provider, params: UpdateProviderParams<'_>) -> Provide
             .to_string(),
         models: params.models.unwrap_or(&existing.models).to_string(),
         enabled: params.enabled.unwrap_or(existing.enabled),
-        capabilities: params
-            .capabilities
-            .unwrap_or(&existing.capabilities)
-            .to_string(),
+        capabilities: params.capabilities.unwrap_or(&existing.capabilities).to_string(),
         context_limit: params.context_limit.unwrap_or(existing.context_limit),
         model_protocols: params
             .model_protocols
@@ -364,10 +357,7 @@ mod tests {
     #[tokio::test]
     async fn update_nonexistent_returns_not_found() {
         let (repo, _db) = setup().await;
-        let err = repo
-            .update("no_id", UpdateProviderParams::default())
-            .await
-            .unwrap_err();
+        let err = repo.update("no_id", UpdateProviderParams::default()).await.unwrap_err();
         assert!(matches!(err, DbError::NotFound(_)));
     }
 
@@ -390,14 +380,8 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(
-            updated.model_protocols.as_deref(),
-            Some(r#"{"model1":"openai"}"#)
-        );
-        assert_eq!(
-            updated.bedrock_config.as_deref(),
-            Some(r#"{"region":"us-east-1"}"#)
-        );
+        assert_eq!(updated.model_protocols.as_deref(), Some(r#"{"model1":"openai"}"#));
+        assert_eq!(updated.bedrock_config.as_deref(), Some(r#"{"region":"us-east-1"}"#));
 
         // Clear optional field
         let cleared = repo

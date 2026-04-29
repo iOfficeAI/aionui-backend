@@ -16,13 +16,12 @@ use std::sync::Arc;
 use aionui_app::{AppServices, ModuleStates, build_module_states, create_router_with_states};
 use aionui_assistant::{AssistantRouterState, AssistantService, BuiltinAssistantRegistry};
 use aionui_db::{
-    IAssistantOverrideRepository, IAssistantRepository, SqliteAssistantOverrideRepository,
-    SqliteAssistantRepository, init_database_memory,
+    IAssistantOverrideRepository, IAssistantRepository, SqliteAssistantOverrideRepository, SqliteAssistantRepository,
+    init_database_memory,
 };
 use aionui_extension::{
-    AssistantRuleDispatcher, ExtensionRegistry, ExtensionRouterState, ExtensionSource,
-    ExtensionStateStore, ExternalPathsManager, HubIndexManager, HubInstaller, HubRouterState,
-    ScanPath, SkillPaths, SkillRouterState,
+    AssistantRuleDispatcher, ExtensionRegistry, ExtensionRouterState, ExtensionSource, ExtensionStateStore,
+    ExternalPathsManager, HubIndexManager, HubInstaller, HubRouterState, ScanPath, SkillPaths, SkillRouterState,
 };
 use axum::http::StatusCode;
 use serde_json::{Value, json};
@@ -75,16 +74,8 @@ async fn fixture() -> Fixture {
     // Builtin manifest: office has rule/skill/avatar on disk, bare has nothing.
     std::fs::create_dir_all(builtin_assets_dir.join("rules")).unwrap();
     std::fs::create_dir_all(builtin_assets_dir.join("skills")).unwrap();
-    std::fs::write(
-        builtin_assets_dir.join("rules/office.en-US.md"),
-        "office rule body",
-    )
-    .unwrap();
-    std::fs::write(
-        builtin_assets_dir.join("skills/office.en-US.md"),
-        "office skill body",
-    )
-    .unwrap();
+    std::fs::write(builtin_assets_dir.join("rules/office.en-US.md"), "office rule body").unwrap();
+    std::fs::write(builtin_assets_dir.join("skills/office.en-US.md"), "office skill body").unwrap();
     // Tiny PNG-ish placeholder — content_type logic only inspects extension.
     std::fs::write(builtin_assets_dir.join("office.png"), b"not-a-real-png").unwrap();
 
@@ -151,8 +142,7 @@ async fn fixture() -> Fixture {
     let ext_data_dir = ext_tmp.path().join("ext-data");
     std::fs::create_dir_all(&ext_data_dir).unwrap();
     let state_store = ExtensionStateStore::new(ext_data_dir.join("extension-states.json"));
-    let registry =
-        ExtensionRegistry::new(state_store, services.event_bus.clone(), "1.0.0".to_string());
+    let registry = ExtensionRegistry::new(state_store, services.event_bus.clone(), "1.0.0".to_string());
     registry
         .initialize_with_scan_paths(vec![ScanPath {
             path: ext_root.clone(),
@@ -170,8 +160,7 @@ async fn fixture() -> Fixture {
         index_manager,
         installer,
     };
-    let ext_paths_mgr =
-        Arc::new(ExternalPathsManager::with_file(ext_data_dir.join("paths.json")).await);
+    let ext_paths_mgr = Arc::new(ExternalPathsManager::with_file(ext_data_dir.join("paths.json")).await);
     let skill_paths = SkillPaths {
         data_dir: ext_data_dir.clone(),
         user_skills_dir: ext_data_dir.join("skills"),
@@ -192,16 +181,11 @@ async fn fixture() -> Fixture {
     // registry (pointing at $exe_dir/assets or dev fallback) and uses
     // `~/.aionui/` for user data — neither is appropriate for tests.
     let pool = services.database.pool().clone();
-    let repo: Arc<dyn IAssistantRepository> =
-        Arc::new(SqliteAssistantRepository::new(pool.clone()));
-    let override_repo: Arc<dyn IAssistantOverrideRepository> =
-        Arc::new(SqliteAssistantOverrideRepository::new(pool));
-    let builtin = Arc::new(BuiltinAssistantRegistry::load_from_dir(
-        builtin_assets_dir.clone(),
-    ));
+    let repo: Arc<dyn IAssistantRepository> = Arc::new(SqliteAssistantRepository::new(pool.clone()));
+    let override_repo: Arc<dyn IAssistantOverrideRepository> = Arc::new(SqliteAssistantOverrideRepository::new(pool));
+    let builtin = Arc::new(BuiltinAssistantRegistry::load_from_dir(builtin_assets_dir.clone()));
     let service = Arc::new(
-        AssistantService::new(repo, override_repo, builtin, registry)
-            .with_user_data_dir(user_data_dir.clone()),
+        AssistantService::new(repo, override_repo, builtin, registry).with_user_data_dir(user_data_dir.clone()),
     );
     states.assistant = AssistantRouterState {
         service: service.clone(),
@@ -296,13 +280,7 @@ async fn create_happy_path_returns_201() {
 #[tokio::test]
 async fn create_rejects_empty_name_with_400() {
     let fx = fixture().await;
-    let req = json_with_token(
-        "POST",
-        "/api/assistants",
-        json!({ "name": "   " }),
-        &fx.token,
-        &fx.csrf,
-    );
+    let req = json_with_token("POST", "/api/assistants", json!({ "name": "   " }), &fx.token, &fx.csrf);
     let resp = fx.app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
@@ -479,11 +457,7 @@ async fn delete_builtin_is_forbidden() {
     let resp = fx
         .app
         .clone()
-        .oneshot(delete_with_token(
-            "/api/assistants/builtin-office",
-            &fx.token,
-            &fx.csrf,
-        ))
+        .oneshot(delete_with_token("/api/assistants/builtin-office", &fx.token, &fx.csrf))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
@@ -495,11 +469,7 @@ async fn delete_extension_is_forbidden() {
     let resp = fx
         .app
         .clone()
-        .oneshot(delete_with_token(
-            "/api/assistants/ext-helper",
-            &fx.token,
-            &fx.csrf,
-        ))
+        .oneshot(delete_with_token("/api/assistants/ext-helper", &fx.token, &fx.csrf))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
@@ -675,13 +645,7 @@ async fn import_retry_is_idempotent() {
         ]
     });
     // First attempt — imported.
-    let req = json_with_token(
-        "POST",
-        "/api/assistants/import",
-        body.clone(),
-        &fx.token,
-        &fx.csrf,
-    );
+    let req = json_with_token("POST", "/api/assistants/import", body.clone(), &fx.token, &fx.csrf);
     let resp = fx.app.clone().oneshot(req).await.unwrap();
     let first = body_json(resp).await;
     assert_eq!(first["data"]["imported"], 1);
@@ -704,17 +668,12 @@ async fn avatar_builtin_returns_bytes_with_content_type() {
     let resp = fx
         .app
         .clone()
-        .oneshot(get_with_token(
-            "/api/assistants/builtin-office/avatar",
-            &fx.token,
-        ))
+        .oneshot(get_with_token("/api/assistants/builtin-office/avatar", &fx.token))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     assert_eq!(
-        resp.headers()
-            .get("content-type")
-            .and_then(|v| v.to_str().ok()),
+        resp.headers().get("content-type").and_then(|v| v.to_str().ok()),
         Some("image/png")
     );
     let bytes = http_body_util::BodyExt::collect(resp.into_body())
@@ -740,9 +699,7 @@ async fn avatar_user_returns_bytes_after_file_planted() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     assert_eq!(
-        resp.headers()
-            .get("content-type")
-            .and_then(|v| v.to_str().ok()),
+        resp.headers().get("content-type").and_then(|v| v.to_str().ok()),
         Some("image/svg+xml")
     );
 }
@@ -754,10 +711,7 @@ async fn avatar_missing_returns_404() {
     let resp = fx
         .app
         .clone()
-        .oneshot(get_with_token(
-            "/api/assistants/builtin-bare/avatar",
-            &fx.token,
-        ))
+        .oneshot(get_with_token("/api/assistants/builtin-bare/avatar", &fx.token))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
@@ -891,11 +845,7 @@ async fn delete_rule_user_removes_file() {
     let resp = fx
         .app
         .clone()
-        .oneshot(delete_with_token(
-            "/api/skills/assistant-rule/u1",
-            &fx.token,
-            &fx.csrf,
-        ))
+        .oneshot(delete_with_token("/api/skills/assistant-rule/u1", &fx.token, &fx.csrf))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -1061,11 +1011,7 @@ async fn delete_skill_user_removes_file() {
     let resp = fx
         .app
         .clone()
-        .oneshot(delete_with_token(
-            "/api/skills/assistant-skill/u1",
-            &fx.token,
-            &fx.csrf,
-        ))
+        .oneshot(delete_with_token("/api/skills/assistant-skill/u1", &fx.token, &fx.csrf))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -1121,7 +1067,5 @@ async fn create_user(fx: &Fixture, id: &str, name: &str) {
 }
 
 fn find_id<'a>(list: &'a Value, id: &str) -> Option<&'a Value> {
-    list.as_array()?
-        .iter()
-        .find(|a| a["id"].as_str() == Some(id))
+    list.as_array()?.iter().find(|a| a["id"].as_str() == Some(id))
 }

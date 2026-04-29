@@ -1,11 +1,9 @@
 use std::path::Path;
 
-use aionui_api_types::{
-    ConversationArtifactResponse, ConversationResponse, MessageResponse, MessageSearchItem,
-};
+use aionui_api_types::{ConversationArtifactResponse, ConversationResponse, MessageResponse, MessageSearchItem};
 use aionui_common::{
-    AgentType, AppError, ConversationSource, ConversationStatus, MessagePosition, MessageStatus,
-    MessageType, ProviderWithModel,
+    AgentType, AppError, ConversationSource, ConversationStatus, MessagePosition, MessageStatus, MessageType,
+    ProviderWithModel,
 };
 use aionui_db::MessageSearchRow;
 use aionui_db::models::{ConversationArtifactRow, ConversationRow, MessageRow};
@@ -16,12 +14,9 @@ use aionui_db::models::{ConversationArtifactRow, ConversationRow, MessageRow};
 /// `data_dir` is required so the response can expose a derived
 /// `is_temporary_workspace` flag without storing that attribute on disk —
 /// see [`row_to_response_with_extra`].
-pub fn row_to_response(
-    row: ConversationRow,
-    data_dir: &Path,
-) -> Result<ConversationResponse, AppError> {
-    let extra: serde_json::Value = serde_json::from_str(&row.extra)
-        .map_err(|e| AppError::Internal(format!("Invalid extra JSON: {e}")))?;
+pub fn row_to_response(row: ConversationRow, data_dir: &Path) -> Result<ConversationResponse, AppError> {
+    let extra: serde_json::Value =
+        serde_json::from_str(&row.extra).map_err(|e| AppError::Internal(format!("Invalid extra JSON: {e}")))?;
     row_to_response_with_extra(row, extra, data_dir)
 }
 
@@ -41,10 +36,7 @@ pub fn row_to_response_with_extra(
     data_dir: &Path,
 ) -> Result<ConversationResponse, AppError> {
     let is_temporary_workspace = {
-        let ws = extra
-            .get("workspace")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let ws = extra.get("workspace").and_then(|v| v.as_str()).unwrap_or("");
         !ws.is_empty() && Path::new(ws).starts_with(data_dir)
     };
     if let Some(obj) = extra.as_object_mut() {
@@ -60,14 +52,9 @@ pub fn row_to_response_with_extra(
         Some(s) => string_to_enum(s)?,
     };
 
-    let source: Option<ConversationSource> =
-        row.source.as_deref().map(string_to_enum).transpose()?;
+    let source: Option<ConversationSource> = row.source.as_deref().map(string_to_enum).transpose()?;
 
-    let model: Option<ProviderWithModel> = row
-        .model
-        .as_deref()
-        .map(parse_provider_with_model)
-        .transpose()?;
+    let model: Option<ProviderWithModel> = row.model.as_deref().map(parse_provider_with_model).transpose()?;
 
     Ok(ConversationResponse {
         id: row.id,
@@ -93,8 +80,8 @@ pub fn row_to_response_with_extra(
 /// `provider_id`, `model` (the selected model name), and `use_model`.
 /// Accepts both snake_case and legacy camelCase key names for backward compatibility.
 fn parse_provider_with_model(s: &str) -> Result<ProviderWithModel, AppError> {
-    let v: serde_json::Value = serde_json::from_str(s)
-        .map_err(|e| AppError::Internal(format!("Invalid model JSON: {e}")))?;
+    let v: serde_json::Value =
+        serde_json::from_str(s).map_err(|e| AppError::Internal(format!("Invalid model JSON: {e}")))?;
 
     if let Some(provider_id) = v
         .get("provider_id")
@@ -144,8 +131,7 @@ pub fn string_to_enum<T: serde::de::DeserializeOwned>(s: &str) -> Result<T, AppE
 pub fn row_to_message_response(row: MessageRow) -> Result<MessageResponse, AppError> {
     let msg_type: MessageType = string_to_enum(&row.r#type)?;
 
-    let position: Option<MessagePosition> =
-        row.position.as_deref().map(string_to_enum).transpose()?;
+    let position: Option<MessagePosition> = row.position.as_deref().map(string_to_enum).transpose()?;
 
     let status: Option<MessageStatus> = row.status.as_deref().map(string_to_enum).transpose()?;
 
@@ -166,9 +152,7 @@ pub fn row_to_message_response(row: MessageRow) -> Result<MessageResponse, AppEr
 }
 
 /// Convert an artifact database row into an API response DTO.
-pub fn row_to_artifact_response(
-    row: ConversationArtifactRow,
-) -> Result<ConversationArtifactResponse, AppError> {
+pub fn row_to_artifact_response(row: ConversationArtifactRow) -> Result<ConversationArtifactResponse, AppError> {
     let kind = string_to_enum(&row.kind)?;
     let status = string_to_enum(&row.status)?;
     let payload: serde_json::Value = serde_json::from_str(&row.payload)
@@ -304,8 +288,7 @@ mod tests {
 
     #[test]
     fn parse_provider_with_model_backend_format() {
-        let json =
-            r#"{"providerId":"p1","model":"claude-sonnet-4-20250514","useModel":"claude-sonnet"}"#;
+        let json = r#"{"providerId":"p1","model":"claude-sonnet-4-20250514","useModel":"claude-sonnet"}"#;
         let result = parse_provider_with_model(json).unwrap();
         assert_eq!(result.provider_id, "p1");
         assert_eq!(result.model, "claude-sonnet-4-20250514");

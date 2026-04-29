@@ -30,14 +30,8 @@ async fn t12_1_security_headers_on_get() {
 
     assert_eq!(resp.status(), StatusCode::OK);
     assert_eq!(resp.headers().get("x-frame-options").unwrap(), "DENY");
-    assert_eq!(
-        resp.headers().get("x-content-type-options").unwrap(),
-        "nosniff"
-    );
-    assert_eq!(
-        resp.headers().get("x-xss-protection").unwrap(),
-        "1; mode=block"
-    );
+    assert_eq!(resp.headers().get("x-content-type-options").unwrap(), "nosniff");
+    assert_eq!(resp.headers().get("x-xss-protection").unwrap(), "1; mode=block");
     assert_eq!(
         resp.headers().get("referrer-policy").unwrap(),
         "strict-origin-when-cross-origin"
@@ -128,11 +122,7 @@ async fn t12_2_login_exempt_from_csrf() {
 async fn t12_2_qr_login_exempt_from_csrf() {
     let app = csrf_app();
     let resp = app
-        .oneshot(
-            Request::post("/api/auth/qr-login")
-                .body(Body::empty())
-                .unwrap(),
-        )
+        .oneshot(Request::post("/api/auth/qr-login").body(Body::empty()).unwrap())
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -146,12 +136,7 @@ async fn t12_2_csrf_cookie_set_on_first_request() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    let set_cookie = resp
-        .headers()
-        .get(header::SET_COOKIE)
-        .unwrap()
-        .to_str()
-        .unwrap();
+    let set_cookie = resp.headers().get(header::SET_COOKIE).unwrap().to_str().unwrap();
     assert!(set_cookie.contains("aionui-csrf-token="));
     // NOT HttpOnly (JS must read it)
     assert!(!set_cookie.contains("HttpOnly"));
@@ -164,10 +149,7 @@ async fn t12_2_csrf_cookie_set_on_first_request() {
 fn rate_limit_app(limiter: Arc<RateLimiter>) -> Router {
     Router::new()
         .route("/test", get(|| async { "ok" }))
-        .layer(middleware::from_fn_with_state(
-            limiter,
-            api_rate_limit_middleware,
-        ))
+        .layer(middleware::from_fn_with_state(limiter, api_rate_limit_middleware))
 }
 
 #[tokio::test]
@@ -213,10 +195,7 @@ async fn auth_rate_limit_skips_successful_responses() {
     let limiter = Arc::new(RateLimiter::new(2, Duration::from_secs(60)));
     let app = Router::new()
         .route("/login", post(|| async { "ok" }))
-        .layer(middleware::from_fn_with_state(
-            limiter,
-            auth_rate_limit_middleware,
-        ));
+        .layer(middleware::from_fn_with_state(limiter, auth_rate_limit_middleware));
 
     // Successful responses (200) don't count toward the limit
     for _ in 0..5 {
@@ -234,10 +213,7 @@ async fn auth_rate_limit_counts_failed_responses() {
     let limiter = Arc::new(RateLimiter::new(2, Duration::from_secs(60)));
     let app = Router::new()
         .route("/login", post(|| async { StatusCode::UNAUTHORIZED }))
-        .layer(middleware::from_fn_with_state(
-            limiter,
-            auth_rate_limit_middleware,
-        ));
+        .layer(middleware::from_fn_with_state(limiter, auth_rate_limit_middleware));
 
     // First two failures pass through
     for _ in 0..2 {
@@ -339,10 +315,7 @@ fn t13_1_authorization_header_takes_priority() {
 #[test]
 fn t13_2_cookie_fallback() {
     let mut headers = axum::http::HeaderMap::new();
-    headers.insert(
-        header::COOKIE,
-        "aionui-session=fallback_tok".parse().unwrap(),
-    );
+    headers.insert(header::COOKIE, "aionui-session=fallback_tok".parse().unwrap());
     assert_eq!(
         aionui_auth::extract_token_from_headers(&headers),
         Some("fallback_tok".into())

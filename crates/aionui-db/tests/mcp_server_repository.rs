@@ -6,8 +6,8 @@
 use std::sync::Arc;
 
 use aionui_db::{
-    CreateMcpServerParams, DbError, IMcpServerRepository, SqliteMcpServerRepository,
-    UpdateMcpServerParams, init_database_memory,
+    CreateMcpServerParams, DbError, IMcpServerRepository, SqliteMcpServerRepository, UpdateMcpServerParams,
+    init_database_memory,
 };
 
 async fn repo() -> (Arc<dyn IMcpServerRepository>, aionui_db::Database) {
@@ -116,10 +116,7 @@ async fn find_by_id_returns_full_record() {
     assert_eq!(found.id, created.id);
     assert_eq!(found.name, "test-mcp");
     assert_eq!(found.transport_type, "stdio");
-    assert_eq!(
-        found.original_json.as_deref(),
-        Some(r#"{"name":"test-mcp"}"#)
-    );
+    assert_eq!(found.original_json.as_deref(), Some(r#"{"name":"test-mcp"}"#));
 }
 
 #[tokio::test]
@@ -405,9 +402,7 @@ async fn update_status_with_timestamp() {
     let created = r.create(stdio_params()).await.unwrap();
 
     let ts = aionui_common::now_ms();
-    r.update_status(&created.id, "connected", Some(ts))
-        .await
-        .unwrap();
+    r.update_status(&created.id, "connected", Some(ts)).await.unwrap();
 
     let found = r.find_by_id(&created.id).await.unwrap().unwrap();
     assert_eq!(found.status, "connected");
@@ -420,9 +415,7 @@ async fn update_status_without_timestamp_preserves_existing() {
     let created = r.create(stdio_params()).await.unwrap();
 
     let ts = aionui_common::now_ms();
-    r.update_status(&created.id, "connected", Some(ts))
-        .await
-        .unwrap();
+    r.update_status(&created.id, "connected", Some(ts)).await.unwrap();
 
     r.update_status(&created.id, "error", None).await.unwrap();
 
@@ -434,10 +427,7 @@ async fn update_status_without_timestamp_preserves_existing() {
 #[tokio::test]
 async fn update_status_nonexistent_returns_not_found() {
     let (r, _db) = repo().await;
-    let err = r
-        .update_status("nonexistent", "connected", None)
-        .await
-        .unwrap_err();
+    let err = r.update_status("nonexistent", "connected", None).await.unwrap_err();
     assert!(matches!(err, DbError::NotFound(_)));
 }
 

@@ -8,9 +8,7 @@
 
 use std::collections::HashMap;
 
-use crate::types::{
-    MailboxMessage, MailboxMessageType, TaskStatus, TeamAgent, TeamTask, TeammateRole,
-};
+use crate::types::{MailboxMessage, MailboxMessageType, TaskStatus, TeamAgent, TeamTask, TeammateRole};
 
 // ---------------------------------------------------------------------------
 // TeammatePromptParams — signature frozen by phase1/interface-contracts.md §5
@@ -216,10 +214,7 @@ pub fn build_wake_payload(
 /// Mirror of AionUi `formatHelpers.ts :: formatMessages`.
 /// Sender "user" renders as `[From User]`; known slot_id resolves to agent
 /// name via `sender_name_lookup`; unknown slot_id falls back to the raw id.
-fn format_messages(
-    messages: &[MailboxMessage],
-    sender_name_lookup: &HashMap<String, String>,
-) -> String {
+fn format_messages(messages: &[MailboxMessage], sender_name_lookup: &HashMap<String, String>) -> String {
     messages
         .iter()
         .map(|m| {
@@ -241,10 +236,7 @@ fn format_messages(
                 .as_deref()
                 .map(|s| format!("\nSummary: {s}"))
                 .unwrap_or_default();
-            format!(
-                "[From {sender}{type_tag}] {content}{summary_line}",
-                content = m.content,
-            )
+            format!("[From {sender}{type_tag}] {content}{summary_line}", content = m.content,)
         })
         .collect::<Vec<_>>()
         .join("\n")
@@ -299,13 +291,7 @@ mod tests {
         }
     }
 
-    fn make_msg(
-        id: &str,
-        from: &str,
-        to: &str,
-        msg_type: MailboxMessageType,
-        content: &str,
-    ) -> MailboxMessage {
+    fn make_msg(id: &str, from: &str, to: &str, msg_type: MailboxMessageType, content: &str) -> MailboxMessage {
         MailboxMessage {
             id: id.into(),
             team_id: "t1".into(),
@@ -400,20 +386,8 @@ mod tests {
                 MailboxMessageType::Message,
                 "Please implement feature X",
             ),
-            make_msg(
-                "m2",
-                "user",
-                "w1",
-                MailboxMessageType::Message,
-                "Direct user request",
-            ),
-            make_msg(
-                "m3",
-                "w2",
-                "w1",
-                MailboxMessageType::IdleNotification,
-                "done with task",
-            ),
+            make_msg("m2", "user", "w1", MailboxMessageType::Message, "Direct user request"),
+            make_msg("m3", "w2", "w1", MailboxMessageType::IdleNotification, "done with task"),
         ];
 
         let tasks = vec![

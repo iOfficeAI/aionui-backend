@@ -57,13 +57,7 @@ mod tests {
         assert_eq!(result.extension_name, "my-ext");
         assert_eq!(result.id, "slack-plugin");
         assert_eq!(result.platform.as_deref(), Some("slack"));
-        assert!(
-            result
-                .entry_point
-                .as_ref()
-                .unwrap()
-                .contains("plugins/slack.js")
-        );
+        assert!(result.entry_point.as_ref().unwrap().contains("plugins/slack.js"));
     }
 
     #[test]

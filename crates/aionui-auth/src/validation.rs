@@ -91,28 +91,19 @@ mod tests {
 
     #[test]
     fn password_too_short() {
-        assert!(matches!(
-            validate_password("short"),
-            Err(AuthError::WeakPassword(_))
-        ));
+        assert!(matches!(validate_password("short"), Err(AuthError::WeakPassword(_))));
     }
 
     #[test]
     fn password_too_long() {
         let long = "a".repeat(129);
-        assert!(matches!(
-            validate_password(&long),
-            Err(AuthError::WeakPassword(_))
-        ));
+        assert!(matches!(validate_password(&long), Err(AuthError::WeakPassword(_))));
     }
 
     #[test]
     fn weak_password_rejected() {
         for &weak in WEAK_PASSWORDS {
-            assert!(
-                validate_password(weak).is_err(),
-                "expected rejection for: {weak}"
-            );
+            assert!(validate_password(weak).is_err(), "expected rejection for: {weak}");
         }
     }
 
@@ -147,19 +138,13 @@ mod tests {
 
     #[test]
     fn username_too_short() {
-        assert!(matches!(
-            validate_username("ab"),
-            Err(AuthError::InvalidUsername(_))
-        ));
+        assert!(matches!(validate_username("ab"), Err(AuthError::InvalidUsername(_))));
     }
 
     #[test]
     fn username_too_long() {
         let long = "a".repeat(33);
-        assert!(matches!(
-            validate_username(&long),
-            Err(AuthError::InvalidUsername(_))
-        ));
+        assert!(matches!(validate_username(&long), Err(AuthError::InvalidUsername(_))));
     }
 
     #[test]

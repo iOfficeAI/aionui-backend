@@ -28,12 +28,10 @@ fn is_unique_violation(err: &dyn sqlx::error::DatabaseError) -> bool {
 #[async_trait::async_trait]
 impl IAcpSessionRepository for SqliteAcpSessionRepository {
     async fn get(&self, conversation_id: &str) -> Result<Option<AcpSessionRow>, DbError> {
-        let row = sqlx::query_as::<_, AcpSessionRow>(
-            "SELECT * FROM acp_session WHERE conversation_id = ?",
-        )
-        .bind(conversation_id)
-        .fetch_optional(&self.pool)
-        .await?;
+        let row = sqlx::query_as::<_, AcpSessionRow>("SELECT * FROM acp_session WHERE conversation_id = ?")
+            .bind(conversation_id)
+            .fetch_optional(&self.pool)
+            .await?;
         Ok(row)
     }
 
@@ -53,12 +51,10 @@ impl IAcpSessionRepository for SqliteAcpSessionRepository {
         .execute(&self.pool)
         .await
         .map_err(|e| match &e {
-            sqlx::Error::Database(db_err) if is_unique_violation(db_err.as_ref()) => {
-                DbError::Conflict(format!(
-                    "acp_session row for conversation '{}' already exists",
-                    params.conversation_id
-                ))
-            }
+            sqlx::Error::Database(db_err) if is_unique_violation(db_err.as_ref()) => DbError::Conflict(format!(
+                "acp_session row for conversation '{}' already exists",
+                params.conversation_id
+            )),
             _ => DbError::Query(e),
         })?;
 
@@ -70,20 +66,14 @@ impl IAcpSessionRepository for SqliteAcpSessionRepository {
         })
     }
 
-    async fn update_session_id(
-        &self,
-        conversation_id: &str,
-        session_id: &str,
-    ) -> Result<bool, DbError> {
+    async fn update_session_id(&self, conversation_id: &str, session_id: &str) -> Result<bool, DbError> {
         let now = now_ms();
-        let result = sqlx::query(
-            "UPDATE acp_session SET session_id = ?, last_active_at = ? WHERE conversation_id = ?",
-        )
-        .bind(session_id)
-        .bind(now)
-        .bind(conversation_id)
-        .execute(&self.pool)
-        .await?;
+        let result = sqlx::query("UPDATE acp_session SET session_id = ?, last_active_at = ? WHERE conversation_id = ?")
+            .bind(session_id)
+            .bind(now)
+            .bind(conversation_id)
+            .execute(&self.pool)
+            .await?;
         Ok(result.rows_affected() > 0)
     }
 
@@ -95,10 +85,7 @@ impl IAcpSessionRepository for SqliteAcpSessionRepository {
         Ok(result.rows_affected() > 0)
     }
 
-    async fn load_runtime_state(
-        &self,
-        conversation_id: &str,
-    ) -> Result<Option<PersistedSessionState>, DbError> {
+    async fn load_runtime_state(&self, conversation_id: &str) -> Result<Option<PersistedSessionState>, DbError> {
         let raw: Option<String> =
             sqlx::query_scalar("SELECT session_config FROM acp_session WHERE conversation_id = ?")
                 .bind(conversation_id)
@@ -109,23 +96,18 @@ impl IAcpSessionRepository for SqliteAcpSessionRepository {
             return Ok(None);
         };
 
-        let parsed: Value = serde_json::from_str(&raw)
-            .map_err(|e| DbError::Init(format!("invalid session_config JSON: {e}")))?;
+        let parsed: Value =
+            serde_json::from_str(&raw).map_err(|e| DbError::Init(format!("invalid session_config JSON: {e}")))?;
         let runtime = parsed.get("runtime");
 
         let mut state = PersistedSessionState::default();
         if let Some(rt) = runtime {
-            state.current_mode_id = rt
-                .get("current_mode_id")
-                .and_then(Value::as_str)
-                .map(ToOwned::to_owned);
+            state.current_mode_id = rt.get("current_mode_id").and_then(Value::as_str).map(ToOwned::to_owned);
             state.current_model_id = rt
                 .get("current_model_id")
                 .and_then(Value::as_str)
                 .map(ToOwned::to_owned);
-            state.config_selections_json = rt
-                .get("config_selections")
-                .map(serde_json::Value::to_string);
+            state.config_selections_json = rt.get("config_selections").map(serde_json::Value::to_string);
             state.context_usage_json = rt.get("context_usage").map(serde_json::Value::to_string);
         }
         Ok(Some(state))
@@ -153,8 +135,7 @@ impl IAcpSessionRepository for SqliteAcpSessionRepository {
             return Ok(false);
         };
 
-        let mut parsed: Value =
-            serde_json::from_str(&raw).unwrap_or_else(|_| Value::Object(Default::default()));
+        let mut parsed: Value = serde_json::from_str(&raw).unwrap_or_else(|_| Value::Object(Default::default()));
         let runtime = parsed
             .as_object_mut()
             .ok_or_else(|| DbError::Init("session_config is not a JSON object".into()))?
@@ -187,9 +168,8 @@ impl IAcpSessionRepository for SqliteAcpSessionRepository {
         if let Some(outer) = params.config_selections_json {
             match outer {
                 Some(json) => {
-                    let v: Value = serde_json::from_str(json).map_err(|e| {
-                        DbError::Init(format!("invalid config_selections JSON: {e}"))
-                    })?;
+                    let v: Value = serde_json::from_str(json)
+                        .map_err(|e| DbError::Init(format!("invalid config_selections JSON: {e}")))?;
                     runtime.insert("config_selections".into(), v);
                 }
                 None => {
@@ -210,8 +190,8 @@ impl IAcpSessionRepository for SqliteAcpSessionRepository {
             }
         }
 
-        let new_config = serde_json::to_string(&parsed)
-            .map_err(|e| DbError::Init(format!("encode session_config: {e}")))?;
+        let new_config =
+            serde_json::to_string(&parsed).map_err(|e| DbError::Init(format!("encode session_config: {e}")))?;
         let now = now_ms();
         let result = sqlx::query(
             "UPDATE acp_session SET session_config = ?, last_active_at = ? \
@@ -333,11 +313,9 @@ mod tests {
         // The stored JSON should parse back to the same payload
         // regardless of key order (serde_json::Map preserves insertion
         // order but the caller shouldn't depend on it here).
-        let selections: Value =
-            serde_json::from_str(state.config_selections_json.as_deref().unwrap()).unwrap();
+        let selections: Value = serde_json::from_str(state.config_selections_json.as_deref().unwrap()).unwrap();
         assert_eq!(selections["reasoning"], "high");
-        let usage: Value =
-            serde_json::from_str(state.context_usage_json.as_deref().unwrap()).unwrap();
+        let usage: Value = serde_json::from_str(state.context_usage_json.as_deref().unwrap()).unwrap();
         assert_eq!(usage["used"], 10);
         assert_eq!(usage["total"], 100);
     }

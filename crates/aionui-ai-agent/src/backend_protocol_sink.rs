@@ -21,22 +21,14 @@ pub struct BackendProtocolSink {
 }
 
 impl BackendProtocolSink {
-    pub fn new(
-        event_tx: broadcast::Sender<AgentStreamEvent>,
-        confirmations: Arc<RwLock<Vec<Confirmation>>>,
-    ) -> Self {
+    pub fn new(event_tx: broadcast::Sender<AgentStreamEvent>, confirmations: Arc<RwLock<Vec<Confirmation>>>) -> Self {
         Self {
             event_tx,
             confirmations,
         }
     }
 
-    fn build_confirmation(
-        call_id: &str,
-        tool_name: &str,
-        category: &ToolCategory,
-        description: &str,
-    ) -> Confirmation {
+    fn build_confirmation(call_id: &str, tool_name: &str, category: &ToolCategory, description: &str) -> Confirmation {
         let title = format!("{} wants to use: {}", category, tool_name);
         let command_type = Some(category.to_string());
 
@@ -72,12 +64,7 @@ impl ProtocolEmitter for BackendProtocolSink {
     fn emit(&self, event: &ProtocolEvent) -> std::io::Result<()> {
         match event {
             ProtocolEvent::ToolRequest { call_id, tool, .. } => {
-                let confirmation = Self::build_confirmation(
-                    call_id,
-                    &tool.name,
-                    &tool.category,
-                    &tool.description,
-                );
+                let confirmation = Self::build_confirmation(call_id, &tool.name, &tool.category, &tool.description);
 
                 if let Ok(mut confs) = self.confirmations.write() {
                     confs.push(confirmation.clone());
@@ -93,24 +80,20 @@ impl ProtocolEmitter for BackendProtocolSink {
                 );
             }
 
-            ProtocolEvent::ToolCancelled {
-                call_id, reason, ..
-            } => {
+            ProtocolEvent::ToolCancelled { call_id, reason, .. } => {
                 if let Ok(mut confs) = self.confirmations.write() {
                     confs.retain(|c| c.call_id != *call_id);
                 }
 
-                let _ = self
-                    .event_tx
-                    .send(AgentStreamEvent::ToolCall(ToolCallEventData {
-                        call_id: call_id.clone(),
-                        name: format!("cancelled: {reason}"),
-                        args: serde_json::Value::Null,
-                        status: ToolCallStatus::Error,
-                        input: None,
-                        output: None,
-                        description: None,
-                    }));
+                let _ = self.event_tx.send(AgentStreamEvent::ToolCall(ToolCallEventData {
+                    call_id: call_id.clone(),
+                    name: format!("cancelled: {reason}"),
+                    args: serde_json::Value::Null,
+                    status: ToolCallStatus::Error,
+                    input: None,
+                    output: None,
+                    description: None,
+                }));
             }
 
             _ => {}
@@ -219,9 +202,7 @@ mod tests {
     #[test]
     fn other_events_are_ignored() {
         let (sink, mut rx, _) = make_sink();
-        let event = ProtocolEvent::StreamStart {
-            msg_id: "m1".into(),
-        };
+        let event = ProtocolEvent::StreamStart { msg_id: "m1".into() };
 
         sink.emit(&event).unwrap();
 
@@ -248,12 +229,8 @@ mod tests {
 
     #[test]
     fn confirmation_has_three_options() {
-        let conf = BackendProtocolSink::build_confirmation(
-            "c1",
-            "Write",
-            &ToolCategory::Edit,
-            "Write file /tmp/test.txt",
-        );
+        let conf =
+            BackendProtocolSink::build_confirmation("c1", "Write", &ToolCategory::Edit, "Write file /tmp/test.txt");
         assert_eq!(conf.options.len(), 3);
         assert_eq!(conf.options[0].value, json!("proceed_once"));
         assert_eq!(conf.options[1].value, json!("proceed_always"));

@@ -5,8 +5,8 @@ use std::sync::Arc;
 use aionui_api_types::WebSocketMessage;
 use aionui_realtime::EventBroadcaster;
 use aionui_team::{
-    Mailbox, MailboxMessageType, SchedulerAction, TaskBoard, TeamAgent, TeammateManager,
-    TeammateRole, TeammateStatus, WAKE_TIMEOUT_MS,
+    Mailbox, MailboxMessageType, SchedulerAction, TaskBoard, TeamAgent, TeammateManager, TeammateRole, TeammateStatus,
+    WAKE_TIMEOUT_MS,
 };
 use common::MockTeamRepo;
 
@@ -104,14 +104,7 @@ async fn aw1_wake_idle_agent_transitions_to_working_with_payload() {
         .unwrap();
 
     h.mailbox
-        .write(
-            "team-1",
-            "w1",
-            "lead",
-            MailboxMessageType::Message,
-            "Do it",
-            None,
-        )
+        .write("team-1", "w1", "lead", MailboxMessageType::Message, "Do it", None)
         .await
         .unwrap();
 
@@ -125,10 +118,7 @@ async fn aw1_wake_idle_agent_transitions_to_working_with_payload() {
     assert_eq!(p.unread_messages.len(), 1);
     assert_eq!(p.unread_messages[0].content, "Do it");
 
-    assert_eq!(
-        h.mgr.get_status("w1").await.unwrap(),
-        TeammateStatus::Working
-    );
+    assert_eq!(h.mgr.get_status("w1").await.unwrap(), TeammateStatus::Working);
 }
 
 // -- AW-2: Wake → agent completes → finalize_turn → actions executed --------
@@ -142,14 +132,8 @@ async fn aw2_wake_complete_finalize_executes_actions() {
     ];
     let h = setup_team(&agents);
 
-    h.mgr
-        .set_status("w1", TeammateStatus::Working)
-        .await
-        .unwrap();
-    h.mgr
-        .set_status("w2", TeammateStatus::Working)
-        .await
-        .unwrap();
+    h.mgr.set_status("w1", TeammateStatus::Working).await.unwrap();
+    h.mgr.set_status("w2", TeammateStatus::Working).await.unwrap();
 
     let actions = vec![
         SchedulerAction::TaskCreate {
@@ -191,10 +175,7 @@ async fn aw4_wake_non_idle_agent_skipped() {
     let agents = vec![make_agent("w1", "Worker", TeammateRole::Teammate)];
     let h = setup_team(&agents);
 
-    h.mgr
-        .set_status("w1", TeammateStatus::Working)
-        .await
-        .unwrap();
+    h.mgr.set_status("w1", TeammateStatus::Working).await.unwrap();
 
     let payload = h.mgr.try_wake("w1").await.unwrap();
     assert!(payload.is_none());
@@ -210,10 +191,7 @@ async fn dl1_lead_finalize_stays_idle_no_auto_wake() {
     ];
     let h = setup_team(&agents);
 
-    h.mgr
-        .set_status("lead", TeammateStatus::Working)
-        .await
-        .unwrap();
+    h.mgr.set_status("lead", TeammateStatus::Working).await.unwrap();
 
     let actions = vec![SchedulerAction::SendMessage {
         to: "w1".into(),
@@ -223,10 +201,7 @@ async fn dl1_lead_finalize_stays_idle_no_auto_wake() {
     let wake_signal = h.mgr.finalize_turn("lead", &actions).await.unwrap();
     assert!(wake_signal.is_none());
 
-    assert_eq!(
-        h.mgr.get_status("lead").await.unwrap(),
-        TeammateStatus::Idle
-    );
+    assert_eq!(h.mgr.get_status("lead").await.unwrap(), TeammateStatus::Idle);
 }
 
 // -- DL-2: All teammates idle → wake leader ---------------------------------
@@ -240,14 +215,8 @@ async fn dl2_all_teammates_idle_wakes_leader() {
     ];
     let h = setup_team(&agents);
 
-    h.mgr
-        .set_status("w1", TeammateStatus::Working)
-        .await
-        .unwrap();
-    h.mgr
-        .set_status("w2", TeammateStatus::Working)
-        .await
-        .unwrap();
+    h.mgr.set_status("w1", TeammateStatus::Working).await.unwrap();
+    h.mgr.set_status("w2", TeammateStatus::Working).await.unwrap();
 
     let wake1 = h.mgr.finalize_turn("w1", &[]).await.unwrap();
     assert!(wake1.is_none());
@@ -267,14 +236,8 @@ async fn dl3_partial_teammates_idle_no_leader_wake() {
     ];
     let h = setup_team(&agents);
 
-    h.mgr
-        .set_status("w1", TeammateStatus::Working)
-        .await
-        .unwrap();
-    h.mgr
-        .set_status("w2", TeammateStatus::Working)
-        .await
-        .unwrap();
+    h.mgr.set_status("w1", TeammateStatus::Working).await.unwrap();
+    h.mgr.set_status("w2", TeammateStatus::Working).await.unwrap();
 
     let wake = h.mgr.finalize_turn("w1", &[]).await.unwrap();
     assert!(wake.is_none());
@@ -342,10 +305,7 @@ async fn ae3_idle_notification_marks_idle_and_notifies_lead() {
     ];
     let h = setup_team(&agents);
 
-    h.mgr
-        .set_status("w1", TeammateStatus::Working)
-        .await
-        .unwrap();
+    h.mgr.set_status("w1", TeammateStatus::Working).await.unwrap();
 
     let wake_signal = h
         .mgr
@@ -399,10 +359,7 @@ async fn we1_status_change_broadcasts_event() {
     let agents = vec![make_agent("w1", "Worker", TeammateRole::Teammate)];
     let h = setup_team(&agents);
 
-    h.mgr
-        .set_status("w1", TeammateStatus::Working)
-        .await
-        .unwrap();
+    h.mgr.set_status("w1", TeammateStatus::Working).await.unwrap();
 
     let events = h.broadcaster.events_by_name("team.agent.status");
     assert_eq!(events.len(), 1);
@@ -474,14 +431,7 @@ async fn full_workflow_lead_delegate_workers_idle_lead_rewake() {
 
     // 1. Wake lead with user message
     h.mailbox
-        .write(
-            "team-1",
-            "lead",
-            "user",
-            MailboxMessageType::Message,
-            "Build X",
-            None,
-        )
+        .write("team-1", "lead", "user", MailboxMessageType::Message, "Build X", None)
         .await
         .unwrap();
 
@@ -513,14 +463,8 @@ async fn full_workflow_lead_delegate_workers_idle_lead_rewake() {
     assert!(wake_signal.is_none(), "lead idle → no auto-wake");
 
     // 3. Workers start working
-    h.mgr
-        .set_status("w1", TeammateStatus::Working)
-        .await
-        .unwrap();
-    h.mgr
-        .set_status("w2", TeammateStatus::Working)
-        .await
-        .unwrap();
+    h.mgr.set_status("w1", TeammateStatus::Working).await.unwrap();
+    h.mgr.set_status("w2", TeammateStatus::Working).await.unwrap();
 
     // 4. Worker1 finishes
     let w1_actions = vec![SchedulerAction::IdleNotification {
@@ -534,11 +478,7 @@ async fn full_workflow_lead_delegate_workers_idle_lead_rewake() {
         summary: Some("Tests written".into()),
     }];
     let wake = h.mgr.finalize_turn("w2", &w2_actions).await.unwrap();
-    assert_eq!(
-        wake.as_deref(),
-        Some("lead"),
-        "all teammates idle → wake leader"
-    );
+    assert_eq!(wake.as_deref(), Some("lead"), "all teammates idle → wake leader");
 
     // 6. Verify lead has idle notifications from both workers
     let lead_msgs = h.mailbox.read_unread("team-1", "lead").await.unwrap();

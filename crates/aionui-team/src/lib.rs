@@ -14,20 +14,17 @@ pub mod task_board;
 pub(crate) mod test_utils;
 pub mod types;
 
-pub use crash_detection::{is_rate_limited, detect_crash, CrashReason};
+pub use crash_detection::{CrashReason, detect_crash, is_rate_limited};
 pub use error::TeamError;
 pub use events::TeamEventEmitter;
 pub use mailbox::Mailbox;
 pub use mcp::{TeamMcpServer, TeamMcpStdioConfig, TeamMcpStdioServerSpec};
 pub use prompts::{build_lead_prompt, build_teammate_prompt, build_wake_payload};
 pub use routes::{TeamRouterState, team_routes};
-pub use scheduler::{
-    SchedulerAction, TeammateManager, WAKE_TIMEOUT_MS, WakePayload, format_crash_testament,
-};
+pub use scheduler::{SchedulerAction, TeammateManager, WAKE_TIMEOUT_MS, WakePayload, format_crash_testament};
 pub use service::TeamSessionService;
 pub use session::{TeamSession, WakeInput};
 pub use task_board::{TaskBoard, TaskUpdate};
 pub use types::{
-    MailboxMessage, MailboxMessageType, TaskStatus, Team, TeamAgent, TeamTask, TeammateRole,
-    TeammateStatus,
+    MailboxMessage, MailboxMessageType, TaskStatus, Team, TeamAgent, TeamTask, TeammateRole, TeammateStatus,
 };

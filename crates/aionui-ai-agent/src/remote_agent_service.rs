@@ -6,8 +6,7 @@ use aionui_api_types::{
     TestRemoteAgentConnectionRequest, UpdateRemoteAgentRequest,
 };
 use aionui_common::{
-    AppError, RemoteAgentAuthType, RemoteAgentProtocol, RemoteAgentStatus, decrypt_string,
-    encrypt_string,
+    AppError, RemoteAgentAuthType, RemoteAgentProtocol, RemoteAgentStatus, decrypt_string, encrypt_string,
 };
 use aionui_db::models::RemoteAgentRow;
 use aionui_db::{IRemoteAgentRepository, UpdateRemoteAgentParams};
@@ -26,10 +25,7 @@ pub struct RemoteAgentService {
 
 impl RemoteAgentService {
     pub fn new(repo: Arc<dyn IRemoteAgentRepository>, encryption_key: [u8; 32]) -> Self {
-        Self {
-            repo,
-            encryption_key,
-        }
+        Self { repo, encryption_key }
     }
 
     /// List all remote agents (auth_token omitted).
@@ -50,10 +46,7 @@ impl RemoteAgentService {
     }
 
     /// Create a new remote agent. OpenClaw protocol auto-generates Ed25519 keys.
-    pub async fn create(
-        &self,
-        req: CreateRemoteAgentRequest,
-    ) -> Result<RemoteAgentResponse, AppError> {
+    pub async fn create(&self, req: CreateRemoteAgentRequest) -> Result<RemoteAgentResponse, AppError> {
         validate_create_request(&req)?;
 
         let encrypted_token = req
@@ -62,13 +55,12 @@ impl RemoteAgentService {
             .map(|t| encrypt_string(t, &self.encryption_key))
             .transpose()?;
 
-        let (device_id, device_public_key, device_private_key) =
-            if req.protocol == RemoteAgentProtocol::OpenClaw {
-                let (id, pub_key, priv_key) = generate_device_keypair(&self.encryption_key)?;
-                (Some(id), Some(pub_key), Some(priv_key))
-            } else {
-                (None, None, None)
-            };
+        let (device_id, device_public_key, device_private_key) = if req.protocol == RemoteAgentProtocol::OpenClaw {
+            let (id, pub_key, priv_key) = generate_device_keypair(&self.encryption_key)?;
+            (Some(id), Some(pub_key), Some(priv_key))
+        } else {
+            (None, None, None)
+        };
 
         let row = self
             .repo
@@ -93,11 +85,7 @@ impl RemoteAgentService {
     }
 
     /// Update an existing remote agent.
-    pub async fn update(
-        &self,
-        id: &str,
-        req: UpdateRemoteAgentRequest,
-    ) -> Result<RemoteAgentResponse, AppError> {
+    pub async fn update(&self, id: &str, req: UpdateRemoteAgentRequest) -> Result<RemoteAgentResponse, AppError> {
         let encrypted_token = match &req.auth_token {
             Some(Some(t)) => Some(Some(encrypt_string(t, &self.encryption_key)?)),
             Some(None) => Some(None),
@@ -135,10 +123,7 @@ impl RemoteAgentService {
     }
 
     /// Test a WebSocket connection to a remote agent URL (10s timeout, SSRF protected).
-    pub async fn test_connection(
-        &self,
-        req: TestRemoteAgentConnectionRequest,
-    ) -> Result<(), AppError> {
+    pub async fn test_connection(&self, req: TestRemoteAgentConnectionRequest) -> Result<(), AppError> {
         validate_ws_url(&req.url)?;
 
         let url = req.url.clone();
@@ -156,9 +141,7 @@ impl RemoteAgentService {
         match result {
             Ok(Ok(_)) => Ok(()),
             Ok(Err(e)) => Err(e),
-            Err(_) => Err(AppError::Timeout(
-                "Connection timed out after 10 seconds".into(),
-            )),
+            Err(_) => Err(AppError::Timeout("Connection timed out after 10 seconds".into())),
         }
     }
 
@@ -206,9 +189,7 @@ impl RemoteAgentService {
             }
             Err(_) => {
                 let _ = self.repo.update_status(id, "error", None).await;
-                Err(AppError::Timeout(
-                    "Handshake timed out after 15 seconds".into(),
-                ))
+                Err(AppError::Timeout("Handshake timed out after 15 seconds".into()))
             }
         }
     }
@@ -233,19 +214,21 @@ impl RemoteAgentService {
     }
 
     fn row_to_response(&self, row: RemoteAgentRow) -> Result<RemoteAgentResponse, AppError> {
-        let masked_token = row.auth_token.as_deref().map(|encrypted| {
-            match decrypt_string(encrypted, &self.encryption_key) {
-                Ok(plain) => mask_token(&plain),
-                Err(e) => {
-                    warn!("Failed to decrypt auth_token for agent {}: {e}", row.id);
-                    "***".to_string()
-                }
-            }
-        });
+        let masked_token =
+            row.auth_token
+                .as_deref()
+                .map(|encrypted| match decrypt_string(encrypted, &self.encryption_key) {
+                    Ok(plain) => mask_token(&plain),
+                    Err(e) => {
+                        warn!("Failed to decrypt auth_token for agent {}: {e}", row.id);
+                        "***".to_string()
+                    }
+                });
 
-        let device_public_key = row.device_public_key.as_deref().map(|encrypted| {
-            decrypt_string(encrypted, &self.encryption_key).unwrap_or_else(|_| "***".to_string())
-        });
+        let device_public_key = row
+            .device_public_key
+            .as_deref()
+            .map(|encrypted| decrypt_string(encrypted, &self.encryption_key).unwrap_or_else(|_| "***".to_string()));
 
         Ok(RemoteAgentResponse {
             id: row.id,
@@ -281,9 +264,7 @@ fn validate_create_request(req: &CreateRemoteAgentRequest) -> Result<(), AppErro
 
 fn validate_ws_url(url: &str) -> Result<(), AppError> {
     if !url.starts_with("ws://") && !url.starts_with("wss://") {
-        return Err(AppError::BadRequest(
-            "URL must use ws:// or wss:// protocol".into(),
-        ));
+        return Err(AppError::BadRequest("URL must use ws:// or wss:// protocol".into()));
     }
     Ok(())
 }
@@ -300,12 +281,9 @@ fn mask_token(token: &str) -> String {
 
 // ── Ed25519 key generation ──────────────────────────────────────
 
-fn generate_device_keypair(
-    encryption_key: &[u8; 32],
-) -> Result<(String, String, String), AppError> {
+fn generate_device_keypair(encryption_key: &[u8; 32]) -> Result<(String, String, String), AppError> {
     let mut rng_bytes = [0u8; 32];
-    getrandom::getrandom(&mut rng_bytes)
-        .map_err(|e| AppError::Internal(format!("RNG failure: {e}")))?;
+    getrandom::getrandom(&mut rng_bytes).map_err(|e| AppError::Internal(format!("RNG failure: {e}")))?;
 
     let signing_key = SigningKey::from_bytes(&rng_bytes);
     let verifying_key = signing_key.verifying_key();

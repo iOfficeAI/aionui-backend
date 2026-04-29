@@ -4,14 +4,14 @@ use aionui_ai_agent::{BuildTaskOptions, ICronService, IWorkerTaskManager, SendMe
 use aionui_api_types::{
     ApprovalCheckResponse, CloneConversationRequest, ConfirmRequest, ConfirmationListResponse,
     ConversationArtifactKind, ConversationArtifactListResponse, ConversationArtifactResponse,
-    ConversationArtifactStatus, ConversationListResponse, ConversationResponse,
-    CreateConversationRequest, ListConversationsQuery, ListMessagesQuery, MessageListResponse,
-    MessageResponse, MessageSearchResponse, SearchMessagesQuery, SendMessageRequest,
-    UpdateConversationArtifactRequest, UpdateConversationRequest, WebSocketMessage,
+    ConversationArtifactStatus, ConversationListResponse, ConversationResponse, CreateConversationRequest,
+    ListConversationsQuery, ListMessagesQuery, MessageListResponse, MessageResponse, MessageSearchResponse,
+    SearchMessagesQuery, SendMessageRequest, UpdateConversationArtifactRequest, UpdateConversationRequest,
+    WebSocketMessage,
 };
 use aionui_common::{
-    AgentType, AppError, ConversationSource, ConversationStatus, PaginatedResult, generate_id,
-    generate_short_id, now_ms,
+    AgentType, AppError, ConversationSource, ConversationStatus, PaginatedResult, generate_id, generate_short_id,
+    now_ms,
 };
 use aionui_db::models::MessageRow;
 use aionui_db::{
@@ -22,8 +22,8 @@ use aionui_realtime::EventBroadcaster;
 use tracing::{debug, info, warn};
 
 use crate::convert::{
-    row_to_artifact_response, row_to_message_response, row_to_response, row_to_response_with_extra,
-    search_row_to_item, string_to_enum,
+    row_to_artifact_response, row_to_message_response, row_to_response, row_to_response_with_extra, search_row_to_item,
+    string_to_enum,
 };
 use crate::skill_resolver::SkillResolver;
 use crate::stream_relay::StreamRelay;
@@ -171,10 +171,7 @@ impl ConversationService {
         // `clone_create` — which merges a source conversation's legacy
         // `extra` into the new request — keeps working on pre-snapshot rows
         // until every legacy row has been backfilled (§7.1).
-        fn take_string_array(
-            obj: &mut serde_json::Map<String, serde_json::Value>,
-            keys: &[&str],
-        ) -> Vec<String> {
+        fn take_string_array(obj: &mut serde_json::Map<String, serde_json::Value>, keys: &[&str]) -> Vec<String> {
             for key in keys {
                 if let Some(v) = obj.remove(*key)
                     && let Ok(arr) = serde_json::from_value::<Vec<String>>(v)
@@ -188,10 +185,7 @@ impl ConversationService {
         let (preset_enabled, exclude_auto_inject) = match extra.as_object_mut() {
             Some(obj) => {
                 let preset = take_string_array(obj, &["preset_enabled_skills", "enabled_skills"]);
-                let exclude = take_string_array(
-                    obj,
-                    &["exclude_auto_inject_skills", "exclude_builtin_skills"],
-                );
+                let exclude = take_string_array(obj, &["exclude_auto_inject_skills", "exclude_builtin_skills"]);
                 // Strip the stale cache field if a clone copied it in.
                 obj.remove("loaded_skills");
                 (preset, exclude)
@@ -200,11 +194,8 @@ impl ConversationService {
         };
 
         let auto_inject_names = self.skill_resolver.auto_inject_names().await;
-        let initial_skills = crate::skill_snapshot::compute_initial_skills(
-            &auto_inject_names,
-            &preset_enabled,
-            &exclude_auto_inject,
-        );
+        let initial_skills =
+            crate::skill_snapshot::compute_initial_skills(&auto_inject_names, &preset_enabled, &exclude_auto_inject);
 
         // Wire skill symlinks into the auto-provisioned workspace so the
         // agent CLI picks them up via its native skills dir (e.g.
@@ -214,8 +205,7 @@ impl ConversationService {
             && !is_custom_workspace
             && !initial_skills.is_empty()
             && let Some(rel_dirs) =
-                native_skills_dirs(&self.agent_metadata_repo, &req.r#type, extra.get("backend"))
-                    .await
+                native_skills_dirs(&self.agent_metadata_repo, &req.r#type, extra.get("backend")).await
         {
             let resolved = self.skill_resolver.resolve_skills(&initial_skills).await;
             if !resolved.is_empty() {
@@ -236,12 +226,7 @@ impl ConversationService {
         if let Some(obj) = extra.as_object_mut() {
             obj.insert(
                 "skills".to_owned(),
-                serde_json::Value::Array(
-                    initial_skills
-                        .into_iter()
-                        .map(serde_json::Value::String)
-                        .collect(),
-                ),
+                serde_json::Value::Array(initial_skills.into_iter().map(serde_json::Value::String).collect()),
             );
         }
 
@@ -283,28 +268,15 @@ impl ConversationService {
         Ok(response)
     }
 
-    async fn create_acp_session_row(
-        &self,
-        conversation_id: &str,
-        extra: &serde_json::Value,
-    ) -> Result<(), AppError> {
+    async fn create_acp_session_row(&self, conversation_id: &str, extra: &serde_json::Value) -> Result<(), AppError> {
         // Identity comes from the user's agent choice in `extra`.
         // `agent_id` is the catalog row id; `backend` is the vendor
         // label; `agent_source` says builtin/extension/custom. The
         // frontend always posts agent_id for picked rows, but older
         // payloads may only carry `backend`, so we resolve defensively.
-        let agent_id_from_extra = extra
-            .get("agent_id")
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty());
-        let backend = extra
-            .get("backend")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default();
-        let agent_source = extra
-            .get("agent_source")
-            .and_then(|v| v.as_str())
-            .unwrap_or("builtin");
+        let agent_id_from_extra = extra.get("agent_id").and_then(|v| v.as_str()).filter(|s| !s.is_empty());
+        let backend = extra.get("backend").and_then(|v| v.as_str()).unwrap_or_default();
+        let agent_source = extra.get("agent_source").and_then(|v| v.as_str()).unwrap_or("builtin");
 
         // Fallback: older clients (electron main, legacy webhooks) only
         // post `backend` without `agent_id`. Resolve the builtin row for
@@ -349,8 +321,8 @@ impl ConversationService {
             .filter(|r| r.user_id == user_id)
             .ok_or_else(|| AppError::NotFound(format!("Conversation {id} not found")))?;
 
-        let mut extra: serde_json::Value = serde_json::from_str(&row.extra)
-            .map_err(|e| AppError::Internal(format!("Invalid extra JSON: {e}")))?;
+        let mut extra: serde_json::Value =
+            serde_json::from_str(&row.extra).map_err(|e| AppError::Internal(format!("Invalid extra JSON: {e}")))?;
         self.backfill_extra_inplace(&row.id, &mut extra).await;
         row_to_response_with_extra(row, extra, &self.workspace_root)
     }
@@ -432,9 +404,7 @@ impl ConversationService {
         if let Some(incoming) = &req.extra
             && incoming.get("skills").is_some()
         {
-            return Err(AppError::BadRequest(
-                "extra.skills is immutable post-creation".into(),
-            ));
+            return Err(AppError::BadRequest("extra.skills is immutable post-creation".into()));
         }
 
         let now = now_ms();
@@ -444,9 +414,10 @@ impl ConversationService {
             let mut existing_extra: serde_json::Value =
                 serde_json::from_str(&existing.extra).unwrap_or_else(|_| serde_json::json!({}));
             merge_json(&mut existing_extra, new_extra);
-            Some(serde_json::to_string(&existing_extra).map_err(|e| {
-                AppError::Internal(format!("Failed to serialize merged extra: {e}"))
-            })?)
+            Some(
+                serde_json::to_string(&existing_extra)
+                    .map_err(|e| AppError::Internal(format!("Failed to serialize merged extra: {e}")))?,
+            )
         } else {
             None
         };
@@ -504,23 +475,22 @@ impl ConversationService {
     /// (e.g. `TeamSessionService::ensure_session` writing
     /// `team_mcp_stdio_config`) where a full `update()` would kill the agent
     /// on a spurious model comparison.
-    pub async fn update_extra(
-        &self,
-        conversation_id: &str,
-        patch: serde_json::Value,
-    ) -> Result<(), AppError> {
-        let existing = self.repo.get(conversation_id).await?.ok_or_else(|| {
-            AppError::NotFound(format!("Conversation {conversation_id} not found"))
-        })?;
+    pub async fn update_extra(&self, conversation_id: &str, patch: serde_json::Value) -> Result<(), AppError> {
+        let existing = self
+            .repo
+            .get(conversation_id)
+            .await?
+            .ok_or_else(|| AppError::NotFound(format!("Conversation {conversation_id} not found")))?;
 
         let mut merged: serde_json::Value =
             serde_json::from_str(&existing.extra).unwrap_or_else(|_| serde_json::json!({}));
         merge_json(&mut merged, &patch);
 
         let updates = ConversationRowUpdate {
-            extra: Some(serde_json::to_string(&merged).map_err(|e| {
-                AppError::Internal(format!("Failed to serialize merged extra: {e}"))
-            })?),
+            extra: Some(
+                serde_json::to_string(&merged)
+                    .map_err(|e| AppError::Internal(format!("Failed to serialize merged extra: {e}")))?,
+            ),
             updated_at: Some(now_ms()),
             ..Default::default()
         };
@@ -585,9 +555,7 @@ impl ConversationService {
                 .get(source_id)
                 .await?
                 .filter(|r| r.user_id == user_id)
-                .ok_or_else(|| {
-                    AppError::NotFound(format!("Source conversation {source_id} not found"))
-                })?;
+                .ok_or_else(|| AppError::NotFound(format!("Source conversation {source_id} not found")))?;
 
             // Inherit name from source if not provided
             if create_req.name.is_none() {
@@ -609,10 +577,7 @@ impl ConversationService {
                         .or_else(|| obj.get("cronJobId").and_then(|value| value.as_str()))
                         .map(ToOwned::to_owned);
                     if let Some(cron_job_id) = cron_job_id {
-                        obj.insert(
-                            "cron_job_id".into(),
-                            serde_json::Value::String(cron_job_id.clone()),
-                        );
+                        obj.insert("cron_job_id".into(), serde_json::Value::String(cron_job_id.clone()));
                         obj.insert("cronJobId".into(), serde_json::Value::String(cron_job_id));
                     }
                 } else {
@@ -653,11 +618,7 @@ impl ConversationService {
     }
 
     /// List conversations associated by the same workspace.
-    pub async fn list_associated(
-        &self,
-        user_id: &str,
-        id: &str,
-    ) -> Result<Vec<ConversationResponse>, AppError> {
+    pub async fn list_associated(&self, user_id: &str, id: &str) -> Result<Vec<ConversationResponse>, AppError> {
         let rows = self.repo.list_associated(user_id, id).await?;
         rows.into_iter()
             .map(|row| row_to_response(row, &self.workspace_root))
@@ -688,9 +649,7 @@ impl ConversationService {
             .get(conversation_id)
             .await?
             .filter(|r| r.user_id == user_id)
-            .ok_or_else(|| {
-                AppError::NotFound(format!("Conversation {conversation_id} not found"))
-            })?;
+            .ok_or_else(|| AppError::NotFound(format!("Conversation {conversation_id} not found")))?;
 
         let page = query.page.unwrap_or(1);
         let page_size = query.page_size.unwrap_or(50);
@@ -699,10 +658,7 @@ impl ConversationService {
             _ => SortOrder::Asc,
         };
 
-        let result = self
-            .repo
-            .get_messages(conversation_id, page, page_size, order)
-            .await?;
+        let result = self.repo.get_messages(conversation_id, page, page_size, order).await?;
 
         let items: Vec<MessageResponse> = result
             .items
@@ -727,9 +683,7 @@ impl ConversationService {
             .get(conversation_id)
             .await?
             .filter(|r| r.user_id == user_id)
-            .ok_or_else(|| {
-                AppError::NotFound(format!("Conversation {conversation_id} not found"))
-            })?;
+            .ok_or_else(|| AppError::NotFound(format!("Conversation {conversation_id} not found")))?;
 
         let mut items = self
             .repo
@@ -769,9 +723,7 @@ impl ConversationService {
             .get(conversation_id)
             .await?
             .filter(|r| r.user_id == user_id)
-            .ok_or_else(|| {
-                AppError::NotFound(format!("Conversation {conversation_id} not found"))
-            })?;
+            .ok_or_else(|| AppError::NotFound(format!("Conversation {conversation_id} not found")))?;
 
         let status = serde_json::to_value(req.status)
             .ok()
@@ -787,9 +739,8 @@ impl ConversationService {
         let response = row_to_artifact_response(row)?;
         self.broadcaster.broadcast(WebSocketMessage::new(
             "conversation.artifact",
-            serde_json::to_value(&response).map_err(|e| {
-                AppError::Internal(format!("Failed to serialize artifact event: {e}"))
-            })?,
+            serde_json::to_value(&response)
+                .map_err(|e| AppError::Internal(format!("Failed to serialize artifact event: {e}")))?,
         ));
 
         Ok(response)
@@ -835,9 +786,7 @@ impl ConversationService {
             .get(conversation_id)
             .await?
             .filter(|r| r.user_id == user_id)
-            .ok_or_else(|| {
-                AppError::NotFound(format!("Conversation {conversation_id} not found"))
-            })?;
+            .ok_or_else(|| AppError::NotFound(format!("Conversation {conversation_id} not found")))?;
 
         let agent = match task_manager.get_task(conversation_id) {
             Some(a) => a,
@@ -863,9 +812,7 @@ impl ConversationService {
             .get(conversation_id)
             .await?
             .filter(|r| r.user_id == user_id)
-            .ok_or_else(|| {
-                AppError::NotFound(format!("Conversation {conversation_id} not found"))
-            })?;
+            .ok_or_else(|| AppError::NotFound(format!("Conversation {conversation_id} not found")))?;
 
         let agent = task_manager
             .get_task(conversation_id)
@@ -904,9 +851,7 @@ impl ConversationService {
             .get(conversation_id)
             .await?
             .filter(|r| r.user_id == user_id)
-            .ok_or_else(|| {
-                AppError::NotFound(format!("Conversation {conversation_id} not found"))
-            })?;
+            .ok_or_else(|| AppError::NotFound(format!("Conversation {conversation_id} not found")))?;
 
         let approved = task_manager
             .get_task(conversation_id)
@@ -933,9 +878,7 @@ impl ConversationService {
         task_manager: &Arc<dyn IWorkerTaskManager>,
     ) -> Result<(), AppError> {
         if req.content.trim().is_empty() {
-            return Err(AppError::BadRequest(
-                "Message content must not be empty".into(),
-            ));
+            return Err(AppError::BadRequest("Message content must not be empty".into()));
         }
 
         // Verify conversation exists and belongs to user
@@ -944,9 +887,7 @@ impl ConversationService {
             .get(conversation_id)
             .await?
             .filter(|r| r.user_id == user_id)
-            .ok_or_else(|| {
-                AppError::NotFound(format!("Conversation {conversation_id} not found"))
-            })?;
+            .ok_or_else(|| AppError::NotFound(format!("Conversation {conversation_id} not found")))?;
 
         // Short-circuit for legacy Gemini conversations: the dedicated Gemini
         // runtime has been removed, so we cannot build an agent for this row.
@@ -1041,8 +982,7 @@ impl ConversationService {
 
                 let rx = agent.subscribe();
                 let send_agent = Arc::clone(&agent);
-                let send_task =
-                    tokio::spawn(async move { send_agent.send_message(current_send).await });
+                let send_task = tokio::spawn(async move { send_agent.send_message(current_send).await });
                 let outcome = relay.run(rx).await;
 
                 match send_task.await {
@@ -1100,9 +1040,7 @@ impl ConversationService {
             .get(conversation_id)
             .await?
             .filter(|r| r.user_id == user_id)
-            .ok_or_else(|| {
-                AppError::NotFound(format!("Conversation {conversation_id} not found"))
-            })?;
+            .ok_or_else(|| AppError::NotFound(format!("Conversation {conversation_id} not found")))?;
 
         let agent = task_manager
             .get_task(conversation_id)
@@ -1129,9 +1067,7 @@ impl ConversationService {
             .get(conversation_id)
             .await?
             .filter(|r| r.user_id == user_id)
-            .ok_or_else(|| {
-                AppError::NotFound(format!("Conversation {conversation_id} not found"))
-            })?;
+            .ok_or_else(|| AppError::NotFound(format!("Conversation {conversation_id} not found")))?;
 
         let build_opts = self.build_task_options(&row)?;
         let stored_workspace = build_opts.workspace.clone();
@@ -1146,10 +1082,7 @@ impl ConversationService {
     }
 
     /// Build [`BuildTaskOptions`] from a conversation database row.
-    fn build_task_options(
-        &self,
-        row: &aionui_db::models::ConversationRow,
-    ) -> Result<BuildTaskOptions, AppError> {
+    fn build_task_options(&self, row: &aionui_db::models::ConversationRow) -> Result<BuildTaskOptions, AppError> {
         let agent_type = string_to_enum(&row.r#type)?;
 
         let model = row
@@ -1164,15 +1097,11 @@ impl ConversationService {
                 use_model: None,
             });
 
-        let extra: serde_json::Value = serde_json::from_str(&row.extra)
-            .map_err(|e| AppError::Internal(format!("Invalid extra JSON: {e}")))?;
+        let extra: serde_json::Value =
+            serde_json::from_str(&row.extra).map_err(|e| AppError::Internal(format!("Invalid extra JSON: {e}")))?;
 
         // Extract workspace from extra (common across agent types)
-        let workspace = extra
-            .get("workspace")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_owned();
+        let workspace = extra.get("workspace").and_then(|v| v.as_str()).unwrap_or("").to_owned();
 
         Ok(BuildTaskOptions {
             agent_type,
@@ -1200,16 +1129,17 @@ impl ConversationService {
         }
 
         // Fetch latest extra, merge the resolved workspace path in, and persist.
-        let row = self.repo.get(conversation_id).await?.ok_or_else(|| {
-            AppError::Internal("Conversation vanished during workspace sync".into())
-        })?;
+        let row = self
+            .repo
+            .get(conversation_id)
+            .await?
+            .ok_or_else(|| AppError::Internal("Conversation vanished during workspace sync".into()))?;
 
-        let mut extra: serde_json::Value =
-            serde_json::from_str(&row.extra).unwrap_or_else(|_| serde_json::json!({}));
+        let mut extra: serde_json::Value = serde_json::from_str(&row.extra).unwrap_or_else(|_| serde_json::json!({}));
         extra["workspace"] = serde_json::Value::String(resolved_workspace.to_owned());
 
-        let extra_json = serde_json::to_string(&extra)
-            .map_err(|e| AppError::Internal(format!("Failed to serialize extra: {e}")))?;
+        let extra_json =
+            serde_json::to_string(&extra).map_err(|e| AppError::Internal(format!("Failed to serialize extra: {e}")))?;
 
         let update = ConversationRowUpdate {
             extra: Some(extra_json),
@@ -1227,12 +1157,7 @@ impl ConversationService {
     }
 
     /// Broadcast a `conversation.listChanged` WebSocket event.
-    fn broadcast_list_changed(
-        &self,
-        conversation_id: &str,
-        action: &str,
-        source: Option<&ConversationSource>,
-    ) {
+    fn broadcast_list_changed(&self, conversation_id: &str, action: &str, source: Option<&ConversationSource>) {
         let payload = serde_json::json!({
             "conversation_id": conversation_id,
             "action": action,
@@ -1302,10 +1227,7 @@ fn backfill_cron_job_id_alias(extra: &mut serde_json::Value) -> bool {
 
     let mut mutated = false;
     if obj.get("cron_job_id").and_then(|value| value.as_str()) != Some(cron_job_id.as_str()) {
-        obj.insert(
-            "cron_job_id".into(),
-            serde_json::Value::String(cron_job_id.clone()),
-        );
+        obj.insert("cron_job_id".into(), serde_json::Value::String(cron_job_id.clone()));
         mutated = true;
     }
     if obj.get("cronJobId").and_then(|value| value.as_str()) != Some(cron_job_id.as_str()) {
@@ -1363,8 +1285,8 @@ async fn native_skills_dirs(
 ///
 /// e.g. `AgentType::Acp` → `"acp"`
 fn enum_to_db<T: serde::Serialize>(val: &T) -> Result<String, AppError> {
-    let json_val = serde_json::to_value(val)
-        .map_err(|e| AppError::Internal(format!("Enum serialization failed: {e}")))?;
+    let json_val =
+        serde_json::to_value(val).map_err(|e| AppError::Internal(format!("Enum serialization failed: {e}")))?;
     json_val
         .as_str()
         .map(|s| s.to_owned())
@@ -1375,18 +1297,13 @@ fn enum_to_db<T: serde::Serialize>(val: &T) -> Result<String, AppError> {
 ///
 /// Called after send_message completes so the session can be resumed
 /// when the user re-enters this conversation later.
-async fn persist_session_key(
-    repo: &Arc<dyn IConversationRepository>,
-    conversation_id: &str,
-    session_key: &str,
-) {
+async fn persist_session_key(repo: &Arc<dyn IConversationRepository>, conversation_id: &str, session_key: &str) {
     let row = match repo.get(conversation_id).await {
         Ok(Some(r)) => r,
         _ => return,
     };
 
-    let mut extra: serde_json::Value =
-        serde_json::from_str(&row.extra).unwrap_or_else(|_| serde_json::json!({}));
+    let mut extra: serde_json::Value = serde_json::from_str(&row.extra).unwrap_or_else(|_| serde_json::json!({}));
 
     if extra.get("sessionKey").and_then(|v| v.as_str()) == Some(session_key) {
         return;
@@ -1410,19 +1327,13 @@ async fn persist_session_key(
     if let Err(e) = repo.update(conversation_id, &update).await {
         warn!(conversation_id, error = %e, "Failed to persist session key");
     } else {
-        debug!(
-            conversation_id,
-            "Persisted session key to conversation.extra"
-        );
+        debug!(conversation_id, "Persisted session key to conversation.extra");
     }
 }
 
-fn legacy_cron_trigger_to_artifact(
-    row: MessageRow,
-) -> Result<ConversationArtifactResponse, AppError> {
-    let payload: serde_json::Value = serde_json::from_str(&row.content).map_err(|e| {
-        AppError::Internal(format!("Invalid legacy cron trigger payload JSON: {e}"))
-    })?;
+fn legacy_cron_trigger_to_artifact(row: MessageRow) -> Result<ConversationArtifactResponse, AppError> {
+    let payload: serde_json::Value = serde_json::from_str(&row.content)
+        .map_err(|e| AppError::Internal(format!("Invalid legacy cron trigger payload JSON: {e}")))?;
     let cron_job_id = payload
         .get("cron_job_id")
         .or_else(|| payload.get("cronJobId"))
@@ -1460,29 +1371,20 @@ mod tests {
         use aionui_common::AgentType;
         assert_eq!(enum_to_db(&AgentType::Acp).unwrap(), "acp");
         assert_eq!(enum_to_db(&AgentType::Nanobot).unwrap(), "nanobot");
-        assert_eq!(
-            enum_to_db(&AgentType::OpenclawGateway).unwrap(),
-            "openclaw-gateway"
-        );
+        assert_eq!(enum_to_db(&AgentType::OpenclawGateway).unwrap(), "openclaw-gateway");
     }
 
     #[test]
     fn enum_to_db_status() {
         assert_eq!(enum_to_db(&ConversationStatus::Pending).unwrap(), "pending");
         assert_eq!(enum_to_db(&ConversationStatus::Running).unwrap(), "running");
-        assert_eq!(
-            enum_to_db(&ConversationStatus::Finished).unwrap(),
-            "finished"
-        );
+        assert_eq!(enum_to_db(&ConversationStatus::Finished).unwrap(), "finished");
     }
 
     #[test]
     fn enum_to_db_source() {
         assert_eq!(enum_to_db(&ConversationSource::Aionui).unwrap(), "aionui");
-        assert_eq!(
-            enum_to_db(&ConversationSource::Telegram).unwrap(),
-            "telegram"
-        );
+        assert_eq!(enum_to_db(&ConversationSource::Telegram).unwrap(), "telegram");
     }
 
     #[test]

@@ -26,11 +26,7 @@ pub trait IMcpServerRepository: Send + Sync {
 
     /// Updates an existing MCP server. Returns `DbError::NotFound` if the ID
     /// doesn't exist, `DbError::Conflict` if the new name collides with another.
-    async fn update(
-        &self,
-        id: &str,
-        params: UpdateMcpServerParams<'_>,
-    ) -> Result<McpServerRow, DbError>;
+    async fn update(&self, id: &str, params: UpdateMcpServerParams<'_>) -> Result<McpServerRow, DbError>;
 
     /// Deletes an MCP server by ID. Returns `DbError::NotFound` if the ID
     /// doesn't exist.
@@ -38,10 +34,7 @@ pub trait IMcpServerRepository: Send + Sync {
 
     /// Upserts multiple servers by name: existing names are updated,
     /// new names are inserted. Returns the count of affected rows.
-    async fn batch_upsert(
-        &self,
-        servers: &[CreateMcpServerParams<'_>],
-    ) -> Result<Vec<McpServerRow>, DbError>;
+    async fn batch_upsert(&self, servers: &[CreateMcpServerParams<'_>]) -> Result<Vec<McpServerRow>, DbError>;
 
     /// Updates only the status (and optionally last_connected).
     /// Returns `DbError::NotFound` if the ID doesn't exist.

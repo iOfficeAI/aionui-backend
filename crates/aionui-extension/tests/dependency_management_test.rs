@@ -6,8 +6,7 @@
 use std::collections::HashMap;
 
 use aionui_extension::{
-    DependencyIssue, ExtensionManifest, ExtensionSource, ExtensionState, LoadedExtension,
-    validate_dependencies,
+    DependencyIssue, ExtensionManifest, ExtensionSource, ExtensionState, LoadedExtension, validate_dependencies,
 };
 
 // ---------------------------------------------------------------------------
@@ -95,10 +94,7 @@ fn dm2_missing_dependency_detected() {
 
 #[test]
 fn dm3_exact_version_mismatch() {
-    let exts = vec![
-        ext("ext-b", "1.5.0", &[]),
-        ext("ext-a", "1.0.0", &[("ext-b", "2.0.0")]),
-    ];
+    let exts = vec![ext("ext-b", "1.5.0", &[]), ext("ext-a", "1.0.0", &[("ext-b", "2.0.0")])];
     let result = validate_dependencies(&exts);
     assert!(!result.valid);
     let mismatch = result
@@ -107,9 +103,7 @@ fn dm3_exact_version_mismatch() {
         .find(|i| matches!(i, DependencyIssue::VersionMismatch { .. }))
         .expect("should contain VersionMismatch");
     match mismatch {
-        DependencyIssue::VersionMismatch {
-            required, actual, ..
-        } => {
+        DependencyIssue::VersionMismatch { required, actual, .. } => {
             assert_eq!(required, "2.0.0");
             assert_eq!(actual, "1.5.0");
         }
@@ -278,11 +272,7 @@ fn large_chain_preserves_order() {
 
 #[test]
 fn multiple_missing_deps_all_reported() {
-    let exts = vec![ext(
-        "ext-a",
-        "1.0.0",
-        &[("dep-1", "^1.0.0"), ("dep-2", "~2.0.0")],
-    )];
+    let exts = vec![ext("ext-a", "1.0.0", &[("dep-1", "^1.0.0"), ("dep-2", "~2.0.0")])];
     let result = validate_dependencies(&exts);
     assert!(!result.valid);
     let missing: Vec<_> = result

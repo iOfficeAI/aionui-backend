@@ -72,12 +72,7 @@ impl TaskBoard {
         TeamTask::from_row(&row).map_err(TeamError::Json)
     }
 
-    pub async fn update_task(
-        &self,
-        team_id: &str,
-        task_id: &str,
-        update: &TaskUpdate,
-    ) -> Result<TeamTask, TeamError> {
+    pub async fn update_task(&self, team_id: &str, task_id: &str, update: &TaskUpdate) -> Result<TeamTask, TeamError> {
         let existing = self
             .repo
             .find_task_by_id(team_id, task_id)
@@ -88,16 +83,8 @@ impl TaskBoard {
             status: update.status.map(|s| s.to_string()),
             description: update.description.clone(),
             owner: update.owner.clone(),
-            blocked_by: update
-                .blocked_by
-                .as_ref()
-                .map(serde_json::to_string)
-                .transpose()?,
-            metadata: update
-                .metadata
-                .as_ref()
-                .map(serde_json::to_string)
-                .transpose()?,
+            blocked_by: update.blocked_by.as_ref().map(serde_json::to_string).transpose()?,
+            metadata: update.metadata.as_ref().map(serde_json::to_string).transpose()?,
         };
 
         self.repo.update_task(task_id, &params).await?;
@@ -119,18 +106,11 @@ impl TaskBoard {
 
     pub async fn list_tasks(&self, team_id: &str) -> Result<Vec<TeamTask>, TeamError> {
         let rows = self.repo.list_tasks(team_id).await?;
-        let tasks = rows
-            .iter()
-            .filter_map(|r| TeamTask::from_row(r).ok())
-            .collect();
+        let tasks = rows.iter().filter_map(|r| TeamTask::from_row(r).ok()).collect();
         Ok(tasks)
     }
 
-    async fn check_unblocks(
-        &self,
-        completed_task_id: &str,
-        completed_row: &TeamTaskRow,
-    ) -> Result<(), TeamError> {
+    async fn check_unblocks(&self, completed_task_id: &str, completed_row: &TeamTaskRow) -> Result<(), TeamError> {
         let blocks: Vec<String> = serde_json::from_str(&completed_row.blocks)?;
         for downstream_id in &blocks {
             self.repo
@@ -154,10 +134,7 @@ mod tests {
     // -- Helper ---------------------------------------------------------------
 
     async fn create_simple_task(board: &TaskBoard, team_id: &str, subject: &str) -> TeamTask {
-        board
-            .create_task(team_id, subject, None, None, &[])
-            .await
-            .unwrap()
+        board.create_task(team_id, subject, None, None, &[]).await.unwrap()
     }
 
     // -- Tests ----------------------------------------------------------------
@@ -200,11 +177,7 @@ mod tests {
 
         assert_eq!(task_b.blocked_by, vec![task_a.id.clone()]);
 
-        let updated_a = repo
-            .find_task_by_id("t1", &task_a.id)
-            .await
-            .unwrap()
-            .unwrap();
+        let updated_a = repo.find_task_by_id("t1", &task_a.id).await.unwrap().unwrap();
         let blocks_a: Vec<String> = serde_json::from_str(&updated_a.blocks).unwrap();
         assert_eq!(blocks_a, vec![task_b.id]);
     }
@@ -214,9 +187,7 @@ mod tests {
         let repo = Arc::new(MockTeamRepo::new());
         let board = TaskBoard::new(repo);
 
-        let result = board
-            .create_task("t1", "X", None, None, &["nonexistent".into()])
-            .await;
+        let result = board.create_task("t1", "X", None, None, &["nonexistent".into()]).await;
         assert!(matches!(result, Err(TeamError::BlockedTaskNotFound(_))));
     }
 
@@ -267,9 +238,7 @@ mod tests {
         let repo = Arc::new(MockTeamRepo::new());
         let board = TaskBoard::new(repo);
 
-        let result = board
-            .update_task("t1", "nonexistent", &TaskUpdate::default())
-            .await;
+        let result = board.update_task("t1", "nonexistent", &TaskUpdate::default()).await;
         assert!(matches!(result, Err(TeamError::TaskNotFound(_))));
     }
 
@@ -345,13 +314,7 @@ mod tests {
         let task_a = create_simple_task(&board, "t1", "A").await;
         let task_x = create_simple_task(&board, "t1", "X").await;
         let task_b = board
-            .create_task(
-                "t1",
-                "B",
-                None,
-                None,
-                &[task_a.id.clone(), task_x.id.clone()],
-            )
+            .create_task("t1", "B", None, None, &[task_a.id.clone(), task_x.id.clone()])
             .await
             .unwrap();
 

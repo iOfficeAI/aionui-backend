@@ -11,8 +11,7 @@ use std::sync::OnceLock;
 fn rate_limit_regex() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
     REGEX.get_or_init(|| {
-        Regex::new(r"(?i)429|rate.?limit|quota|too many requests")
-            .expect("rate-limit regex must compile")
+        Regex::new(r"(?i)429|rate.?limit|quota|too many requests").expect("rate-limit regex must compile")
     })
 }
 
@@ -56,9 +55,7 @@ mod tests {
 
     #[test]
     fn non_error_event_is_not_rate_limited() {
-        assert!(!is_rate_limited(&AgentStreamEvent::Start(
-            StartEventData::default()
-        )));
+        assert!(!is_rate_limited(&AgentStreamEvent::Start(StartEventData::default())));
     }
 }
 
@@ -121,7 +118,10 @@ mod crash_tests {
             message: "something else broke".into(),
             code: None,
         });
-        assert_eq!(detect_crash(&event), Some(CrashReason::Unknown("something else broke".into())));
+        assert_eq!(
+            detect_crash(&event),
+            Some(CrashReason::Unknown("something else broke".into()))
+        );
     }
 
     #[test]

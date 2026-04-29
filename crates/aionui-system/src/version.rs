@@ -1,6 +1,4 @@
-use aionui_api_types::{
-    GitHubReleaseAsset, UpdateCheckRequest, UpdateCheckResult, UpdateReleaseInfo,
-};
+use aionui_api_types::{GitHubReleaseAsset, UpdateCheckRequest, UpdateCheckResult, UpdateReleaseInfo};
 use aionui_common::AppError;
 use serde::Deserialize;
 
@@ -28,11 +26,7 @@ impl VersionCheckService {
 
     /// Create a service with a custom API base URL (for testing).
     #[doc(hidden)]
-    pub fn with_api_base(
-        http_client: reqwest::Client,
-        current_version: String,
-        api_base: String,
-    ) -> Self {
+    pub fn with_api_base(http_client: reqwest::Client, current_version: String, api_base: String) -> Self {
         Self {
             http_client,
             current_version,
@@ -41,16 +35,12 @@ impl VersionCheckService {
     }
 
     /// Check for updates against GitHub Releases.
-    pub async fn check_update(
-        &self,
-        req: &UpdateCheckRequest,
-    ) -> Result<UpdateCheckResult, AppError> {
+    pub async fn check_update(&self, req: &UpdateCheckRequest) -> Result<UpdateCheckResult, AppError> {
         let repo = resolve_repo(req.repo.as_deref());
         let releases = self.fetch_releases(&repo).await?;
 
-        let current = parse_version(&self.current_version).ok_or_else(|| {
-            AppError::Internal(format!("invalid current version: {}", self.current_version))
-        })?;
+        let current = parse_version(&self.current_version)
+            .ok_or_else(|| AppError::Internal(format!("invalid current version: {}", self.current_version)))?;
 
         let platform = crate::sysinfo::get_system_info();
         let best = find_best_release(
@@ -104,9 +94,7 @@ impl VersionCheckService {
             if !resp.status().is_success() {
                 let status = resp.status();
                 let body = resp.text().await.unwrap_or_default();
-                return Err(AppError::BadGateway(format!(
-                    "GitHub API returned {status}: {body}"
-                )));
+                return Err(AppError::BadGateway(format!("GitHub API returned {status}: {body}")));
             }
 
             let has_next = resp
@@ -115,9 +103,10 @@ impl VersionCheckService {
                 .and_then(|v| v.to_str().ok())
                 .is_some_and(|v| v.contains("rel=\"next\""));
 
-            let batch: Vec<GitHubRelease> = resp.json().await.map_err(|e| {
-                AppError::BadGateway(format!("Failed to parse GitHub releases: {e}"))
-            })?;
+            let batch: Vec<GitHubRelease> = resp
+                .json()
+                .await
+                .map_err(|e| AppError::BadGateway(format!("Failed to parse GitHub releases: {e}")))?;
 
             let batch_len = batch.len();
             all_releases.extend(batch);
@@ -220,11 +209,7 @@ fn find_best_release(
 ///
 /// Uses filename heuristics: the asset name should contain a platform
 /// keyword and an architecture keyword.
-fn find_recommended_asset(
-    assets: &[GitHubReleaseAsset],
-    platform: &str,
-    arch: &str,
-) -> Option<GitHubReleaseAsset> {
+fn find_recommended_asset(assets: &[GitHubReleaseAsset], platform: &str, arch: &str) -> Option<GitHubReleaseAsset> {
     let platform_keywords = platform_keywords(platform);
     let arch_keywords = arch_keywords(arch);
 
@@ -361,12 +346,7 @@ mod tests {
         assert!(kw.contains(&"aarch64"));
     }
 
-    fn make_release(
-        tag: &str,
-        draft: bool,
-        prerelease: bool,
-        assets: Vec<GitHubAsset>,
-    ) -> GitHubRelease {
+    fn make_release(tag: &str, draft: bool, prerelease: bool, assets: Vec<GitHubAsset>) -> GitHubRelease {
         GitHubRelease {
             tag_name: tag.to_owned(),
             name: Some(format!("Release {tag}")),
@@ -516,12 +496,7 @@ mod tests {
         )];
         let best = find_best_release(&releases, &current, false, "darwin", "arm64").unwrap();
         assert!(best.recommended_asset.is_some());
-        assert!(
-            best.recommended_asset
-                .unwrap()
-                .name
-                .contains("darwin-arm64")
-        );
+        assert!(best.recommended_asset.unwrap().name.contains("darwin-arm64"));
     }
 
     #[test]

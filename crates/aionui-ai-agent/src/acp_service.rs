@@ -2,9 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
-use aionui_api_types::{
-    AcpEnvResponse, AcpHealthCheckResponse, DetectCliResponse, TestCustomAgentResponse,
-};
+use aionui_api_types::{AcpEnvResponse, AcpHealthCheckResponse, DetectCliResponse, TestCustomAgentResponse};
 use aionui_common::AppError;
 use tracing::debug;
 
@@ -49,18 +47,14 @@ pub async fn health_check(registry: &Arc<AgentRegistry>, backend: &str) -> AcpHe
         error: if available {
             None
         } else {
-            Some(format!(
-                "Spawn command for backend '{backend}' not found in PATH"
-            ))
+            Some(format!("Spawn command for backend '{backend}' not found in PATH"))
         },
     }
 }
 
 fn probe_command(meta: &AgentMetadata) -> Option<String> {
     let cmd = meta.command.as_deref()?;
-    which::which(cmd)
-        .ok()
-        .map(|p| p.to_string_lossy().into_owned())
+    which::which(cmd).ok().map(|p| p.to_string_lossy().into_owned())
 }
 
 /// Get relevant environment variables for ACP operations.
@@ -80,8 +74,7 @@ pub fn test_custom_agent(
     _acp_args: &[String],
     _env: &HashMap<String, String>,
 ) -> Result<TestCustomAgentResponse, AppError> {
-    which::which(command)
-        .map_err(|_| AppError::BadRequest(format!("Command '{command}' not found in PATH")))?;
+    which::which(command).map_err(|_| AppError::BadRequest(format!("Command '{command}' not found in PATH")))?;
 
     Ok(TestCustomAgentResponse {
         step: "completed".into(),

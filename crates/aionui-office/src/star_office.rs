@@ -10,14 +10,7 @@ const MAX_CONCURRENT_WORKERS: usize = 6;
 const SCAN_RADIUS: u16 = 24;
 const KNOWN_PORTS: [u16; 2] = [19000, 18791];
 
-const STATUS_MARKERS: [&str; 6] = [
-    "idle",
-    "writing",
-    "researching",
-    "executing",
-    "syncing",
-    "error",
-];
+const STATUS_MARKERS: [&str; 6] = ["idle", "writing", "researching", "executing", "syncing", "error"];
 const FEATURE_KEYWORDS: [&str; 3] = ["star office", "decorate room", "asset sidebar"];
 const EXCLUDE_KEYWORDS: [&str; 1] = ["openclaw control"];
 
@@ -40,20 +33,11 @@ impl StarOfficeDetector {
         }
     }
 
-    pub async fn detect(
-        &self,
-        preferred_url: Option<&str>,
-        force: bool,
-        timeout_ms: Option<u64>,
-    ) -> Option<String> {
+    pub async fn detect(&self, preferred_url: Option<&str>, force: bool, timeout_ms: Option<u64>) -> Option<String> {
         if !force {
             let cache = self.cache.lock().await;
             if let Some(ref c) = *cache {
-                let ttl = if c.was_hit {
-                    CACHE_HIT_TTL
-                } else {
-                    CACHE_MISS_TTL
-                };
+                let ttl = if c.was_hit { CACHE_HIT_TTL } else { CACHE_MISS_TTL };
                 if c.cached_at.elapsed() < ttl {
                     tracing::debug!(cached_url = ?c.url, "returning cached star-office result");
                     return c.url.clone();
@@ -64,10 +48,7 @@ impl StarOfficeDetector {
         let candidates = build_candidate_urls(preferred_url);
         let timeout = Duration::from_millis(timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS));
 
-        tracing::debug!(
-            count = candidates.len(),
-            "scanning star-office candidate URLs"
-        );
+        tracing::debug!(count = candidates.len(), "scanning star-office candidate URLs");
         let result = self.scan_candidates(&candidates, timeout).await;
 
         let mut cache = self.cache.lock().await;
@@ -144,9 +125,7 @@ fn build_candidate_urls(preferred_url: Option<&str>) -> Vec<String> {
 }
 
 fn extract_port(url: &str) -> Option<u16> {
-    let without_scheme = url
-        .strip_prefix("http://")
-        .or_else(|| url.strip_prefix("https://"))?;
+    let without_scheme = url.strip_prefix("http://").or_else(|| url.strip_prefix("https://"))?;
     let host_part = without_scheme.split('/').next()?;
     let port_str = host_part.rsplit(':').next()?;
     port_str.parse().ok()
@@ -184,8 +163,7 @@ async fn check_health(client: &reqwest::Client, base_url: &str, timeout: Duratio
         Err(_) => return false,
     };
 
-    FEATURE_KEYWORDS.iter().any(|k| body.contains(k))
-        && !EXCLUDE_KEYWORDS.iter().any(|k| body.contains(k))
+    FEATURE_KEYWORDS.iter().any(|k| body.contains(k)) && !EXCLUDE_KEYWORDS.iter().any(|k| body.contains(k))
 }
 
 #[cfg(test)]
@@ -319,14 +297,7 @@ mod tests {
 
     #[test]
     fn status_markers_all_present() {
-        let expected = [
-            "idle",
-            "writing",
-            "researching",
-            "executing",
-            "syncing",
-            "error",
-        ];
+        let expected = ["idle", "writing", "researching", "executing", "syncing", "error"];
         assert_eq!(STATUS_MARKERS, expected);
     }
 
@@ -344,18 +315,14 @@ mod tests {
     #[tokio::test]
     async fn detect_no_service_returns_none() {
         let detector = StarOfficeDetector::new(reqwest::Client::new());
-        let result = detector
-            .detect(Some("http://localhost:59999"), false, Some(50))
-            .await;
+        let result = detector.detect(Some("http://localhost:59999"), false, Some(50)).await;
         assert!(result.is_none());
     }
 
     #[tokio::test]
     async fn detect_cache_miss_stored() {
         let detector = StarOfficeDetector::new(reqwest::Client::new());
-        let _ = detector
-            .detect(Some("http://localhost:59998"), false, Some(50))
-            .await;
+        let _ = detector.detect(Some("http://localhost:59998"), false, Some(50)).await;
         let cache = detector.cache.lock().await;
         let c = cache.as_ref().unwrap();
         assert!(c.url.is_none());

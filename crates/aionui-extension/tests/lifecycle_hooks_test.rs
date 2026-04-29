@@ -8,9 +8,7 @@
 use std::fs;
 use std::path::Path;
 
-use aionui_extension::{
-    HookKind, LifecycleHooks, execute_hook, needs_install_hook, resolve_hook_path,
-};
+use aionui_extension::{HookKind, LifecycleHooks, execute_hook, needs_install_hook, resolve_hook_path};
 use tempfile::TempDir;
 
 // ---------------------------------------------------------------------------
@@ -89,10 +87,7 @@ async fn lh2_version_change_executes_on_install() {
     let hook_path = resolve_hook_path(&hooks, HookKind::OnInstall).unwrap();
     let result = execute_hook(dir.path(), hook_path, HookKind::OnInstall, "test-ext").await;
     assert!(result.is_ok());
-    assert!(
-        marker.exists(),
-        "onInstall marker should be created on upgrade"
-    );
+    assert!(marker.exists(), "onInstall marker should be created on upgrade");
 }
 
 // ---------------------------------------------------------------------------
@@ -237,19 +232,9 @@ fn resolve_hook_path_none_when_not_declared() {
 #[tokio::test]
 async fn hook_nonzero_exit_returns_hook_failed() {
     let dir = setup_ext_dir();
-    write_script(
-        dir.path(),
-        "scripts/fail.sh",
-        "echo 'setup failed' >&2; exit 42",
-    );
+    write_script(dir.path(), "scripts/fail.sh", "echo 'setup failed' >&2; exit 42");
 
-    let result = execute_hook(
-        dir.path(),
-        "scripts/fail.sh",
-        HookKind::OnInstall,
-        "failing-ext",
-    )
-    .await;
+    let result = execute_hook(dir.path(), "scripts/fail.sh", HookKind::OnInstall, "failing-ext").await;
 
     assert!(result.is_err());
     match result.unwrap_err() {

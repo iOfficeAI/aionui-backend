@@ -101,12 +101,7 @@ async fn enable_plugin_invalid_type() {
     let json = body_json(resp).await;
     let data = &json["data"];
     assert!(!data["success"].as_bool().unwrap());
-    assert!(
-        data["error"]
-            .as_str()
-            .unwrap()
-            .contains("Invalid plugin type")
-    );
+    assert!(data["error"].as_str().unwrap().contains("Invalid plugin type"));
 }
 
 // DP-3: Disable missing pluginId fails
@@ -115,13 +110,7 @@ async fn disable_plugin_missing_plugin_id() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
-    let req = json_with_token(
-        "POST",
-        "/api/channel/plugins/disable",
-        json!({}),
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("POST", "/api/channel/plugins/disable", json!({}), &token, &csrf);
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
@@ -207,13 +196,7 @@ async fn approve_pairing_missing_code() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
-    let req = json_with_token(
-        "POST",
-        "/api/channel/pairings/approve",
-        json!({}),
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("POST", "/api/channel/pairings/approve", json!({}), &token, &csrf);
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
@@ -277,13 +260,7 @@ async fn revoke_user_missing_user_id() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
-    let req = json_with_token(
-        "POST",
-        "/api/channel/users/revoke",
-        json!({}),
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("POST", "/api/channel/users/revoke", json!({}), &token, &csrf);
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
@@ -355,13 +332,7 @@ async fn sync_settings_missing_platform() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
-    let req = json_with_token(
-        "POST",
-        "/api/channel/settings/sync",
-        json!({}),
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("POST", "/api/channel/settings/sync", json!({}), &token, &csrf);
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
@@ -398,8 +369,7 @@ async fn pairing_approve_creates_user() {
     let pool = services.database.pool().clone();
     let repo: std::sync::Arc<dyn aionui_db::IChannelRepository> =
         std::sync::Arc::new(aionui_db::SqliteChannelRepository::new(pool));
-    let pairing_svc =
-        aionui_channel::pairing::PairingService::new(repo.clone(), services.event_bus.clone());
+    let pairing_svc = aionui_channel::pairing::PairingService::new(repo.clone(), services.event_bus.clone());
 
     let code = pairing_svc
         .request_pairing("tg_user_42", "telegram", Some("Alice"))
@@ -490,8 +460,7 @@ async fn pairing_reject_removes_from_pending() {
     let pool = services.database.pool().clone();
     let repo: std::sync::Arc<dyn aionui_db::IChannelRepository> =
         std::sync::Arc::new(aionui_db::SqliteChannelRepository::new(pool));
-    let pairing_svc =
-        aionui_channel::pairing::PairingService::new(repo.clone(), services.event_bus.clone());
+    let pairing_svc = aionui_channel::pairing::PairingService::new(repo.clone(), services.event_bus.clone());
 
     let code = pairing_svc
         .request_pairing("tg_user_99", "telegram", None)

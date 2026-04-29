@@ -5,9 +5,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use aionui_api_types::{
-    BatchImportMcpServersRequest, CreateMcpServerRequest, McpTransport, UpdateMcpServerRequest,
-};
+use aionui_api_types::{BatchImportMcpServersRequest, CreateMcpServerRequest, McpTransport, UpdateMcpServerRequest};
 use aionui_db::SqliteMcpServerRepository;
 use aionui_mcp::{McpConfigService, McpError};
 
@@ -68,10 +66,7 @@ async fn create_http_with_headers() {
     let resp = svc.add_server(http_req("test-http")).await.unwrap();
 
     match resp.transport {
-        McpTransport::Http {
-            ref url,
-            ref headers,
-        } => {
+        McpTransport::Http { ref url, ref headers } => {
             assert_eq!(url, "https://example.com/mcp");
             assert_eq!(headers.get("Auth").unwrap(), "Bearer tok");
         }

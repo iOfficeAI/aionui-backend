@@ -294,8 +294,7 @@ pub fn normalize_ws_url(host: &str, port: u16) -> String {
         format!("ws://{host}:{port}")
     };
 
-    raw.replace("https://", "wss://")
-        .replace("http://", "ws://")
+    raw.replace("https://", "wss://").replace("http://", "ws://")
 }
 
 #[cfg(test)]
@@ -310,18 +309,9 @@ mod tests {
 
     #[test]
     fn normalize_ws_url_with_scheme() {
-        assert_eq!(
-            normalize_ws_url("https://remote.host", 443),
-            "wss://remote.host:443"
-        );
-        assert_eq!(
-            normalize_ws_url("http://local.host", 8080),
-            "ws://local.host:8080"
-        );
-        assert_eq!(
-            normalize_ws_url("ws://already.ws", 18789),
-            "ws://already.ws:18789"
-        );
+        assert_eq!(normalize_ws_url("https://remote.host", 443), "wss://remote.host:443");
+        assert_eq!(normalize_ws_url("http://local.host", 8080), "ws://local.host:8080");
+        assert_eq!(normalize_ws_url("ws://already.ws", 18789), "ws://already.ws:18789");
     }
 
     #[test]
@@ -438,17 +428,12 @@ mod tests {
         let hello: HelloOk = serde_json::from_value(json).unwrap();
         assert_eq!(hello.protocol, Some(3));
         assert_eq!(hello.policy.as_ref().unwrap().tick_interval_ms, Some(30000));
-        assert_eq!(
-            hello.auth.as_ref().unwrap().device_token.as_deref(),
-            Some("tok123")
-        );
+        assert_eq!(hello.auth.as_ref().unwrap().device_token.as_deref(), Some("tok123"));
     }
 
     #[test]
     fn sessions_resolve_serializes() {
-        let params = SessionsResolveParams {
-            key: "sk-prev".into(),
-        };
+        let params = SessionsResolveParams { key: "sk-prev".into() };
         let json = serde_json::to_value(&params).unwrap();
         assert_eq!(json["key"], "sk-prev");
     }

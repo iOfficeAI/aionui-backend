@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
 use aionui_api_types::{
-    TeamAgentRemovedPayload, TeamAgentRenamedPayload, TeamAgentSpawnedPayload,
-    TeamAgentStatusPayload, WebSocketMessage,
+    TeamAgentRemovedPayload, TeamAgentRenamedPayload, TeamAgentSpawnedPayload, TeamAgentStatusPayload, WebSocketMessage,
 };
 use aionui_realtime::EventBroadcaster;
 
@@ -15,10 +14,7 @@ pub struct TeamEventEmitter {
 
 impl TeamEventEmitter {
     pub fn new(team_id: String, broadcaster: Arc<dyn EventBroadcaster>) -> Self {
-        Self {
-            team_id,
-            broadcaster,
-        }
+        Self { team_id, broadcaster }
     }
 
     pub fn team_id(&self) -> &str {
@@ -81,8 +77,7 @@ mod tests {
     use super::*;
     use crate::types::TeammateRole;
     use aionui_api_types::{
-        TeamAgentRemovedPayload, TeamAgentRenamedPayload, TeamAgentSpawnedPayload,
-        TeamAgentStatusPayload,
+        TeamAgentRemovedPayload, TeamAgentRenamedPayload, TeamAgentSpawnedPayload, TeamAgentStatusPayload,
     };
 
     struct RecordingBroadcaster {
@@ -122,8 +117,7 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].name, "team.agent.status");
 
-        let payload: TeamAgentStatusPayload =
-            serde_json::from_value(events[0].data.clone()).unwrap();
+        let payload: TeamAgentStatusPayload = serde_json::from_value(events[0].data.clone()).unwrap();
         assert_eq!(payload.team_id, "team-1");
         assert_eq!(payload.slot_id, "slot-1");
         assert_eq!(payload.status, "working");
@@ -150,8 +144,7 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].name, "team.agent.spawned");
 
-        let payload: TeamAgentSpawnedPayload =
-            serde_json::from_value(events[0].data.clone()).unwrap();
+        let payload: TeamAgentSpawnedPayload = serde_json::from_value(events[0].data.clone()).unwrap();
         assert_eq!(payload.team_id, "team-1");
         assert_eq!(payload.agent.slot_id, "slot-2");
         assert_eq!(payload.agent.name, "Worker");
@@ -167,8 +160,7 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].name, "team.agent.removed");
 
-        let payload: TeamAgentRemovedPayload =
-            serde_json::from_value(events[0].data.clone()).unwrap();
+        let payload: TeamAgentRemovedPayload = serde_json::from_value(events[0].data.clone()).unwrap();
         assert_eq!(payload.team_id, "team-1");
         assert_eq!(payload.slot_id, "slot-3");
     }
@@ -182,8 +174,7 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].name, "team.agent.renamed");
 
-        let payload: TeamAgentRenamedPayload =
-            serde_json::from_value(events[0].data.clone()).unwrap();
+        let payload: TeamAgentRenamedPayload = serde_json::from_value(events[0].data.clone()).unwrap();
         assert_eq!(payload.team_id, "team-1");
         assert_eq!(payload.slot_id, "slot-1");
         assert_eq!(payload.name, "New Name");
@@ -226,17 +217,9 @@ mod tests {
 
         let events = bc.events();
         assert_eq!(events.len(), 6);
-        let expected = [
-            "idle",
-            "working",
-            "thinking",
-            "tool_use",
-            "completed",
-            "error",
-        ];
+        let expected = ["idle", "working", "thinking", "tool_use", "completed", "error"];
         for (event, exp) in events.iter().zip(expected.iter()) {
-            let payload: TeamAgentStatusPayload =
-                serde_json::from_value(event.data.clone()).unwrap();
+            let payload: TeamAgentStatusPayload = serde_json::from_value(event.data.clone()).unwrap();
             assert_eq!(payload.status, *exp);
         }
     }

@@ -17,12 +17,11 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use aionui_db::{
-    SqliteClientPreferenceRepository, SqliteProviderRepository, SqliteSettingsRepository,
-    init_database_memory,
+    SqliteClientPreferenceRepository, SqliteProviderRepository, SqliteSettingsRepository, init_database_memory,
 };
 use aionui_system::{
-    ClientPrefService, ModelFetchService, ProtocolDetectionService, ProviderService,
-    SettingsService, SystemRouterState, VersionCheckService, system_routes,
+    ClientPrefService, ModelFetchService, ProtocolDetectionService, ProviderService, SettingsService,
+    SystemRouterState, VersionCheckService, system_routes,
 };
 
 // ---------------------------------------------------------------------------
@@ -31,19 +30,12 @@ use aionui_system::{
 
 const TEST_KEY: [u8; 32] = [0x42; 32];
 
-fn build_state(
-    db: &aionui_db::Database,
-    version_check_service: VersionCheckService,
-) -> SystemRouterState {
+fn build_state(db: &aionui_db::Database, version_check_service: VersionCheckService) -> SystemRouterState {
     let provider_repo = Arc::new(SqliteProviderRepository::new(db.pool().clone()));
     let http_client = reqwest::Client::new();
     SystemRouterState {
-        settings_service: SettingsService::new(Arc::new(SqliteSettingsRepository::new(
-            db.pool().clone(),
-        ))),
-        client_pref_service: ClientPrefService::new(Arc::new(
-            SqliteClientPreferenceRepository::new(db.pool().clone()),
-        )),
+        settings_service: SettingsService::new(Arc::new(SqliteSettingsRepository::new(db.pool().clone()))),
+        client_pref_service: ClientPrefService::new(Arc::new(SqliteClientPreferenceRepository::new(db.pool().clone()))),
         provider_service: ProviderService::new(provider_repo.clone(), TEST_KEY),
         model_fetch_service: ModelFetchService::new(provider_repo, TEST_KEY, http_client.clone()),
         protocol_detection_service: ProtocolDetectionService::new(http_client),
@@ -62,11 +54,7 @@ async fn setup() -> axum::Router {
 async fn setup_with_mock(current_version: &str, mock_server: &MockServer) -> axum::Router {
     let db = init_database_memory().await.unwrap();
     let http_client = reqwest::Client::new();
-    let vcs = VersionCheckService::with_api_base(
-        http_client,
-        current_version.to_owned(),
-        mock_server.uri(),
-    );
+    let vcs = VersionCheckService::with_api_base(http_client, current_version.to_owned(), mock_server.uri());
     let state = build_state(&db, vcs);
     system_routes(state)
 }
@@ -77,11 +65,7 @@ async fn body_json(resp: axum::response::Response) -> serde_json::Value {
 }
 
 fn get_request(uri: &str) -> Request<Body> {
-    Request::builder()
-        .method("GET")
-        .uri(uri)
-        .body(Body::empty())
-        .unwrap()
+    Request::builder().method("GET").uri(uri).body(Body::empty()).unwrap()
 }
 
 fn json_request(method_str: &str, uri: &str, body: serde_json::Value) -> Request<Body> {
@@ -93,12 +77,7 @@ fn json_request(method_str: &str, uri: &str, body: serde_json::Value) -> Request
         .unwrap()
 }
 
-fn make_github_release(
-    tag: &str,
-    draft: bool,
-    prerelease: bool,
-    assets: Vec<serde_json::Value>,
-) -> serde_json::Value {
+fn make_github_release(tag: &str, draft: bool, prerelease: bool, assets: Vec<serde_json::Value>) -> serde_json::Value {
     json!({
         "tag_name": tag,
         "name": format!("Release {tag}"),
@@ -325,18 +304,16 @@ async fn test_check_update_recommended_asset_matches_platform() {
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/repos/iOfficeAI/AionUi/releases"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(json!([make_github_release(
-                "v2.0.0",
-                false,
-                false,
-                vec![
-                    make_github_asset("app-2.0.0-win-x64.exe", 50_000_000),
-                    make_github_asset("app-2.0.0-darwin-arm64.dmg", 80_000_000),
-                    make_github_asset("app-2.0.0-linux-amd64.deb", 60_000_000),
-                ]
-            ),])),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([make_github_release(
+            "v2.0.0",
+            false,
+            false,
+            vec![
+                make_github_asset("app-2.0.0-win-x64.exe", 50_000_000),
+                make_github_asset("app-2.0.0-darwin-arm64.dmg", 80_000_000),
+                make_github_asset("app-2.0.0-linux-amd64.deb", 60_000_000),
+            ]
+        ),])))
         .mount(&mock_server)
         .await;
 
@@ -405,14 +382,12 @@ async fn test_check_update_custom_repo() {
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/repos/custom-org/custom-repo/releases"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(json!([make_github_release(
-                "v3.0.0",
-                false,
-                false,
-                vec![]
-            ),])),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([make_github_release(
+            "v3.0.0",
+            false,
+            false,
+            vec![]
+        ),])))
         .mount(&mock_server)
         .await;
 
@@ -460,14 +435,12 @@ async fn test_check_update_response_format() {
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/repos/iOfficeAI/AionUi/releases"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_json(json!([make_github_release(
-                "v2.0.0",
-                false,
-                false,
-                vec![make_github_asset("app.dmg", 100_000),]
-            ),])),
-        )
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([make_github_release(
+            "v2.0.0",
+            false,
+            false,
+            vec![make_github_asset("app.dmg", 100_000),]
+        ),])))
         .mount(&mock_server)
         .await;
 

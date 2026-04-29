@@ -41,14 +41,9 @@ impl EventBroadcaster for MockBroadcaster {
     }
 }
 
-async fn setup() -> (
-    PairingService,
-    Arc<dyn IChannelRepository>,
-    Arc<MockBroadcaster>,
-) {
+async fn setup() -> (PairingService, Arc<dyn IChannelRepository>, Arc<MockBroadcaster>) {
     let db = init_database_memory().await.unwrap();
-    let repo: Arc<dyn IChannelRepository> =
-        Arc::new(SqliteChannelRepository::new(db.pool().clone()));
+    let repo: Arc<dyn IChannelRepository> = Arc::new(SqliteChannelRepository::new(db.pool().clone()));
     let bc = Arc::new(MockBroadcaster::new());
     let svc = PairingService::new(repo.clone(), bc.clone());
     // Keep db alive by leaking — test process exits anyway
@@ -61,10 +56,7 @@ async fn setup() -> (
 #[tokio::test]
 async fn pg1_code_is_six_digits() {
     let (svc, _repo, _bc) = setup().await;
-    let code = svc
-        .request_pairing("u1", "telegram", Some("Alice"))
-        .await
-        .unwrap();
+    let code = svc.request_pairing("u1", "telegram", Some("Alice")).await.unwrap();
     assert_eq!(code.len(), PAIRING_CODE_LENGTH);
     assert!(code.chars().all(|c| c.is_ascii_digit()));
 }
@@ -89,14 +81,8 @@ async fn pg2_code_expires_after_ten_minutes() {
 #[tokio::test]
 async fn pg3_same_user_re_request_expires_old_code() {
     let (svc, repo, _bc) = setup().await;
-    let code1 = svc
-        .request_pairing("u1", "telegram", Some("Alice"))
-        .await
-        .unwrap();
-    let code2 = svc
-        .request_pairing("u1", "telegram", Some("Alice"))
-        .await
-        .unwrap();
+    let code1 = svc.request_pairing("u1", "telegram", Some("Alice")).await.unwrap();
+    let code2 = svc.request_pairing("u1", "telegram", Some("Alice")).await.unwrap();
 
     assert_ne!(code1, code2);
 
@@ -120,12 +106,8 @@ async fn pp1_no_pending_returns_empty() {
 #[tokio::test]
 async fn pp2_multiple_pending_returned() {
     let (svc, _repo, _bc) = setup().await;
-    svc.request_pairing("u1", "telegram", Some("Alice"))
-        .await
-        .unwrap();
-    svc.request_pairing("u2", "lark", Some("Bob"))
-        .await
-        .unwrap();
+    svc.request_pairing("u1", "telegram", Some("Alice")).await.unwrap();
+    svc.request_pairing("u2", "lark", Some("Bob")).await.unwrap();
 
     let pending = svc.get_pending_pairings().await.unwrap();
     assert_eq!(pending.len(), 2);
@@ -160,10 +142,7 @@ async fn pp3_expired_not_in_pending() {
 #[tokio::test]
 async fn ap1_approve_valid_pairing() {
     let (svc, repo, _bc) = setup().await;
-    let code = svc
-        .request_pairing("tg_42", "telegram", Some("Alice"))
-        .await
-        .unwrap();
+    let code = svc.request_pairing("tg_42", "telegram", Some("Alice")).await.unwrap();
 
     svc.approve_pairing(&code).await.unwrap();
 
@@ -177,10 +156,7 @@ async fn ap1_approve_valid_pairing() {
 #[tokio::test]
 async fn ap2_dc2_approved_user_in_authorized_list() {
     let (svc, repo, _bc) = setup().await;
-    let code = svc
-        .request_pairing("tg_42", "telegram", Some("Alice"))
-        .await
-        .unwrap();
+    let code = svc.request_pairing("tg_42", "telegram", Some("Alice")).await.unwrap();
     svc.approve_pairing(&code).await.unwrap();
 
     let users = repo.get_all_users().await.unwrap();
@@ -334,17 +310,11 @@ async fn dc3_same_platform_user_unique() {
     let (svc, _repo, _bc) = setup().await;
 
     // Approve first pairing
-    let code1 = svc
-        .request_pairing("tg_42", "telegram", Some("Alice"))
-        .await
-        .unwrap();
+    let code1 = svc.request_pairing("tg_42", "telegram", Some("Alice")).await.unwrap();
     svc.approve_pairing(&code1).await.unwrap();
 
     // Second pairing for same user should fail on user creation (unique constraint)
-    let code2 = svc
-        .request_pairing("tg_42", "telegram", Some("Alice"))
-        .await
-        .unwrap();
+    let code2 = svc.request_pairing("tg_42", "telegram", Some("Alice")).await.unwrap();
     let result = svc.approve_pairing(&code2).await;
     // DB should reject duplicate (platform_user_id, platform_type)
     assert!(result.is_err());
@@ -355,9 +325,7 @@ async fn dc3_same_platform_user_unique() {
 #[tokio::test]
 async fn ws1_pairing_request_broadcasts_event() {
     let (svc, _repo, bc) = setup().await;
-    svc.request_pairing("tg_42", "telegram", Some("Alice"))
-        .await
-        .unwrap();
+    svc.request_pairing("tg_42", "telegram", Some("Alice")).await.unwrap();
 
     let events = bc.take_events();
     assert_eq!(events.len(), 1);
@@ -374,10 +342,7 @@ async fn ws1_pairing_request_broadcasts_event() {
 #[tokio::test]
 async fn ws3_approve_broadcasts_user_authorized() {
     let (svc, _repo, bc) = setup().await;
-    let code = svc
-        .request_pairing("tg_42", "telegram", Some("Alice"))
-        .await
-        .unwrap();
+    let code = svc.request_pairing("tg_42", "telegram", Some("Alice")).await.unwrap();
     bc.take_events(); // clear request event
 
     svc.approve_pairing(&code).await.unwrap();
@@ -402,10 +367,7 @@ async fn is_user_authorized_false_before_approval() {
 #[tokio::test]
 async fn is_user_authorized_true_after_approval() {
     let (svc, _repo, _bc) = setup().await;
-    let code = svc
-        .request_pairing("tg_42", "telegram", None)
-        .await
-        .unwrap();
+    let code = svc.request_pairing("tg_42", "telegram", None).await.unwrap();
     svc.approve_pairing(&code).await.unwrap();
 
     assert!(svc.is_user_authorized("tg_42", "telegram").await.unwrap());
@@ -414,10 +376,7 @@ async fn is_user_authorized_true_after_approval() {
 #[tokio::test]
 async fn is_user_authorized_different_platform_false() {
     let (svc, _repo, _bc) = setup().await;
-    let code = svc
-        .request_pairing("tg_42", "telegram", None)
-        .await
-        .unwrap();
+    let code = svc.request_pairing("tg_42", "telegram", None).await.unwrap();
     svc.approve_pairing(&code).await.unwrap();
 
     // Same user ID but different platform

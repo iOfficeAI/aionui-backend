@@ -1,9 +1,8 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use aionui_cron::skill_file::{
-    ParsedSkillContent, build_skill_content, content_hash, cron_skill_dir, cron_skill_file_path,
-    parse_skill_content, read_skill_content, validate_skill_content, write_raw_skill_file,
-    write_skill_file,
+    ParsedSkillContent, build_skill_content, content_hash, cron_skill_dir, cron_skill_file_path, parse_skill_content,
+    read_skill_content, validate_skill_content, write_raw_skill_file, write_skill_file,
 };
 
 fn unique_temp_dir(label: &str) -> std::path::PathBuf {
@@ -11,10 +10,7 @@ fn unique_temp_dir(label: &str) -> std::path::PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    std::env::temp_dir().join(format!(
-        "aionui-cron-{label}-{}-{nanos}",
-        std::process::id()
-    ))
+    std::env::temp_dir().join(format!("aionui-cron-{label}-{}-{nanos}", std::process::id()))
 }
 
 #[test]
@@ -50,8 +46,7 @@ fn parse_skill_content_roundtrips_built_files() {
 
 #[test]
 fn parse_skill_content_skips_blank_lines_after_frontmatter() {
-    let parsed =
-        parse_skill_content("---\nname: Test\ndescription: Desc\n---\n\n\nPrompt").unwrap();
+    let parsed = parse_skill_content("---\nname: Test\ndescription: Desc\n---\n\n\nPrompt").unwrap();
     assert_eq!(parsed.body, "Prompt");
 }
 
@@ -63,10 +58,8 @@ fn parse_skill_content_handles_empty_body() {
 
 #[test]
 fn validate_skill_content_rejects_placeholders() {
-    let err = validate_skill_content(
-        "---\nname: skill-name\ndescription: Real description\n---\n\nReal body",
-    )
-    .unwrap_err();
+    let err =
+        validate_skill_content("---\nname: skill-name\ndescription: Real description\n---\n\nReal body").unwrap_err();
     assert!(err.to_string().contains("template placeholder"));
 }
 
@@ -115,19 +108,9 @@ async fn write_raw_skill_file_validates_before_writing() {
     let base = unique_temp_dir("write-raw");
     std::fs::create_dir_all(&base).unwrap();
 
-    let err = write_raw_skill_file(&base, "job-456", "not valid")
-        .await
-        .unwrap_err();
-    assert!(
-        err.to_string()
-            .contains("skill file must start with YAML frontmatter")
-    );
-    assert!(
-        read_skill_content(&base, "job-456")
-            .await
-            .unwrap()
-            .is_none()
-    );
+    let err = write_raw_skill_file(&base, "job-456", "not valid").await.unwrap_err();
+    assert!(err.to_string().contains("skill file must start with YAML frontmatter"));
+    assert!(read_skill_content(&base, "job-456").await.unwrap().is_none());
 
     std::fs::remove_dir_all(&base).unwrap();
 }

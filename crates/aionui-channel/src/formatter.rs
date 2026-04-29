@@ -21,8 +21,7 @@ pub fn format_text_for_platform(text: &str, platform: PluginType) -> String {
 
 // ── Telegram ─────────────────────────────────────────────────────
 
-static RE_CODE_BLOCK: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"```(?:\w*)\n?([\s\S]*?)```").unwrap());
+static RE_CODE_BLOCK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"```(?:\w*)\n?([\s\S]*?)```").unwrap());
 static RE_INLINE_CODE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"`([^`]+)`").unwrap());
 static RE_BOLD_STAR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\*\*(.+?)\*\*").unwrap());
 static RE_BOLD_UNDER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"__(.+?)__").unwrap());
@@ -44,18 +43,14 @@ fn markdown_to_telegram_html(text: &str) -> String {
 
 // ── Lark / DingTalk ──────────────────────────────────────────────
 
-static RE_PRE_CODE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"<pre><code[^>]*>([\s\S]*?)</code></pre>").unwrap());
-static RE_HTML_CODE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"<code>([^<]+)</code>").unwrap());
+static RE_PRE_CODE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<pre><code[^>]*>([\s\S]*?)</code></pre>").unwrap());
+static RE_HTML_CODE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<code>([^<]+)</code>").unwrap());
 static RE_HTML_B: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<b>([\s\S]*?)</b>").unwrap());
-static RE_HTML_STRONG: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"<strong>([\s\S]*?)</strong>").unwrap());
+static RE_HTML_STRONG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<strong>([\s\S]*?)</strong>").unwrap());
 static RE_HTML_I: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<i>([\s\S]*?)</i>").unwrap());
 static RE_HTML_EM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<em>([\s\S]*?)</em>").unwrap());
-static RE_HTML_SAFE_LINK: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"<a\s+href="((?:https?://|mailto:|/)[^"]*)"[^>]*>([^<]*)</a>"#).unwrap()
-});
+static RE_HTML_SAFE_LINK: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"<a\s+href="((?:https?://|mailto:|/)[^"]*)"[^>]*>([^<]*)</a>"#).unwrap());
 static RE_HTML_TAG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<[^>]+>").unwrap());
 
 fn html_to_markdown(text: &str) -> String {
@@ -81,9 +76,7 @@ fn strip_html(text: &str) -> String {
 // ── Helpers ──────────────────────────────────────────────────────
 
 fn escape_html(text: &str) -> String {
-    text.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
+    text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
 }
 
 fn strip_tags_loop(text: &str) -> String {

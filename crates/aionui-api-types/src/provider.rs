@@ -275,10 +275,7 @@ mod tests {
 
     #[test]
     fn test_model_type_serialization() {
-        assert_eq!(
-            serde_json::to_string(&ModelType::Text).unwrap(),
-            r#""text""#
-        );
+        assert_eq!(serde_json::to_string(&ModelType::Text).unwrap(), r#""text""#);
         assert_eq!(
             serde_json::to_string(&ModelType::FunctionCalling).unwrap(),
             r#""function_calling""#
@@ -336,18 +333,12 @@ mod tests {
 
     #[test]
     fn test_health_status_serialization() {
-        assert_eq!(
-            serde_json::to_string(&HealthStatus::Healthy).unwrap(),
-            r#""healthy""#
-        );
+        assert_eq!(serde_json::to_string(&HealthStatus::Healthy).unwrap(), r#""healthy""#);
         assert_eq!(
             serde_json::to_string(&HealthStatus::Unhealthy).unwrap(),
             r#""unhealthy""#
         );
-        assert_eq!(
-            serde_json::to_string(&HealthStatus::Unknown).unwrap(),
-            r#""unknown""#
-        );
+        assert_eq!(serde_json::to_string(&HealthStatus::Unknown).unwrap(), r#""unknown""#);
     }
 
     #[test]
@@ -560,14 +551,8 @@ mod tests {
             req.model_protocols.as_ref().unwrap().get("gpt-4"),
             Some(&"openai".to_string())
         );
-        assert_eq!(
-            req.model_enabled.as_ref().unwrap().get("gpt-4"),
-            Some(&true)
-        );
-        assert_eq!(
-            req.model_enabled.as_ref().unwrap().get("gpt-3.5"),
-            Some(&false)
-        );
+        assert_eq!(req.model_enabled.as_ref().unwrap().get("gpt-4"), Some(&true));
+        assert_eq!(req.model_enabled.as_ref().unwrap().get("gpt-3.5"), Some(&false));
         let health = req.model_health.as_ref().unwrap().get("gpt-4").unwrap();
         assert_eq!(health.status, HealthStatus::Healthy);
         assert_eq!(health.latency, Some(320));
@@ -685,8 +670,7 @@ mod tests {
 
     #[test]
     fn test_model_info_named() {
-        let info: ModelInfo =
-            serde_json::from_value(json!({"id": "gpt-4", "name": "GPT-4"})).unwrap();
+        let info: ModelInfo = serde_json::from_value(json!({"id": "gpt-4", "name": "GPT-4"})).unwrap();
         assert_eq!(
             info,
             ModelInfo::Named {
@@ -765,10 +749,7 @@ mod tests {
 
     #[test]
     fn test_suggestion_type_serialization() {
-        assert_eq!(
-            serde_json::to_string(&SuggestionType::None).unwrap(),
-            r#""none""#
-        );
+        assert_eq!(serde_json::to_string(&SuggestionType::None).unwrap(), r#""none""#);
         assert_eq!(
             serde_json::to_string(&SuggestionType::CheckKey).unwrap(),
             r#""check_key""#

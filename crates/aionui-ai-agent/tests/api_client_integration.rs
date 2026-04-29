@@ -40,9 +40,7 @@ async fn mock_handler(State(state): State<MockState>) -> impl IntoResponse {
 
 /// Spin up a mock HTTP server that returns the given responses in order.
 /// Returns (base_url, call_count_handle).
-async fn start_mock_server(
-    responses: Vec<(StatusCode, serde_json::Value)>,
-) -> (String, Arc<AtomicUsize>) {
+async fn start_mock_server(responses: Vec<(StatusCode, serde_json::Value)>) -> (String, Arc<AtomicUsize>) {
     let call_count = Arc::new(AtomicUsize::new(0));
     let state = MockState {
         responses: Arc::new(responses),
@@ -92,10 +90,7 @@ async fn multiple_keys_parsed_correctly() {
 #[tokio::test]
 async fn key_rotation_on_401() {
     let (url, call_count) = start_mock_server(vec![
-        (
-            StatusCode::UNAUTHORIZED,
-            json!({ "error": "invalid_api_key" }),
-        ),
+        (StatusCode::UNAUTHORIZED, json!({ "error": "invalid_api_key" })),
         (StatusCode::OK, json!({ "result": "success" })),
     ])
     .await;
@@ -115,10 +110,7 @@ async fn key_rotation_on_401() {
 #[tokio::test]
 async fn key_rotation_on_429() {
     let (url, call_count) = start_mock_server(vec![
-        (
-            StatusCode::TOO_MANY_REQUESTS,
-            json!({ "error": "rate_limited" }),
-        ),
+        (StatusCode::TOO_MANY_REQUESTS, json!({ "error": "rate_limited" })),
         (StatusCode::OK, json!({ "data": "ok" })),
     ])
     .await;
@@ -136,11 +128,7 @@ async fn key_rotation_on_429() {
 
 #[tokio::test]
 async fn all_keys_exhausted_returns_error() {
-    let (url, _) = start_mock_server(vec![(
-        StatusCode::UNAUTHORIZED,
-        json!({ "error": "bad key" }),
-    )])
-    .await;
+    let (url, _) = start_mock_server(vec![(StatusCode::UNAUTHORIZED, json!({ "error": "bad key" }))]).await;
 
     // Single key, blacklisted after first failure
     let km = Arc::new(ApiKeyManager::new("sk-only", None));
@@ -163,18 +151,9 @@ async fn all_keys_exhausted_returns_error() {
 #[tokio::test]
 async fn max_retries_exceeded() {
     let (url, call_count) = start_mock_server(vec![
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            json!({ "error": "server error" }),
-        ),
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            json!({ "error": "still broken" }),
-        ),
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            json!({ "error": "still broken" }),
-        ),
+        (StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": "server error" })),
+        (StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": "still broken" })),
+        (StatusCode::INTERNAL_SERVER_ERROR, json!({ "error": "still broken" })),
     ])
     .await;
 
@@ -193,11 +172,7 @@ async fn max_retries_exceeded() {
 
 #[tokio::test]
 async fn non_retryable_error_returns_immediately() {
-    let (url, call_count) = start_mock_server(vec![(
-        StatusCode::BAD_REQUEST,
-        json!({ "error": "bad request" }),
-    )])
-    .await;
+    let (url, call_count) = start_mock_server(vec![(StatusCode::BAD_REQUEST, json!({ "error": "bad request" }))]).await;
 
     let km = Arc::new(ApiKeyManager::new("sk-test", None));
     let client = OpenAIRotatingClient::new(km, &url, Some(3), Some(10));

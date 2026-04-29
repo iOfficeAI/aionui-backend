@@ -7,10 +7,9 @@ use axum::routing::{get, post};
 use tracing::warn;
 
 use aionui_api_types::{
-    ApiResponse, ApprovePairingRequest, BridgeResponse, ChannelSessionResponse,
-    ChannelUserResponse, DisablePluginRequest, EnablePluginRequest, PairingRequestResponse,
-    PluginStatusResponse, RejectPairingRequest, RevokeUserRequest, SyncChannelSettingsRequest,
-    TestPluginRequest, TestPluginResponse,
+    ApiResponse, ApprovePairingRequest, BridgeResponse, ChannelSessionResponse, ChannelUserResponse,
+    DisablePluginRequest, EnablePluginRequest, PairingRequestResponse, PluginStatusResponse, RejectPairingRequest,
+    RevokeUserRequest, SyncChannelSettingsRequest, TestPluginRequest, TestPluginResponse,
 };
 use aionui_common::AppError;
 use aionui_db::IChannelRepository;
@@ -255,10 +254,7 @@ async fn revoke_user(
     let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
 
     // Clean up sessions first
-    state
-        .session_manager
-        .cleanup_user_sessions(&req.user_id)
-        .await?;
+    state.session_manager.cleanup_user_sessions(&req.user_id).await?;
 
     // Delete user record
     state.repo.delete_user(&req.user_id).await?;
@@ -328,9 +324,7 @@ async fn sync_channel_settings(
 
 /// `GET /api/channel/weixin/login` — start WeChat QR code login SSE stream.
 #[cfg(feature = "weixin")]
-async fn weixin_login_sse(
-    State(_state): State<ChannelRouterState>,
-) -> impl axum::response::IntoResponse {
+async fn weixin_login_sse(State(_state): State<ChannelRouterState>) -> impl axum::response::IntoResponse {
     use std::convert::Infallible;
 
     use axum::response::sse::{Event, KeepAlive, Sse};
@@ -342,18 +336,15 @@ async fn weixin_login_sse(
 
     let rx = weixin_login_stream();
 
-    let sse_stream =
-        futures_util::stream::unfold(rx, |mut rx: mpsc::Receiver<WeixinLoginEvent>| async move {
-            match rx.recv().await {
-                Some(event) => {
-                    let sse_event = Event::default()
-                        .event(event.event_name())
-                        .data(event.to_json_data());
-                    Some((Ok::<_, Infallible>(sse_event), rx))
-                }
-                None => None,
+    let sse_stream = futures_util::stream::unfold(rx, |mut rx: mpsc::Receiver<WeixinLoginEvent>| async move {
+        match rx.recv().await {
+            Some(event) => {
+                let sse_event = Event::default().event(event.event_name()).data(event.to_json_data());
+                Some((Ok::<_, Infallible>(sse_event), rx))
             }
-        });
+            None => None,
+        }
+    });
 
     Sse::new(sse_stream).keep_alive(KeepAlive::default())
 }
@@ -459,14 +450,8 @@ mod tests {
             }),
         };
         let config = build_test_config(&req);
-        assert_eq!(
-            config.credentials.client_id.as_deref(),
-            Some("client_id_123")
-        );
-        assert_eq!(
-            config.credentials.client_secret.as_deref(),
-            Some("client_secret_456")
-        );
+        assert_eq!(config.credentials.client_id.as_deref(), Some("client_id_123"));
+        assert_eq!(config.credentials.client_secret.as_deref(), Some("client_secret_456"));
     }
 
     #[test]
@@ -480,13 +465,7 @@ mod tests {
             }),
         };
         let config = build_test_config(&req);
-        assert_eq!(
-            config.credentials.bot_token.as_deref(),
-            Some("bot_token_xyz")
-        );
-        assert_eq!(
-            config.credentials.account_id.as_deref(),
-            Some("account_abc")
-        );
+        assert_eq!(config.credentials.bot_token.as_deref(), Some("bot_token_xyz"));
+        assert_eq!(config.credentials.account_id.as_deref(), Some("account_abc"));
     }
 }

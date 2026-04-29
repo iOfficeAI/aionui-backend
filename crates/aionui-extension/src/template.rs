@@ -56,16 +56,12 @@ pub fn resolve_file_reference(value: &str, ext_dir: &Path) -> Result<String, Ext
     };
 
     if rel_path.is_empty() {
-        return Err(ExtensionError::FileReferenceNotFound(
-            "@file: with empty path".into(),
-        ));
+        return Err(ExtensionError::FileReferenceNotFound("@file: with empty path".into()));
     }
 
     let full_path = ext_dir.join(rel_path);
     if !full_path.exists() {
-        return Err(ExtensionError::FileReferenceNotFound(
-            full_path.display().to_string(),
-        ));
+        return Err(ExtensionError::FileReferenceNotFound(full_path.display().to_string()));
     }
 
     // Canonicalize both paths to resolve symlinks and `..` components,
@@ -133,9 +129,7 @@ mod tests {
     #[test]
     fn test_undefined_strict_returns_error() {
         let err = resolve_env_templates("${_NONEXISTENT_VAR_456}", true).unwrap_err();
-        assert!(
-            matches!(err, ExtensionError::UndefinedEnvVariable(ref v) if v == "_NONEXISTENT_VAR_456")
-        );
+        assert!(matches!(err, ExtensionError::UndefinedEnvVariable(ref v) if v == "_NONEXISTENT_VAR_456"));
     }
 
     #[test]
@@ -181,8 +175,7 @@ mod tests {
 
     #[test]
     fn test_file_reference_not_found() {
-        let err = resolve_file_reference("@file:nonexistent.md", Path::new("/tmp/no_such_ext"))
-            .unwrap_err();
+        let err = resolve_file_reference("@file:nonexistent.md", Path::new("/tmp/no_such_ext")).unwrap_err();
         assert!(matches!(err, ExtensionError::FileReferenceNotFound(_)));
     }
 
@@ -201,8 +194,7 @@ mod tests {
         let outside_file = std::env::temp_dir().join("ext_test_traversal_secret.txt");
         std::fs::write(&outside_file, "secret data").unwrap();
 
-        let err =
-            resolve_file_reference("@file:../ext_test_traversal_secret.txt", &dir).unwrap_err();
+        let err = resolve_file_reference("@file:../ext_test_traversal_secret.txt", &dir).unwrap_err();
         assert!(matches!(err, ExtensionError::PathTraversal(_)));
 
         std::fs::remove_dir_all(&dir).unwrap();
@@ -218,8 +210,7 @@ mod tests {
         let outside_file = std::env::temp_dir().join("ext_test_nested_secret.txt");
         std::fs::write(&outside_file, "nested secret").unwrap();
 
-        let err =
-            resolve_file_reference("@file:sub/../../ext_test_nested_secret.txt", &dir).unwrap_err();
+        let err = resolve_file_reference("@file:sub/../../ext_test_nested_secret.txt", &dir).unwrap_err();
         assert!(matches!(err, ExtensionError::PathTraversal(_)));
 
         std::fs::remove_dir_all(&dir).unwrap();

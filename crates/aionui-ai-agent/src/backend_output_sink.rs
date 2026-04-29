@@ -6,8 +6,8 @@ use tokio::sync::broadcast;
 use uuid::Uuid;
 
 use crate::stream_event::{
-    AgentStreamEvent, ErrorEventData, FinishEventData, StartEventData, TextEventData,
-    ThinkingEventData, TipType, TipsEventData, ToolCallEventData, ToolCallStatus,
+    AgentStreamEvent, ErrorEventData, FinishEventData, StartEventData, TextEventData, ThinkingEventData, TipType,
+    TipsEventData, ToolCallEventData, ToolCallStatus,
 };
 
 pub struct BackendOutputSink {
@@ -32,19 +32,16 @@ impl OutputSink for BackendOutputSink {
     }
 
     fn emit_thinking(&self, text: &str, _msg_id: &str) {
-        let _ = self
-            .event_tx
-            .send(AgentStreamEvent::Thinking(ThinkingEventData {
-                content: text.to_owned(),
-                subject: None,
-                duration: None,
-                status: None,
-            }));
+        let _ = self.event_tx.send(AgentStreamEvent::Thinking(ThinkingEventData {
+            content: text.to_owned(),
+            subject: None,
+            duration: None,
+            status: None,
+        }));
     }
 
     fn emit_tool_call(&self, name: &str, input: &str) {
-        let parsed_input =
-            serde_json::from_str(input).unwrap_or(serde_json::Value::String(input.to_owned()));
+        let parsed_input = serde_json::from_str(input).unwrap_or(serde_json::Value::String(input.to_owned()));
         let call_id = format!("aionrs-{}", Uuid::now_v7());
 
         self.active_calls
@@ -52,17 +49,15 @@ impl OutputSink for BackendOutputSink {
             .unwrap()
             .insert(name.to_owned(), call_id.clone());
 
-        let _ = self
-            .event_tx
-            .send(AgentStreamEvent::ToolCall(ToolCallEventData {
-                call_id,
-                name: name.to_owned(),
-                args: parsed_input.clone(),
-                status: ToolCallStatus::Running,
-                input: Some(parsed_input),
-                output: None,
-                description: None,
-            }));
+        let _ = self.event_tx.send(AgentStreamEvent::ToolCall(ToolCallEventData {
+            call_id,
+            name: name.to_owned(),
+            args: parsed_input.clone(),
+            status: ToolCallStatus::Running,
+            input: Some(parsed_input),
+            output: None,
+            description: None,
+        }));
     }
 
     fn emit_tool_result(&self, name: &str, is_error: bool, content: &str) {
@@ -72,28 +67,21 @@ impl OutputSink for BackendOutputSink {
             ToolCallStatus::Completed
         };
 
-        let call_id = self
-            .active_calls
-            .lock()
-            .unwrap()
-            .remove(name)
-            .unwrap_or_default();
+        let call_id = self.active_calls.lock().unwrap().remove(name).unwrap_or_default();
 
-        let _ = self
-            .event_tx
-            .send(AgentStreamEvent::ToolCall(ToolCallEventData {
-                call_id,
-                name: name.to_owned(),
-                args: serde_json::Value::Null,
-                status,
-                input: None,
-                output: if content.is_empty() {
-                    None
-                } else {
-                    Some(content.to_owned())
-                },
-                description: None,
-            }));
+        let _ = self.event_tx.send(AgentStreamEvent::ToolCall(ToolCallEventData {
+            call_id,
+            name: name.to_owned(),
+            args: serde_json::Value::Null,
+            status,
+            input: None,
+            output: if content.is_empty() {
+                None
+            } else {
+                Some(content.to_owned())
+            },
+            description: None,
+        }));
     }
 
     fn emit_stream_start(&self, _msg_id: &str) {
@@ -113,9 +101,7 @@ impl OutputSink for BackendOutputSink {
     ) {
         let _ = self
             .event_tx
-            .send(AgentStreamEvent::Finish(FinishEventData {
-                session_id: None,
-            }));
+            .send(AgentStreamEvent::Finish(FinishEventData { session_id: None }));
     }
 
     fn emit_error(&self, msg: &str) {

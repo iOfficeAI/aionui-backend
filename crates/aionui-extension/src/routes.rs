@@ -6,9 +6,8 @@ use axum::extract::{Json, State};
 use axum::routing::{get, post};
 
 use aionui_api_types::{
-    ApiResponse, DisableExtensionRequest, EnableExtensionRequest, ExtensionSummaryResponse,
-    GetI18nRequest, GetPermissionsRequest, GetRiskLevelRequest, PermissionDetailResponse,
-    PermissionSummaryResponse,
+    ApiResponse, DisableExtensionRequest, EnableExtensionRequest, ExtensionSummaryResponse, GetI18nRequest,
+    GetPermissionsRequest, GetRiskLevelRequest, PermissionDetailResponse, PermissionSummaryResponse,
 };
 use aionui_common::AppError;
 

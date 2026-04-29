@@ -39,10 +39,7 @@ fn serial() -> MutexGuard<'static, ()> {
 ///
 /// Returns the Arc-wrapped manager and a pre-subscribed event receiver
 /// (subscribed BEFORE the relay starts, so no events are missed).
-async fn make_mock_agent(
-    script: &str,
-    backend: &str,
-) -> (Arc<AcpAgentManager>, broadcast::Receiver<AgentStreamEvent>) {
+async fn make_mock_agent(script: &str, backend: &str) -> (Arc<AcpAgentManager>, broadcast::Receiver<AgentStreamEvent>) {
     let temp_dir = std::env::temp_dir();
     let script_path = temp_dir.join(format!(
         "mock_acp_{}_{}.sh",
@@ -221,18 +218,10 @@ async fn acp_agent_receives_stream_events() {
     // Wait for finish event, collecting all events along the way
     let events = wait_for_event(&mut rx, |e| matches!(e, AgentStreamEvent::Finish(_))).await;
 
-    assert!(
-        events.len() >= 2,
-        "Expected at least 2 events, got {}",
-        events.len()
-    );
+    assert!(events.len() >= 2, "Expected at least 2 events, got {}", events.len());
 
-    let has_start = events
-        .iter()
-        .any(|e| matches!(e, AgentStreamEvent::Start(_)));
-    let has_text = events
-        .iter()
-        .any(|e| matches!(e, AgentStreamEvent::Text(_)));
+    let has_start = events.iter().any(|e| matches!(e, AgentStreamEvent::Start(_)));
+    let has_text = events.iter().any(|e| matches!(e, AgentStreamEvent::Text(_)));
 
     assert!(has_start, "Should have received Start event");
     assert!(has_text, "Should have received Text event");
@@ -318,14 +307,11 @@ async fn acp_agent_model_info_captured() {
 #[ignore = "requires JSON-RPC mock agent"]
 async fn acp_agent_kill_terminates_process() {
     let _guard = serial();
-    let (agent, _rx) =
-        make_mock_agent(r#"trap '' TERM; while true; do sleep 1; done"#, "claude").await;
+    let (agent, _rx) = make_mock_agent(r#"trap '' TERM; while true; do sleep 1; done"#, "claude").await;
 
     assert!(agent.last_activity_at() > 0);
 
-    agent
-        .kill(Some(aionui_common::AgentKillReason::IdleTimeout))
-        .unwrap();
+    agent.kill(Some(aionui_common::AgentKillReason::IdleTimeout)).unwrap();
 
     tokio::time::sleep(Duration::from_millis(1000)).await;
 }
@@ -393,18 +379,10 @@ async fn acp_agent_multiple_event_types() {
 
     let events = wait_for_event(&mut rx, |e| matches!(e, AgentStreamEvent::Finish(_))).await;
 
-    assert!(
-        events.len() >= 4,
-        "Expected 4+ events, got {}",
-        events.len()
-    );
+    assert!(events.len() >= 4, "Expected 4+ events, got {}", events.len());
 
-    assert!(
-        matches!(&events[0], AgentStreamEvent::Start(d) if d.session_id == Some("sess-multi".into()))
-    );
+    assert!(matches!(&events[0], AgentStreamEvent::Start(d) if d.session_id == Some("sess-multi".into())));
     assert!(matches!(&events[1], AgentStreamEvent::Thinking(d) if d.content == "Analyzing..."));
     assert!(matches!(&events[2], AgentStreamEvent::Text(d) if d.content == "Result"));
-    assert!(
-        matches!(&events[3], AgentStreamEvent::Finish(d) if d.session_id == Some("sess-multi".into()))
-    );
+    assert!(matches!(&events[3], AgentStreamEvent::Finish(d) if d.session_id == Some("sess-multi".into())));
 }

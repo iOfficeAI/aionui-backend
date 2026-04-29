@@ -3,9 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
-use aionui_common::{
-    AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, TimestampMs, now_ms,
-};
+use aionui_common::{AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, TimestampMs, now_ms};
 use serde_json::{Value, json};
 use tokio::sync::{Mutex, RwLock, broadcast};
 use tracing::{debug, error, info, warn};
@@ -20,8 +18,8 @@ use super::connection::{AuthConfig, OpenClawConnection};
 use super::device_identity::load_or_create_identity;
 use super::event_mapper::{TextFallbackState, map_openclaw_event};
 use super::protocol::{
-    ChatAbortParams, ChatSendParams, SessionsResetParams, SessionsResetResponse,
-    SessionsResolveParams, SessionsResolveResponse, normalize_ws_url,
+    ChatAbortParams, ChatSendParams, SessionsResetParams, SessionsResetResponse, SessionsResolveParams,
+    SessionsResolveResponse, normalize_ws_url,
 };
 
 use aionui_common::{CommandSpec, EnvVar};
@@ -96,10 +94,7 @@ impl OpenClawAgentManager {
 
                 Some(process)
             } else {
-                debug!(
-                    port = port,
-                    "OpenClaw gateway already listening, skipping spawn"
-                );
+                debug!(port = port, "OpenClaw gateway already listening, skipping spawn");
                 None
             }
         } else {
@@ -116,8 +111,7 @@ impl OpenClawAgentManager {
             .clone()
             .or_else(|| super::config::get_gateway_auth_token(file_config.as_ref()))
             .or_else(|| {
-                super::device_auth_store::load_device_auth_token(&identity.device_id, "operator")
-                    .map(|e| e.token)
+                super::device_auth_store::load_device_auth_token(&identity.device_id, "operator").map(|e| e.token)
             });
         let password = config
             .gateway
@@ -264,11 +258,7 @@ impl OpenClawAgentManager {
             AgentStreamEvent::AcpPermission(data) => {
                 if let Some(conf) = data.as_confirmation() {
                     let mut guard = self.state.write().await;
-                    if let Some(existing) = guard
-                        .confirmations
-                        .iter_mut()
-                        .find(|c| c.call_id == conf.call_id)
-                    {
+                    if let Some(existing) = guard.confirmations.iter_mut().find(|c| c.call_id == conf.call_id) {
                         *existing = conf;
                     } else {
                         guard.confirmations.push(conf);
@@ -304,10 +294,7 @@ impl OpenClawAgentManager {
         };
 
         self.connection
-            .request::<Value>(
-                "chat.send",
-                serde_json::to_value(params).unwrap_or_default(),
-            )
+            .request::<Value>("chat.send", serde_json::to_value(params).unwrap_or_default())
             .await?;
 
         Ok(())
@@ -323,8 +310,7 @@ impl OpenClawAgentManager {
                 .connection
                 .request::<SessionsResolveResponse>(
                     "sessions.resolve",
-                    serde_json::to_value(SessionsResolveParams { key: key.clone() })
-                        .unwrap_or_default(),
+                    serde_json::to_value(SessionsResolveParams { key: key.clone() }).unwrap_or_default(),
                 )
                 .await
             {
@@ -437,15 +423,17 @@ impl IAgentManager for OpenClawAgentManager {
                 error = %e,
                 "OpenClaw send_message failed, emitting Error+Finish"
             );
-            let _ = self.event_tx.send(AgentStreamEvent::Error(
-                crate::stream_event::ErrorEventData {
+            let _ = self
+                .event_tx
+                .send(AgentStreamEvent::Error(crate::stream_event::ErrorEventData {
                     message: format!("OpenClaw send failed: {e}"),
                     code: None,
-                },
-            ));
-            let _ = self.event_tx.send(AgentStreamEvent::Finish(
-                crate::stream_event::FinishEventData { session_id: None },
-            ));
+                }));
+            let _ = self
+                .event_tx
+                .send(AgentStreamEvent::Finish(crate::stream_event::FinishEventData {
+                    session_id: None,
+                }));
         }
         result
     }
@@ -459,10 +447,7 @@ impl IAgentManager for OpenClawAgentManager {
             };
             let _ = self
                 .connection
-                .request::<Value>(
-                    "chat.abort",
-                    serde_json::to_value(params).unwrap_or_default(),
-                )
+                .request::<Value>("chat.abort", serde_json::to_value(params).unwrap_or_default())
                 .await;
         }
 
@@ -487,32 +472,22 @@ impl IAgentManager for OpenClawAgentManager {
                     conversation_id = %conversation_id,
                     "Gateway did not send abort event within timeout, emitting fallback Finish"
                 );
-                let _ = event_tx.send(AgentStreamEvent::Error(
-                    crate::stream_event::ErrorEventData {
-                        message: "Stopped by user".into(),
-                        code: None,
-                    },
-                ));
-                let _ = event_tx.send(AgentStreamEvent::Finish(
-                    crate::stream_event::FinishEventData { session_id: None },
-                ));
+                let _ = event_tx.send(AgentStreamEvent::Error(crate::stream_event::ErrorEventData {
+                    message: "Stopped by user".into(),
+                    code: None,
+                }));
+                let _ = event_tx.send(AgentStreamEvent::Finish(crate::stream_event::FinishEventData {
+                    session_id: None,
+                }));
             }
         });
 
         Ok(())
     }
 
-    fn confirm(
-        &self,
-        _msg_id: &str,
-        call_id: &str,
-        _data: Value,
-        always_allow: bool,
-    ) -> Result<(), AppError> {
+    fn confirm(&self, _msg_id: &str, call_id: &str, _data: Value, always_allow: bool) -> Result<(), AppError> {
         if let Ok(mut state) = self.state.try_write() {
-            if always_allow
-                && let Some(conf) = state.confirmations.iter().find(|c| c.call_id == call_id)
-            {
+            if always_allow && let Some(conf) = state.confirmations.iter().find(|c| c.call_id == call_id) {
                 let key = approval_key(conf.action.as_deref(), conf.command_type.as_deref());
                 state.approval_memory.insert(key, true);
             }
@@ -521,21 +496,14 @@ impl IAgentManager for OpenClawAgentManager {
 
         let connection = Arc::clone(&self.connection);
         let call_id = call_id.to_owned();
-        let option_id = if always_allow {
-            "allow_always"
-        } else {
-            "allow_once"
-        };
+        let option_id = if always_allow { "allow_always" } else { "allow_once" };
         let option_id = option_id.to_owned();
         tokio::spawn(async move {
             let params = json!({
                 "requestId": call_id,
                 "optionId": option_id,
             });
-            if let Err(e) = connection
-                .request::<Value>("exec.approval.respond", params)
-                .await
-            {
+            if let Err(e) = connection.request::<Value>("exec.approval.respond", params).await {
                 warn!(error = %e, "Failed to send OpenClaw approval response");
             }
         });
@@ -586,10 +554,7 @@ impl IAgentManager for OpenClawAgentManager {
     }
 
     fn get_session_key(&self) -> Option<String> {
-        self.state
-            .try_read()
-            .ok()
-            .and_then(|g| g.session_key.clone())
+        self.state.try_read().ok().and_then(|g| g.session_key.clone())
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -597,11 +562,7 @@ impl IAgentManager for OpenClawAgentManager {
     }
 }
 
-fn build_spawn_config(
-    cli_path: &str,
-    workspace: &str,
-    gateway: &OpenClawGatewayConfig,
-) -> CommandSpec {
+fn build_spawn_config(cli_path: &str, workspace: &str, gateway: &OpenClawGatewayConfig) -> CommandSpec {
     let host = gateway.host.as_deref().unwrap_or("127.0.0.1");
     let port = gateway.port.unwrap_or(DEFAULT_GATEWAY_PORT);
 
@@ -665,11 +626,7 @@ mod tests {
     }
 
     fn env_val<'a>(config: &'a CommandSpec, name: &str) -> Option<&'a str> {
-        config
-            .env
-            .iter()
-            .find(|e| e.name == name)
-            .map(|e| e.value.as_str())
+        config.env.iter().find(|e| e.name == name).map(|e| e.value.as_str())
     }
 
     #[test]
@@ -684,10 +641,7 @@ mod tests {
         };
         let config = build_spawn_config("/usr/bin/openclaw", "/proj", &gateway);
         assert_eq!(config.command.to_str().unwrap(), "/usr/bin/openclaw");
-        assert_eq!(
-            env_val(&config, "OPENCLAW_GATEWAY_HOST").unwrap(),
-            "127.0.0.1"
-        );
+        assert_eq!(env_val(&config, "OPENCLAW_GATEWAY_HOST").unwrap(), "127.0.0.1");
         assert_eq!(env_val(&config, "OPENCLAW_GATEWAY_PORT").unwrap(), "18789");
         assert!(env_val(&config, "OPENCLAW_GATEWAY_TOKEN").is_none());
     }
@@ -703,19 +657,10 @@ mod tests {
             cli_path: Some("/usr/bin/openclaw".into()),
         };
         let config = build_spawn_config("/usr/bin/openclaw", "/proj", &gateway);
-        assert_eq!(
-            env_val(&config, "OPENCLAW_GATEWAY_HOST").unwrap(),
-            "remote.host"
-        );
+        assert_eq!(env_val(&config, "OPENCLAW_GATEWAY_HOST").unwrap(), "remote.host");
         assert_eq!(env_val(&config, "OPENCLAW_GATEWAY_PORT").unwrap(), "9999");
-        assert_eq!(
-            env_val(&config, "OPENCLAW_GATEWAY_TOKEN").unwrap(),
-            "secret"
-        );
-        assert_eq!(
-            env_val(&config, "OPENCLAW_GATEWAY_PASSWORD").unwrap(),
-            "pass"
-        );
+        assert_eq!(env_val(&config, "OPENCLAW_GATEWAY_TOKEN").unwrap(), "secret");
+        assert_eq!(env_val(&config, "OPENCLAW_GATEWAY_PASSWORD").unwrap(), "pass");
     }
 
     #[test]

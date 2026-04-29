@@ -19,8 +19,7 @@ pub fn camel_to_snake(input: &str) -> String {
     let chars: Vec<char> = input.chars().collect();
     for (i, &c) in chars.iter().enumerate() {
         if c.is_ascii_uppercase() {
-            let prev_is_lower_or_digit =
-                i > 0 && (chars[i - 1].is_ascii_lowercase() || chars[i - 1].is_ascii_digit());
+            let prev_is_lower_or_digit = i > 0 && (chars[i - 1].is_ascii_lowercase() || chars[i - 1].is_ascii_digit());
             let next_is_lower = chars.get(i + 1).is_some_and(|n| n.is_ascii_lowercase());
             let prev_is_upper = i > 0 && chars[i - 1].is_ascii_uppercase();
             if prev_is_lower_or_digit || (prev_is_upper && next_is_lower) {

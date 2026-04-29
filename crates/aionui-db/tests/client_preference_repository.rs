@@ -4,9 +4,7 @@
 
 use std::sync::Arc;
 
-use aionui_db::{
-    IClientPreferenceRepository, SqliteClientPreferenceRepository, init_database_memory,
-};
+use aionui_db::{IClientPreferenceRepository, SqliteClientPreferenceRepository, init_database_memory};
 
 async fn repo() -> Arc<dyn IClientPreferenceRepository> {
     let db = init_database_memory().await.unwrap();
@@ -61,9 +59,7 @@ async fn upsert_empty_batch_is_noop() {
 #[tokio::test]
 async fn get_by_keys_returns_only_matching() {
     let r = repo().await;
-    r.upsert_batch(&[("a", "1"), ("b", "2"), ("c", "3")])
-        .await
-        .unwrap();
+    r.upsert_batch(&[("a", "1"), ("b", "2"), ("c", "3")]).await.unwrap();
 
     let prefs = r.get_by_keys(&["a", "c"]).await.unwrap();
     assert_eq!(prefs.len(), 2);
@@ -97,9 +93,7 @@ async fn get_by_keys_empty_input_returns_empty() {
 #[tokio::test]
 async fn delete_keys_removes_specified_entries() {
     let r = repo().await;
-    r.upsert_batch(&[("a", "1"), ("b", "2"), ("c", "3")])
-        .await
-        .unwrap();
+    r.upsert_batch(&[("a", "1"), ("b", "2"), ("c", "3")]).await.unwrap();
 
     r.delete_keys(&["a", "c"]).await.unwrap();
 

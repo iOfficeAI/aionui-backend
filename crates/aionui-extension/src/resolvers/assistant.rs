@@ -39,11 +39,7 @@ pub fn resolve_assistant(
 }
 
 /// Resolve all assistant contributions from an extension.
-pub fn resolve_assistants(
-    assistants: &[ExtAssistant],
-    extension_name: &str,
-    ext_dir: &Path,
-) -> Vec<ResolvedAssistant> {
+pub fn resolve_assistants(assistants: &[ExtAssistant], extension_name: &str, ext_dir: &Path) -> Vec<ResolvedAssistant> {
     assistants
         .iter()
         .filter_map(|a| {
@@ -116,8 +112,7 @@ mod tests {
             context: None,
         };
 
-        let err =
-            resolve_assistant(&assistant, "my-ext", Path::new("/tmp/no_such_ext_dir")).unwrap_err();
+        let err = resolve_assistant(&assistant, "my-ext", Path::new("/tmp/no_such_ext_dir")).unwrap_err();
         assert!(matches!(err, ExtensionError::FileReferenceNotFound(_)));
     }
 

@@ -8,9 +8,8 @@ use tracing::{debug, warn};
 use crate::error::ChannelError;
 
 use super::types::{
-    BotInfoData, BotInfoResponse, GenericResponse, SendCardRequest, SendMessageData,
-    SendMessageResponse, TenantAccessTokenRequest, TenantAccessTokenResponse, UpdateCardRequest,
-    WsEndpointData, WsEndpointResponse,
+    BotInfoData, BotInfoResponse, GenericResponse, SendCardRequest, SendMessageData, SendMessageResponse,
+    TenantAccessTokenRequest, TenantAccessTokenResponse, UpdateCardRequest, WsEndpointData, WsEndpointResponse,
 };
 
 const LARK_OPEN_API_BASE: &str = "https://open.feishu.cn/open-apis";
@@ -95,16 +94,13 @@ impl LarkApi {
             )));
         }
 
-        let token = resp.tenant_access_token.ok_or_else(|| {
-            ChannelError::ConnectionFailed("Lark token response missing token".into())
-        })?;
+        let token = resp
+            .tenant_access_token
+            .ok_or_else(|| ChannelError::ConnectionFailed("Lark token response missing token".into()))?;
 
         let expires_in = Duration::from_secs(resp.expire.unwrap_or(7200) as u64);
 
-        debug!(
-            expires_in_secs = expires_in.as_secs(),
-            "Lark token refreshed"
-        );
+        debug!(expires_in_secs = expires_in.as_secs(), "Lark token refreshed");
 
         let mut cache = self.token_cache.write().await;
         *cache = Some(TokenCache {
@@ -154,14 +150,10 @@ impl LarkApi {
             .header("Authorization", format!("Bearer {token}"))
             .send()
             .await
-            .map_err(|e| {
-                ChannelError::ConnectionFailed(format!("Lark WS endpoint request failed: {e}"))
-            })?
+            .map_err(|e| ChannelError::ConnectionFailed(format!("Lark WS endpoint request failed: {e}")))?
             .json()
             .await
-            .map_err(|e| {
-                ChannelError::ConnectionFailed(format!("Lark WS endpoint parse failed: {e}"))
-            })?;
+            .map_err(|e| ChannelError::ConnectionFailed(format!("Lark WS endpoint parse failed: {e}")))?;
 
         if resp.code != 0 {
             return Err(ChannelError::ConnectionFailed(format!(
@@ -170,20 +162,15 @@ impl LarkApi {
             )));
         }
 
-        resp.data.ok_or_else(|| {
-            ChannelError::ConnectionFailed("Lark WS endpoint returned no URL".into())
-        })
+        resp.data
+            .ok_or_else(|| ChannelError::ConnectionFailed("Lark WS endpoint returned no URL".into()))
     }
 
     /// Send an interactive card message to a chat.
     ///
     /// Uses `receive_id_type=chat_id` to address by chat ID.
     /// Returns the message ID of the sent card.
-    pub async fn send_card(
-        &self,
-        chat_id: &str,
-        card_content: &str,
-    ) -> Result<SendMessageData, ChannelError> {
+    pub async fn send_card(&self, chat_id: &str, card_content: &str) -> Result<SendMessageData, ChannelError> {
         let token = self.get_token().await?;
         let url = format!("{LARK_OPEN_API_BASE}/im/v1/messages?receive_id_type=chat_id");
 
@@ -202,14 +189,10 @@ impl LarkApi {
             .json(&body)
             .send()
             .await
-            .map_err(|e| {
-                ChannelError::MessageSendFailed(format!("Lark send card request failed: {e}"))
-            })?
+            .map_err(|e| ChannelError::MessageSendFailed(format!("Lark send card request failed: {e}")))?
             .json()
             .await
-            .map_err(|e| {
-                ChannelError::MessageSendFailed(format!("Lark send card parse failed: {e}"))
-            })?;
+            .map_err(|e| ChannelError::MessageSendFailed(format!("Lark send card parse failed: {e}")))?;
 
         if resp.code != 0 {
             return Err(ChannelError::MessageSendFailed(format!(
@@ -218,17 +201,12 @@ impl LarkApi {
             )));
         }
 
-        resp.data.ok_or_else(|| {
-            ChannelError::MessageSendFailed("Lark send card returned no data".into())
-        })
+        resp.data
+            .ok_or_else(|| ChannelError::MessageSendFailed("Lark send card returned no data".into()))
     }
 
     /// Update (patch) an existing interactive card message.
-    pub async fn update_card(
-        &self,
-        message_id: &str,
-        card_content: &str,
-    ) -> Result<(), ChannelError> {
+    pub async fn update_card(&self, message_id: &str, card_content: &str) -> Result<(), ChannelError> {
         let token = self.get_token().await?;
         let url = format!("{LARK_OPEN_API_BASE}/im/v1/messages/{message_id}");
 
@@ -245,14 +223,10 @@ impl LarkApi {
             .json(&body)
             .send()
             .await
-            .map_err(|e| {
-                ChannelError::MessageSendFailed(format!("Lark update card request failed: {e}"))
-            })?
+            .map_err(|e| ChannelError::MessageSendFailed(format!("Lark update card request failed: {e}")))?
             .json()
             .await
-            .map_err(|e| {
-                ChannelError::MessageSendFailed(format!("Lark update card parse failed: {e}"))
-            })?;
+            .map_err(|e| ChannelError::MessageSendFailed(format!("Lark update card parse failed: {e}")))?;
 
         if resp.code != 0 {
             warn!(code = resp.code, msg = resp.msg, "Lark update card error");

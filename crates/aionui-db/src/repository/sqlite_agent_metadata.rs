@@ -21,20 +21,18 @@ impl SqliteAgentMetadataRepository {
 #[async_trait::async_trait]
 impl IAgentMetadataRepository for SqliteAgentMetadataRepository {
     async fn list_all(&self) -> Result<Vec<AgentMetadataRow>, DbError> {
-        let rows = sqlx::query_as::<_, AgentMetadataRow>(
-            "SELECT * FROM agent_metadata ORDER BY created_at ASC, id ASC",
-        )
-        .fetch_all(&self.pool)
-        .await?;
+        let rows =
+            sqlx::query_as::<_, AgentMetadataRow>("SELECT * FROM agent_metadata ORDER BY created_at ASC, id ASC")
+                .fetch_all(&self.pool)
+                .await?;
         Ok(rows)
     }
 
     async fn get(&self, id: &str) -> Result<Option<AgentMetadataRow>, DbError> {
-        let row =
-            sqlx::query_as::<_, AgentMetadataRow>("SELECT * FROM agent_metadata WHERE id = ?")
-                .bind(id)
-                .fetch_optional(&self.pool)
-                .await?;
+        let row = sqlx::query_as::<_, AgentMetadataRow>("SELECT * FROM agent_metadata WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
         Ok(row)
     }
 
@@ -43,20 +41,16 @@ impl IAgentMetadataRepository for SqliteAgentMetadataRepository {
         agent_source: &str,
         name: &str,
     ) -> Result<Option<AgentMetadataRow>, DbError> {
-        let row = sqlx::query_as::<_, AgentMetadataRow>(
-            "SELECT * FROM agent_metadata WHERE agent_source = ? AND name = ?",
-        )
-        .bind(agent_source)
-        .bind(name)
-        .fetch_optional(&self.pool)
-        .await?;
+        let row =
+            sqlx::query_as::<_, AgentMetadataRow>("SELECT * FROM agent_metadata WHERE agent_source = ? AND name = ?")
+                .bind(agent_source)
+                .bind(name)
+                .fetch_optional(&self.pool)
+                .await?;
         Ok(row)
     }
 
-    async fn find_builtin_by_backend(
-        &self,
-        backend: &str,
-    ) -> Result<Option<AgentMetadataRow>, DbError> {
+    async fn find_builtin_by_backend(&self, backend: &str) -> Result<Option<AgentMetadataRow>, DbError> {
         let row = sqlx::query_as::<_, AgentMetadataRow>(
             "SELECT * FROM agent_metadata \
              WHERE agent_source = 'builtin' AND backend = ? \
@@ -68,10 +62,7 @@ impl IAgentMetadataRepository for SqliteAgentMetadataRepository {
         Ok(row)
     }
 
-    async fn upsert(
-        &self,
-        params: &UpsertAgentMetadataParams<'_>,
-    ) -> Result<AgentMetadataRow, DbError> {
+    async fn upsert(&self, params: &UpsertAgentMetadataParams<'_>) -> Result<AgentMetadataRow, DbError> {
         let now = now_ms();
 
         sqlx::query(
@@ -137,9 +128,10 @@ impl IAgentMetadataRepository for SqliteAgentMetadataRepository {
         .execute(&self.pool)
         .await?;
 
-        let row = self.get(params.id).await?.ok_or_else(|| {
-            DbError::Init(format!("upsert did not produce row for id '{}'", params.id))
-        })?;
+        let row = self
+            .get(params.id)
+            .await?
+            .ok_or_else(|| DbError::Init(format!("upsert did not produce row for id '{}'", params.id)))?;
         Ok(row)
     }
 
@@ -199,13 +191,12 @@ impl IAgentMetadataRepository for SqliteAgentMetadataRepository {
 
     async fn set_enabled(&self, id: &str, enabled: bool) -> Result<bool, DbError> {
         let now = now_ms();
-        let result =
-            sqlx::query("UPDATE agent_metadata SET enabled = ?, updated_at = ? WHERE id = ?")
-                .bind(enabled)
-                .bind(now)
-                .bind(id)
-                .execute(&self.pool)
-                .await?;
+        let result = sqlx::query("UPDATE agent_metadata SET enabled = ?, updated_at = ? WHERE id = ?")
+            .bind(enabled)
+            .bind(now)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
         Ok(result.rows_affected() > 0)
     }
 
@@ -263,10 +254,7 @@ mod tests {
         let rows = repo.list_all().await.unwrap();
         // 17 ACP vendors + 3 internal agents = 20.
         assert_eq!(rows.len(), 20);
-        assert!(
-            rows.iter()
-                .any(|r| r.name == "Claude" && r.agent_source == "builtin")
-        );
+        assert!(rows.iter().any(|r| r.name == "Claude" && r.agent_source == "builtin"));
         assert!(
             rows.iter()
                 .any(|r| r.name == "Aion CLI" && r.agent_source == "internal")
@@ -325,10 +313,7 @@ mod tests {
             .unwrap()
             .expect("claude row exists");
 
-        assert_eq!(
-            updated.agent_capabilities.as_deref(),
-            Some(r#"{"loadSession":true}"#)
-        );
+        assert_eq!(updated.agent_capabilities.as_deref(), Some(r#"{"loadSession":true}"#));
         assert_eq!(updated.auth_methods.as_deref(), Some(r#"[{"id":"oauth"}]"#));
         assert!(updated.config_options.is_none());
     }
@@ -403,10 +388,7 @@ mod tests {
         p2.id = "custom-b";
         p2.name = "dup";
         repo.upsert(&p1).await.unwrap();
-        let err = repo
-            .upsert(&p2)
-            .await
-            .expect_err("unique violation");
+        let err = repo.upsert(&p2).await.expect_err("unique violation");
         assert!(matches!(err, DbError::Query(_)));
     }
 }

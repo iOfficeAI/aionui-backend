@@ -5,8 +5,8 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::routing::{get, post};
 
 use aionui_api_types::{
-    ApiResponse, ConversationResponse, CreateCronJobRequest, CronJobResponse, HasSkillResponse,
-    ListCronJobsQuery, RunNowResponse, SaveCronSkillRequest, UpdateCronJobRequest,
+    ApiResponse, ConversationResponse, CreateCronJobRequest, CronJobResponse, HasSkillResponse, ListCronJobsQuery,
+    RunNowResponse, SaveCronSkillRequest, UpdateCronJobRequest,
 };
 use aionui_auth::CurrentUser;
 use aionui_common::AppError;
@@ -17,16 +17,10 @@ use crate::state::CronRouterState;
 pub fn cron_routes(state: CronRouterState) -> Router {
     Router::new()
         .route("/api/cron/jobs", get(list_jobs).post(create_job))
-        .route(
-            "/api/cron/jobs/{id}",
-            get(get_job).put(update_job).delete(delete_job),
-        )
+        .route("/api/cron/jobs/{id}", get(get_job).put(update_job).delete(delete_job))
         .route("/api/cron/jobs/{id}/run", post(run_now))
         .route("/api/cron/internal/system-resume", post(system_resume))
-        .route(
-            "/api/cron/jobs/{id}/conversations",
-            get(list_conversations_by_cron_job),
-        )
+        .route("/api/cron/jobs/{id}/conversations", get(list_conversations_by_cron_job))
         .route(
             "/api/cron/jobs/{id}/skill",
             get(has_skill).post(save_skill).delete(delete_skill),
@@ -97,10 +91,7 @@ async fn system_resume(
     State(state): State<CronRouterState>,
     headers: HeaderMap,
 ) -> Result<Json<ApiResponse<()>>, AppError> {
-    let is_internal = headers
-        .get("x-aionui-internal")
-        .and_then(|value| value.to_str().ok())
-        == Some("1");
+    let is_internal = headers.get("x-aionui-internal").and_then(|value| value.to_str().ok()) == Some("1");
     if !is_internal {
         return Err(AppError::Forbidden("internal route".into()));
     }
@@ -125,10 +116,7 @@ async fn list_conversations_by_cron_job(
     Extension(user): Extension<CurrentUser>,
     Path(id): Path<String>,
 ) -> Result<Json<ApiResponse<Vec<ConversationResponse>>>, AppError> {
-    let items = state
-        .conversation_service
-        .list_by_cron_job(&user.id, &id)
-        .await?;
+    let items = state.conversation_service.list_by_cron_job(&user.id, &id).await?;
     Ok(Json(ApiResponse::ok(items)))
 }
 

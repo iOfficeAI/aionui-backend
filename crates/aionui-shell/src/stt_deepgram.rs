@@ -24,9 +24,7 @@ pub async fn transcribe(
 
     let mut query_params = vec![("model", config.model.clone())];
 
-    let language = language_hint
-        .or(config.language.as_deref())
-        .filter(|s| !s.is_empty());
+    let language = language_hint.or(config.language.as_deref()).filter(|s| !s.is_empty());
     if let Some(lang) = language {
         query_params.push(("language", lang.to_owned()));
     } else if config.detect_language == Some(true) {
@@ -55,10 +53,7 @@ pub async fn transcribe(
 
     let status = response.status();
     if !status.is_success() {
-        let body = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "<unreadable>".to_owned());
+        let body = response.text().await.unwrap_or_else(|_| "<unreadable>".to_owned());
         return Err(SttError::RequestFailed(format!(
             "Deepgram API returned {status}: {body}"
         )));

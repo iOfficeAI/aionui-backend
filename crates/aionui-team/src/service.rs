@@ -57,15 +57,9 @@ impl TeamSessionService {
         }
     }
 
-    pub async fn create_team(
-        &self,
-        user_id: &str,
-        req: CreateTeamRequest,
-    ) -> Result<TeamResponse, TeamError> {
+    pub async fn create_team(&self, user_id: &str, req: CreateTeamRequest) -> Result<TeamResponse, TeamError> {
         if req.agents.is_empty() {
-            return Err(TeamError::InvalidRequest(
-                "at least one agent is required".into(),
-            ));
+            return Err(TeamError::InvalidRequest("at least one agent is required".into()));
         }
 
         let team_id = generate_id();
@@ -100,9 +94,7 @@ impl TeamSessionService {
                 .conversation_service
                 .create(user_id, conv_req)
                 .await
-                .map_err(|e| {
-                    TeamError::InvalidRequest(format!("failed to create conversation: {e}"))
-                })?;
+                .map_err(|e| TeamError::InvalidRequest(format!("failed to create conversation: {e}")))?;
 
             agents.push(TeamAgent {
                 slot_id,
@@ -197,10 +189,7 @@ impl TeamSessionService {
         }
 
         for agent in &team.agents {
-            let _ = self
-                .conversation_service
-                .delete(user_id, &agent.conversation_id)
-                .await;
+            let _ = self.conversation_service.delete(user_id, &agent.conversation_id).await;
         }
 
         self.repo.delete_mailbox_by_team(team_id).await?;
@@ -277,9 +266,7 @@ impl TeamSessionService {
             .conversation_service
             .create(user_id, conv_req)
             .await
-            .map_err(|e| {
-                TeamError::InvalidRequest(format!("failed to create conversation: {e}"))
-            })?;
+            .map_err(|e| TeamError::InvalidRequest(format!("failed to create conversation: {e}")))?;
 
         let agent = TeamAgent {
             slot_id,
@@ -315,12 +302,7 @@ impl TeamSessionService {
         Ok(response)
     }
 
-    pub async fn remove_agent(
-        &self,
-        user_id: &str,
-        team_id: &str,
-        slot_id: &str,
-    ) -> Result<(), TeamError> {
+    pub async fn remove_agent(&self, user_id: &str, team_id: &str, slot_id: &str) -> Result<(), TeamError> {
         let row = self
             .repo
             .get_team(team_id)
@@ -360,12 +342,7 @@ impl TeamSessionService {
         Ok(())
     }
 
-    pub async fn rename_agent(
-        &self,
-        team_id: &str,
-        slot_id: &str,
-        name: &str,
-    ) -> Result<(), TeamError> {
+    pub async fn rename_agent(&self, team_id: &str, slot_id: &str, name: &str) -> Result<(), TeamError> {
         let row = self
             .repo
             .get_team(team_id)
@@ -436,10 +413,7 @@ impl TeamSessionService {
         )
         .await?;
 
-        if let Err(e) = self
-            .rebuild_agent_processes(&session, &user_id, &agents_snapshot)
-            .await
-        {
+        if let Err(e) = self.rebuild_agent_processes(&session, &user_id, &agents_snapshot).await {
             session.stop();
             return Err(e);
         }
@@ -476,25 +450,16 @@ impl TeamSessionService {
                 })?;
 
             self.task_manager
-                .kill(
-                    &agent.conversation_id,
-                    Some(AgentKillReason::TeamMcpRebuild),
-                )
+                .kill(&agent.conversation_id, Some(AgentKillReason::TeamMcpRebuild))
                 .map_err(|e| {
-                    TeamError::InvalidRequest(format!(
-                        "failed to kill agent task {}: {e}",
-                        agent.conversation_id
-                    ))
+                    TeamError::InvalidRequest(format!("failed to kill agent task {}: {e}", agent.conversation_id))
                 })?;
 
             self.conversation_service
                 .warmup(user_id, &agent.conversation_id, &self.task_manager)
                 .await
                 .map_err(|e| {
-                    TeamError::InvalidRequest(format!(
-                        "failed to rebuild agent task {}: {e}",
-                        agent.conversation_id
-                    ))
+                    TeamError::InvalidRequest(format!("failed to rebuild agent task {}: {e}", agent.conversation_id))
                 })?;
         }
         Ok(())
@@ -573,18 +538,11 @@ impl TeamSessionService {
             .sessions
             .get(team_id)
             .ok_or_else(|| TeamError::SessionNotFound(team_id.into()))?;
-        entry
-            .session
-            .send_message_to_agent(slot_id, content, files)
-            .await
+        entry.session.send_message_to_agent(slot_id, content, files).await
     }
 
     pub fn dispose_all(&self) {
-        let keys: Vec<String> = self
-            .sessions
-            .iter()
-            .map(|entry| entry.key().clone())
-            .collect();
+        let keys: Vec<String> = self.sessions.iter().map(|entry| entry.key().clone()).collect();
         for key in keys {
             self.stop_session(&key);
         }
@@ -627,9 +585,7 @@ fn parse_agent_type(backend: &str) -> Result<AgentType, TeamError> {
     if let Ok(t) = serde_json::from_str::<AgentType>(&quoted) {
         return Ok(t);
     }
-    Err(TeamError::InvalidRequest(format!(
-        "unsupported backend: {backend}"
-    )))
+    Err(TeamError::InvalidRequest(format!("unsupported backend: {backend}")))
 }
 
 #[cfg(test)]

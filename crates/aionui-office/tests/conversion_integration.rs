@@ -158,13 +158,7 @@ async fn dc4_excel_to_json_file_not_found() {
     assert_eq!(resp.to, "excel-json");
     assert!(!resp.result.success);
     assert!(resp.result.data.is_none());
-    assert!(
-        resp.result
-            .error
-            .as_ref()
-            .unwrap()
-            .contains("file not found")
-    );
+    assert!(resp.result.error.as_ref().unwrap().contains("file not found"));
 }
 
 // DC-6: Word → Markdown (pandoc not available)
@@ -178,13 +172,7 @@ async fn dc6_word_to_markdown_file_not_found() {
 
     assert_eq!(resp.to, "markdown");
     assert!(!resp.result.success);
-    assert!(
-        resp.result
-            .error
-            .as_ref()
-            .unwrap()
-            .contains("file not found")
-    );
+    assert!(resp.result.error.as_ref().unwrap().contains("file not found"));
 }
 
 // DC-8: PPT → JSON (officecli not available)
@@ -198,13 +186,7 @@ async fn dc8_ppt_to_json_file_not_found() {
 
     assert_eq!(resp.to, "ppt-json");
     assert!(!resp.result.success);
-    assert!(
-        resp.result
-            .error
-            .as_ref()
-            .unwrap()
-            .contains("file not found")
-    );
+    assert!(resp.result.error.as_ref().unwrap().contains("file not found"));
 }
 
 // DC-8b: PPT → JSON (officecli not installed — configured path invalid and not in PATH)
