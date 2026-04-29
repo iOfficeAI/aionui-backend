@@ -21,6 +21,7 @@ mod shell;
 mod skill;
 mod system;
 mod team;
+mod team_mcp;
 mod websocket;
 
 pub use acp::{
@@ -136,4 +137,5 @@ pub use team::{
     TeamAgentRenamedPayload, TeamAgentResponse, TeamAgentSpawnedPayload, TeamAgentStatusPayload,
     TeamListResponse, TeamResponse,
 };
+pub use team_mcp::TeamMcpStdioConfig;
 pub use websocket::WebSocketMessage;
