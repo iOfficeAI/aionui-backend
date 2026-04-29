@@ -193,6 +193,9 @@ pub struct ConversationFilters {
     pub cron_job_id: Option<String>,
     /// Filter by pinned status.
     pub pinned: Option<bool>,
+    /// When true (default), exclude team-agent conversations (extra.teamId is set).
+    /// Old rows without teamId in extra pass naturally — backward compatible.
+    pub exclude_team_conversations: bool,
 }
 
 impl ConversationFilters {

@@ -695,6 +695,11 @@ fn append_filter_conditions(
         where_parts.push("c.pinned = ?".to_string());
         binds.push(BindValue::Bool(pinned));
     }
+    if filters.exclude_team_conversations {
+        // Exclude conversations that belong to a team agent (extra.teamId is set).
+        // Old rows without teamId in extra return NULL here and are included.
+        where_parts.push("json_extract(c.extra, '$.teamId') IS NULL".to_string());
+    }
 }
 
 /// Builds a count query and bind values for the total (ignoring cursor).
@@ -1117,6 +1122,48 @@ mod tests {
         assert_eq!(result.items.len(), 1);
         assert_eq!(result.total, 1);
         assert!(result.items[0].pinned);
+    }
+
+    #[tokio::test]
+    async fn list_exclude_team_conversations() {
+        let (repo, _db) = setup().await;
+
+        let mut regular = sample_conversation(SYSTEM_USER_ID);
+        regular.extra = r#"{"workspace":"/home"}"#.to_string();
+        repo.create(&regular).await.unwrap();
+
+        let mut team_agent = sample_conversation(SYSTEM_USER_ID);
+        team_agent.id = aionui_common::generate_prefixed_id("conv");
+        team_agent.extra = r#"{"teamId":"team-xyz","workspace":"/home"}"#.to_string();
+        repo.create(&team_agent).await.unwrap();
+
+        // exclude_team_conversations=true: only regular conv returned
+        let result = repo
+            .list_paginated(
+                SYSTEM_USER_ID,
+                &ConversationFilters {
+                    limit: 20,
+                    exclude_team_conversations: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.items.len(), 1);
+        assert_eq!(result.items[0].id, regular.id);
+
+        // exclude_team_conversations=false (default): both returned
+        let result_all = repo
+            .list_paginated(
+                SYSTEM_USER_ID,
+                &ConversationFilters {
+                    limit: 20,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(result_all.items.len(), 2);
     }
 
     // ── Extended query tests ────────────────────────────────────────
