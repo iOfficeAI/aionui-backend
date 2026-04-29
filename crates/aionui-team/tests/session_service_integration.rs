@@ -499,6 +499,7 @@ fn two_agent_input() -> Vec<TeamAgentInput> {
             backend: "acp".into(),
             model: "claude".into(),
             custom_agent_id: None,
+            conversation_id: None,
         },
         TeamAgentInput {
             name: "Worker".into(),
@@ -506,6 +507,7 @@ fn two_agent_input() -> Vec<TeamAgentInput> {
             backend: "acp".into(),
             model: "claude".into(),
             custom_agent_id: None,
+            conversation_id: None,
         },
     ]
 }
@@ -550,6 +552,7 @@ async fn tc2_create_single_agent_team() {
                     backend: "acp".into(),
                     model: "claude".into(),
                     custom_agent_id: None,
+                    conversation_id: None,
                 }],
             },
         )
@@ -575,6 +578,7 @@ async fn tc4_first_agent_is_lead() {
                         backend: "acp".into(),
                         model: "claude".into(),
                         custom_agent_id: None,
+                        conversation_id: None,
                     },
                     TeamAgentInput {
                         name: "B".into(),
@@ -582,6 +586,7 @@ async fn tc4_first_agent_is_lead() {
                         backend: "acp".into(),
                         model: "claude".into(),
                         custom_agent_id: None,
+                        conversation_id: None,
                     },
                 ],
             },
@@ -769,6 +774,7 @@ async fn aa1_add_agent_to_team() {
                     backend: "acp".into(),
                     model: "claude".into(),
                     custom_agent_id: None,
+                    conversation_id: None,
                 }],
             },
         )
