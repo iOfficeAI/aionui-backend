@@ -418,6 +418,7 @@ pub fn build_team_state(
         team_repo,
         conv_service,
         services.event_bus.clone(),
+        services.worker_task_manager.clone(),
         backend_binary_path,
     ));
     TeamRouterState { service }
