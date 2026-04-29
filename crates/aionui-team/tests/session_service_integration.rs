@@ -725,7 +725,7 @@ async fn tg1_get_existing_team() {
         .await
         .unwrap();
 
-    let got = svc.get_team(&created.id).await.unwrap();
+    let got = svc.get_team("user1", &created.id).await.unwrap();
     assert_eq!(got.id, created.id);
     assert_eq!(got.name, "Alpha");
     assert_eq!(got.agents.len(), 2);
@@ -734,7 +734,7 @@ async fn tg1_get_existing_team() {
 #[tokio::test]
 async fn tg2_get_nonexistent_returns_error() {
     let svc = setup();
-    let result = svc.get_team("nonexistent").await;
+    let result = svc.get_team("user1", "nonexistent").await;
     assert!(result.is_err());
 }
 
@@ -766,6 +766,46 @@ async fn td6_delete_nonexistent_returns_error() {
     assert!(result.is_err());
 }
 
+#[tokio::test]
+async fn tg3_get_team_other_user_returns_not_found() {
+    let svc = setup();
+    let created = svc
+        .create_team(
+            "user1",
+            CreateTeamRequest {
+                name: "Alpha".into(),
+                agents: two_agent_input(),
+            },
+        )
+        .await
+        .unwrap();
+
+    let err = svc.get_team("user2", &created.id).await.unwrap_err();
+    assert!(matches!(err, aionui_team::TeamError::TeamNotFound(_)));
+}
+
+#[tokio::test]
+async fn td7_remove_team_other_user_returns_not_found() {
+    let svc = setup();
+    let created = svc
+        .create_team(
+            "user1",
+            CreateTeamRequest {
+                name: "Alpha".into(),
+                agents: two_agent_input(),
+            },
+        )
+        .await
+        .unwrap();
+
+    let err = svc.remove_team("user2", &created.id).await.unwrap_err();
+    assert!(matches!(err, aionui_team::TeamError::TeamNotFound(_)));
+
+    // Team should still exist
+    let got = svc.get_team("user1", &created.id).await.unwrap();
+    assert_eq!(got.id, created.id);
+}
+
 // -- Rename team --------------------------------------------------------------
 
 #[tokio::test]
@@ -783,7 +823,7 @@ async fn tr1_rename_existing_team() {
         .unwrap();
 
     svc.rename_team(&created.id, "New Name").await.unwrap();
-    let got = svc.get_team(&created.id).await.unwrap();
+    let got = svc.get_team("user1", &created.id).await.unwrap();
     assert_eq!(got.name, "New Name");
 }
 
@@ -838,7 +878,7 @@ async fn aa1_add_agent_to_team() {
     assert_eq!(agent.role, "teammate");
     assert!(!agent.conversation_id.is_empty());
 
-    let got = svc.get_team(&created.id).await.unwrap();
+    let got = svc.get_team("user1", &created.id).await.unwrap();
     assert_eq!(got.agents.len(), 2);
 }
 
@@ -880,7 +920,7 @@ async fn ar1_remove_agent_from_team() {
         .await
         .unwrap();
 
-    let got = svc.get_team(&created.id).await.unwrap();
+    let got = svc.get_team("user1", &created.id).await.unwrap();
     assert_eq!(got.agents.len(), 1);
     assert!(got.agents.iter().all(|a| a.slot_id != worker_slot));
 }
@@ -922,7 +962,7 @@ async fn an1_rename_agent() {
         .await
         .unwrap();
 
-    let got = svc.get_team(&created.id).await.unwrap();
+    let got = svc.get_team("user1", &created.id).await.unwrap();
     let agent = got.agents.iter().find(|a| a.slot_id == slot_id).unwrap();
     assert_eq!(agent.name, "Senior Worker");
 }
