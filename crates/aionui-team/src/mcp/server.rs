@@ -391,8 +391,8 @@ async fn exec_send_message(args: &Value, scheduler: &TeammateManager, caller_slo
 
     let trimmed = input.message.trim();
     if trimmed == "shutdown_approved" {
-        // W5-D30a-2 will wire the real approval handling; this stub intercepts the sentinel so it never reaches the recipient.
         debug!(from = caller_slot_id, "shutdown_approved intercepted");
+        scheduler.notify_shutdown_acknowledged(caller_slot_id);
         return Ok(json!({"status": "shutdown_approved_received"}).to_string());
     }
     // Reason: a teammate replying to a shutdown request with

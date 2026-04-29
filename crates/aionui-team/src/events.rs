@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use aionui_api_types::{
-    TeamAgentRemovedPayload, TeamAgentRenamedPayload, TeamAgentSpawnedPayload, TeamAgentStatusPayload, WebSocketMessage,
+    TeamAgentRemovedPayload, TeamAgentRenamedPayload, TeamAgentShutdownPayload, TeamAgentSpawnedPayload,
+    TeamAgentStatusPayload, WebSocketMessage,
 };
 use aionui_realtime::EventBroadcaster;
 
@@ -58,6 +59,22 @@ impl TeamEventEmitter {
         self.broadcaster.broadcast(event);
     }
 
+    /// Emit `team.agent.shutdown` to signal that the named teammate has
+    /// acknowledged a Lead-initiated shutdown request. The actual removal
+    /// (and `team.agent.removed`) follows once the agent process is killed
+    /// and scheduler state is cleared.
+    pub fn broadcast_agent_shutdown(&self, slot_id: &str) {
+        let payload = TeamAgentShutdownPayload {
+            team_id: self.team_id.clone(),
+            slot_id: slot_id.to_owned(),
+        };
+        let event = WebSocketMessage::new(
+            "team.agent.shutdown",
+            serde_json::to_value(payload).expect("serialize shutdown payload"),
+        );
+        self.broadcaster.broadcast(event);
+    }
+
     pub fn broadcast_agent_renamed(&self, slot_id: &str, name: &str) {
         let payload = TeamAgentRenamedPayload {
             team_id: self.team_id.clone(),
@@ -77,7 +94,8 @@ mod tests {
     use super::*;
     use crate::types::TeammateRole;
     use aionui_api_types::{
-        TeamAgentRemovedPayload, TeamAgentRenamedPayload, TeamAgentSpawnedPayload, TeamAgentStatusPayload,
+        TeamAgentRemovedPayload, TeamAgentRenamedPayload, TeamAgentShutdownPayload, TeamAgentSpawnedPayload,
+        TeamAgentStatusPayload,
     };
 
     struct RecordingBroadcaster {
@@ -163,6 +181,20 @@ mod tests {
         let payload: TeamAgentRemovedPayload = serde_json::from_value(events[0].data.clone()).unwrap();
         assert_eq!(payload.team_id, "team-1");
         assert_eq!(payload.slot_id, "slot-3");
+    }
+
+    #[test]
+    fn shutdown_event_has_correct_shape() {
+        let (emitter, bc) = make_emitter();
+        emitter.broadcast_agent_shutdown("slot-9");
+
+        let events = bc.events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].name, "team.agent.shutdown");
+
+        let payload: TeamAgentShutdownPayload = serde_json::from_value(events[0].data.clone()).unwrap();
+        assert_eq!(payload.team_id, "team-1");
+        assert_eq!(payload.slot_id, "slot-9");
     }
 
     #[test]

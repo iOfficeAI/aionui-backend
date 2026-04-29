@@ -167,6 +167,19 @@ pub struct TeamAgentRenamedPayload {
     pub name: String,
 }
 
+/// Payload for `team.agent.shutdown` WebSocket event.
+///
+/// Pushed when a teammate acknowledges a Lead-initiated shutdown by
+/// replying `shutdown_approved`. The acknowledging teammate is identified
+/// by `slot_id`; `remove_agent` (and the accompanying
+/// `team.agent.removed` event) follows asynchronously once the agent
+/// process is actually killed and state is cleared.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TeamAgentShutdownPayload {
+    pub team_id: String,
+    pub slot_id: String,
+}
+
 /// Lifecycle phases of the per-team MCP stdio bridge + ACP session.
 ///
 /// Emitted by the MCP supervisor whenever a teammate slot transitions
@@ -641,6 +654,19 @@ mod tests {
         };
         let json = serde_json::to_string(&payload).unwrap();
         let parsed: TeamAgentRenamedPayload = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, payload);
+    }
+
+    #[test]
+    fn team_agent_shutdown_payload_roundtrip() {
+        let payload = TeamAgentShutdownPayload {
+            team_id: "t1".into(),
+            slot_id: "s2".into(),
+        };
+        let json = serde_json::to_value(&payload).unwrap();
+        assert_eq!(json["team_id"], "t1");
+        assert_eq!(json["slot_id"], "s2");
+        let parsed: TeamAgentShutdownPayload = serde_json::from_value(json).unwrap();
         assert_eq!(parsed, payload);
     }
 

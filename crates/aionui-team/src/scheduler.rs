@@ -462,6 +462,19 @@ impl TeammateManager {
         Ok(Some(conversation_id))
     }
 
+    /// Announce that a teammate has acknowledged a Lead-initiated shutdown
+    /// request (returned `shutdown_approved` via `team_send_message`).
+    ///
+    /// This is the first signal the frontend receives; actual removal
+    /// (process kill, state cleanup, `team.agent.removed`) is driven
+    /// separately by `remove_agent` once the orchestration layer decides to
+    /// tear the slot down. Broadcast is best-effort and does not mutate
+    /// scheduler state on its own.
+    pub fn notify_shutdown_acknowledged(&self, slot_id: &str) {
+        self.events.broadcast_agent_shutdown(slot_id);
+        debug!(team_id = %self.team_id, slot_id, "agent shutdown acknowledged");
+    }
+
     /// Clear all scheduler-side state associated with a removed agent.
     ///
     /// Drops three independent entries so nothing survives to affect the
@@ -1254,6 +1267,34 @@ mod tests {
             .collect();
         assert_eq!(removed_events.len(), 1);
         assert_eq!(removed_events[0].data["slot_id"], "worker-2");
+    }
+
+    #[tokio::test]
+    async fn notify_shutdown_acknowledged_broadcasts_shutdown_event() {
+        let agents = make_team_agents();
+        let (mgr, bc) = make_manager(&agents);
+
+        mgr.notify_shutdown_acknowledged("worker-2");
+
+        let shutdown_events: Vec<_> = bc
+            .events()
+            .into_iter()
+            .filter(|e| e.name == "team.agent.shutdown")
+            .collect();
+        assert_eq!(shutdown_events.len(), 1);
+        assert_eq!(shutdown_events[0].data["slot_id"], "worker-2");
+        assert_eq!(shutdown_events[0].data["team_id"], mgr.team_id);
+    }
+
+    #[tokio::test]
+    async fn notify_shutdown_acknowledged_does_not_remove_slot() {
+        let agents = make_team_agents();
+        let (mgr, _) = make_manager(&agents);
+        let before = mgr.list_agents().await.len();
+
+        mgr.notify_shutdown_acknowledged("worker-2");
+
+        assert_eq!(mgr.list_agents().await.len(), before);
     }
 
     #[tokio::test]
