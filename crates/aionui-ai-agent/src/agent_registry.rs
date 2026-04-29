@@ -279,6 +279,7 @@ fn decode_row(row: AgentMetadataRow) -> Option<AgentMetadata> {
         env,
         native_skills_dirs,
         behavior_policy,
+        yolo_id: row.yolo_id,
         handshake,
     };
 
@@ -416,15 +417,10 @@ mod tests {
 
     #[tokio::test]
     async fn find_builtin_claude_has_bridge_command() {
-        use aionui_api_types::ResumeStrategy;
         let reg = registry().await;
         let m = reg.find_builtin_by_backend("claude").await.unwrap();
         assert_eq!(m.command.as_deref(), Some("bun"));
         assert!(m.behavior_policy.supports_side_question);
-        assert_eq!(
-            m.behavior_policy.resume_strategy,
-            ResumeStrategy::NewAndPrompt
-        );
         assert_eq!(
             m.native_skills_dirs.as_deref(),
             Some(&[".claude/skills".to_string()][..])
@@ -432,30 +428,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn codex_uses_session_load_strategy() {
-        use aionui_api_types::ResumeStrategy;
+    async fn codex_yolo_id_maps_to_full_access() {
         let reg = registry().await;
         let codex = reg.find_builtin_by_backend("codex").await.unwrap();
-        assert_eq!(
-            codex.behavior_policy.resume_strategy,
-            ResumeStrategy::SessionLoad
-        );
         // Legacy AionUi yolo aliases resolve to Codex's native
         // `full-access` mode via the catalog row.
-        assert_eq!(
-            codex.behavior_policy.yolo_id.as_deref(),
-            Some("full-access")
-        );
+        assert_eq!(codex.yolo_id.as_deref(), Some("full-access"));
     }
 
     #[tokio::test]
     async fn claude_yolo_id_maps_to_bypass_permissions() {
         let reg = registry().await;
         let claude = reg.find_builtin_by_backend("claude").await.unwrap();
-        assert_eq!(
-            claude.behavior_policy.yolo_id.as_deref(),
-            Some("bypassPermissions")
-        );
+        assert_eq!(claude.yolo_id.as_deref(), Some("bypassPermissions"));
     }
 
     /// On a host that has *none* of the seeded CLIs installed, the
@@ -477,9 +462,7 @@ mod tests {
         );
         // Aion CLI (internal, no spawn command) is always available.
         assert!(
-            visible
-                .iter()
-                .any(|m| m.agent_type == AgentType::Aionrs),
+            visible.iter().any(|m| m.agent_type == AgentType::Aionrs),
             "internal aionrs row should survive the filter"
         );
     }
@@ -549,7 +532,7 @@ mod tests {
         reg.apply_handshake_inner(
             &claude.id,
             &AgentHandshake {
-                agent_capabilities: Some(serde_json::json!({"loadSession": true})),
+                agent_capabilities: Some(serde_json::json!({"load_session": true})),
                 ..Default::default()
             },
         )
@@ -581,7 +564,7 @@ mod tests {
         let refreshed = reg.get(&claude.id).await.unwrap();
         assert_eq!(
             refreshed.handshake.agent_capabilities,
-            Some(serde_json::json!({"loadSession": true})),
+            Some(serde_json::json!({"load_session": true})),
             "agent_capabilities must survive later partial writes"
         );
         assert!(

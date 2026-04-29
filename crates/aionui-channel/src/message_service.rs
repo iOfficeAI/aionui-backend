@@ -188,7 +188,8 @@ impl ChannelMessageService {
             | AgentStreamEvent::AcpContextUsage(_)
             | AgentStreamEvent::System(_)
             | AgentStreamEvent::RequestTrace(_)
-            | AgentStreamEvent::SlashCommandsUpdated(_) => None,
+            | AgentStreamEvent::SlashCommandsUpdated(_)
+            | AgentStreamEvent::SessionAssigned(_) => None,
         }
     }
 

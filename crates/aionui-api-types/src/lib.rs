@@ -32,7 +32,6 @@ pub use acp::{
 };
 pub use agent_discovery::{
     AgentEnvEntry, AgentHandshake, AgentMetadata, AgentSource, AgentSourceInfo, BehaviorPolicy,
-    ResumeStrategy,
 };
 pub use assistant::{
     AssistantResponse, AssistantSource, CreateAssistantRequest, ImportAssistantsRequest,

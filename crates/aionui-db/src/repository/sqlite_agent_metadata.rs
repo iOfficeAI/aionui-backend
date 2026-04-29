@@ -78,11 +78,12 @@ impl IAgentMetadataRepository for SqliteAgentMetadataRepository {
             "INSERT INTO agent_metadata \
                 (id, icon, name, name_i18n, description, description_i18n, \
                  backend, agent_type, agent_source, agent_source_info, \
-                 enabled, command, args, env, native_skills_dirs, behavior_policy, \
+                 enabled, command, args, env, native_skills_dirs, \
+                 behavior_policy, yolo_id, \
                  agent_capabilities, auth_methods, config_options, \
                  available_modes, available_models, available_commands, \
                  created_at, updated_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
              ON CONFLICT(id) DO UPDATE SET \
                 icon = excluded.icon, \
                 name = excluded.name, \
@@ -99,6 +100,7 @@ impl IAgentMetadataRepository for SqliteAgentMetadataRepository {
                 env = excluded.env, \
                 native_skills_dirs = excluded.native_skills_dirs, \
                 behavior_policy = excluded.behavior_policy, \
+                yolo_id = excluded.yolo_id, \
                 agent_capabilities = excluded.agent_capabilities, \
                 auth_methods = excluded.auth_methods, \
                 config_options = excluded.config_options, \
@@ -123,6 +125,7 @@ impl IAgentMetadataRepository for SqliteAgentMetadataRepository {
         .bind(params.env)
         .bind(params.native_skills_dirs)
         .bind(params.behavior_policy)
+        .bind(params.yolo_id)
         .bind(params.agent_capabilities)
         .bind(params.auth_methods)
         .bind(params.config_options)
@@ -243,7 +246,8 @@ mod tests {
             args: Some("[]"),
             env: Some("[]"),
             native_skills_dirs: Some(r#"[".claude/skills"]"#),
-            behavior_policy: Some(r#"{"resume_strategy":"new_and_prompt"}"#),
+            behavior_policy: Some(r#"{"supports_side_question":true}"#),
+            yolo_id: Some("bypassPermissions"),
             agent_capabilities: None,
             auth_methods: None,
             config_options: None,

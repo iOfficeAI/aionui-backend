@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use aionui_ai_agent::{AgentStreamEvent, ICronService, MessageMiddleware, MiddlewareResult};
 use aionui_api_types::WebSocketMessage;
-use aionui_common::{generate_id, now_ms};
+use aionui_common::{generate_id, normalize_keys_to_snake_case, now_ms};
 use aionui_db::IConversationRepository;
 use aionui_db::models::MessageRow;
 use aionui_realtime::EventBroadcaster;
@@ -174,13 +174,17 @@ impl StreamRelay {
 
     /// Forward an agent event to connected WebSocket clients.
     fn forward_to_websocket(&self, event: &AgentStreamEvent) {
-        let event_data = match serde_json::to_value(event) {
+        let mut event_data = match serde_json::to_value(event) {
             Ok(v) => v,
             Err(e) => {
                 warn!(error = %e, "Failed to serialize agent event for WebSocket");
                 return;
             }
         };
+        // Nested ACP SDK payloads serialise as camelCase on their own;
+        // force every object key down the tree to snake_case so the
+        // wire contract stays uniform.
+        normalize_keys_to_snake_case(&mut event_data);
 
         let payload = json!({
             "conversation_id": self.conversation_id,

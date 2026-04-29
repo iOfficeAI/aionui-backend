@@ -20,12 +20,12 @@ use agent_client_protocol::schema::{
     SessionConfigOption, SessionId, SessionModeState, SessionModelState,
     SetSessionConfigOptionRequest, SetSessionModeRequest, SetSessionModelRequest, UsageUpdate,
 };
-use aionui_api_types::{AgentHandshake, AgentMetadata, ResumeStrategy};
+use aionui_api_types::{AgentHandshake, AgentMetadata};
 
 use aionui_api_types::TeamMcpStdioConfig;
 use aionui_common::{
     AgentKillReason, AgentType, AppError, CommandSpec, Confirmation, ConversationStatus,
-    TimestampMs, now_ms,
+    TimestampMs, normalize_keys_to_snake_case, now_ms,
 };
 use serde_json::Value;
 use tokio::sync::{Mutex, RwLock, broadcast, mpsc, oneshot};
@@ -43,12 +43,12 @@ fn normalize_requested_mode(metadata: &AgentMetadata, mode: &str) -> String {
     // AionUi persists the legacy aliases `yolo` / `yoloNoSandbox` while
     // ACP backends expect their native mode id (e.g. `full-access` for
     // Codex). Resolution is data-driven: the mapping lives on each
-    // catalog row's `behavior_policy.yolo_id`. Backends without a
+    // catalog row's top-level `yolo_id` column. Backends without a
     // `yolo_id` have no equivalent, so the alias passes through
     // unchanged and `session/set_mode` gets the caller's original
     // value.
     if matches!(trimmed, "yolo" | "yoloNoSandbox")
-        && let Some(native) = metadata.behavior_policy.yolo_id.as_deref()
+        && let Some(native) = metadata.yolo_id.as_deref()
     {
         return native.to_owned();
     }
@@ -64,6 +64,21 @@ fn normalize_requested_mode(metadata: &AgentMetadata, mode: &str) -> String {
     }
 
     trimmed.to_owned()
+}
+
+/// Extract the `current_value` string from a `SessionConfigKind` —
+/// currently only the Select kind has a string value we can replay
+/// through `session/set_session_config_option`. Boolean toggles and
+/// other future kinds return `None` and are skipped by the replay
+/// path.
+fn extract_config_current_value(
+    kind: &agent_client_protocol::schema::SessionConfigKind,
+) -> Option<String> {
+    use agent_client_protocol::schema::SessionConfigKind;
+    match kind {
+        SessionConfigKind::Select(sel) => Some(sel.current_value.to_string()),
+        _ => None,
+    }
 }
 
 fn confirm_option_id(data: &Value) -> Option<String> {
@@ -135,25 +150,48 @@ struct AcpState {
     has_messages: bool,
 }
 
+/// Serialize an external value (typically an ACP SDK struct that emits
+/// camelCase) and normalise every object key to snake_case before it
+/// leaves the backend. All handshake columns, WebSocket payloads, and
+/// HTTP responses share this rule — callers should go through this
+/// helper instead of `serde_json::to_value` directly.
+fn sdk_to_snake_value<T: serde::Serialize>(value: &T) -> Option<Value> {
+    let mut v = serde_json::to_value(value).ok()?;
+    normalize_keys_to_snake_case(&mut v);
+    Some(v)
+}
+
 /// Project an `AgentStreamEvent` onto the subset of `AgentHandshake`
 /// fields the catalog cares about. Returns `None` for unrelated
 /// events — the forwarder filters on that.
+///
+/// Event payloads may arrive here either already snake_case (from
+/// `emit_snapshot_events`) or camelCase (from `SessionUpdate::*`
+/// translation in `stream_event.rs`). We re-normalise unconditionally
+/// so the persisted handshake blob is uniform; `camel_to_snake` is
+/// idempotent on snake_case input.
 fn catalog_partial_from_event(event: &AgentStreamEvent) -> Option<AgentHandshake> {
+    fn snake(mut v: Value) -> Value {
+        normalize_keys_to_snake_case(&mut v);
+        v
+    }
     match event {
         AgentStreamEvent::AcpModeInfo(v) => Some(AgentHandshake {
-            available_modes: Some(v.clone()),
+            available_modes: Some(snake(v.clone())),
             ..Default::default()
         }),
         AgentStreamEvent::AcpModelInfo(v) => Some(AgentHandshake {
-            available_models: Some(v.clone()),
+            available_models: Some(snake(v.clone())),
             ..Default::default()
         }),
         AgentStreamEvent::AcpConfigOption(v) => Some(AgentHandshake {
-            config_options: Some(v.clone()),
+            config_options: Some(snake(v.clone())),
             ..Default::default()
         }),
         AgentStreamEvent::AvailableCommands(data) => {
-            let cmds = serde_json::to_value(&data.commands).ok()?;
+            // `AvailableCommand` is an ACP SDK struct — normalise on
+            // the way into the catalog so the stored blob is snake_case.
+            let cmds = sdk_to_snake_value(&data.commands)?;
             Some(AgentHandshake {
                 available_commands: Some(cmds),
                 ..Default::default()
@@ -244,6 +282,63 @@ impl AcpAgentManager {
                 mode.to_owned(),
                 modes.available_modes,
             ));
+        }
+    }
+
+    /// Restore user-chosen config option values on top of the CLI's
+    /// freshly returned defaults.
+    ///
+    /// The CLI treats every `session/new` and `session/load` reply as a
+    /// source of truth for the `config_options` schema (labels, enum
+    /// values, ordering), but it does not remember the user's previous
+    /// selection in AionUi. We persist those selections in
+    /// `acp_session.session_config.runtime.config_selections`, preload
+    /// them into the snapshot, and here — once a session id is live —
+    /// replay any that diverge from the CLI's current value through
+    /// `session/set_session_config_option`.
+    ///
+    /// Best-effort: a per-option failure is logged and skipped so the
+    /// user still gets a usable session instead of a hard error.
+    async fn apply_preferred_config_selections(&self, session_id: &str) {
+        let (selections, cli_options) = {
+            let snapshot = self.runtime_snapshot.read().await;
+            (
+                snapshot.config_selections().clone(),
+                snapshot
+                    .config_options()
+                    .map(<[SessionConfigOption]>::to_vec)
+                    .unwrap_or_default(),
+            )
+        };
+        if selections.is_empty() {
+            return;
+        }
+
+        for option in &cli_options {
+            let cid = option.id.to_string();
+            let Some(desired) = selections.get(&cid) else {
+                continue;
+            };
+            let current = extract_config_current_value(&option.kind);
+            if current.as_deref() == Some(desired.as_str()) {
+                continue;
+            }
+            if let Err(err) = self
+                .protocol
+                .set_config_option(SetSessionConfigOptionRequest::new(
+                    SessionId::new(session_id),
+                    cid.clone(),
+                    desired.clone(),
+                ))
+                .await
+            {
+                info!(
+                    config_id = %cid,
+                    desired = %desired,
+                    error = %err,
+                    "apply_preferred_config_selections: set_config_option failed; skipping"
+                );
+            }
         }
     }
 
@@ -425,10 +520,8 @@ impl AcpAgentManager {
         let init_handshake = AgentHandshake {
             agent_capabilities: protocol
                 .agent_capabilities()
-                .and_then(|c| serde_json::to_value(c).ok()),
-            auth_methods: protocol
-                .auth_methods()
-                .and_then(|m| serde_json::to_value(m).ok()),
+                .and_then(|c| sdk_to_snake_value(&c)),
+            auth_methods: protocol.auth_methods().and_then(|m| sdk_to_snake_value(&m)),
             ..Default::default()
         };
         if init_handshake.agent_capabilities.is_some() || init_handshake.auth_methods.is_some() {
@@ -627,7 +720,17 @@ impl AcpAgentManager {
             state.session_id = Some(sid.clone());
         }
 
+        // Notify subscribers (e.g. AcpAgentService) so the new id is
+        // persisted into `acp_session.session_id` — resume can then
+        // choose `session/load` instead of a fresh `session/new`.
+        let _ = self.event_tx.send(AgentStreamEvent::SessionAssigned(
+            crate::stream_event::SessionAssignedEventData {
+                session_id: sid.clone(),
+            },
+        ));
+
         self.apply_preferred_mode(&sid).await?;
+        self.apply_preferred_config_selections(&sid).await;
 
         // Inject first-message prefix (preset context + skills index).
         // Backends with native skill discovery (e.g. Claude via .claude/skills/)
@@ -684,9 +787,7 @@ impl AcpAgentManager {
         data: &SendMessageData,
         session_id: Option<&str>,
     ) -> Result<(), AppError> {
-        let strategy = self.resume_strategy();
-
-        if strategy.is_session_load()
+        if self.supports_session_load()
             && let Some(sid) = session_id
         {
             // Capture anything preload put into the snapshot so the
@@ -733,6 +834,10 @@ impl AcpAgentManager {
         }
 
         self.emit_snapshot_events().await;
+
+        if let Some(sid) = session_id {
+            self.apply_preferred_config_selections(sid).await;
+        }
 
         self.prompt_existing_session(data, session_id).await
     }
@@ -798,18 +903,26 @@ impl AcpAgentManager {
                 current_model_label: Some(current_label),
                 available_models: available,
             };
-            if let Ok(v) = serde_json::to_value(&payload) {
+            // ModelInfoPayload is our own struct but go through the
+            // normaliser for consistency with sibling events.
+            if let Some(v) = sdk_to_snake_value(&payload) {
                 let _ = self.event_tx.send(AgentStreamEvent::AcpModelInfo(v));
             }
         }
         if let Some(modes) = snapshot.modes()
-            && let Ok(v) = serde_json::to_value(modes)
+            && let Some(v) = sdk_to_snake_value(&modes)
         {
             let _ = self.event_tx.send(AgentStreamEvent::AcpModeInfo(v));
         }
         if let Some(config_options) = snapshot.config_options()
-            && let Ok(v) = serde_json::to_value(config_options)
+            && let Some(v) = sdk_to_snake_value(&serde_json::json!({
+                "config_options": config_options,
+            }))
         {
+            // Wrap in `{config_options: [...]}` to match the SDK
+            // `ConfigOptionUpdate` shape used by the streaming path —
+            // handshake blobs and downstream consumers see a uniform
+            // structure regardless of origin.
             let _ = self.event_tx.send(AgentStreamEvent::AcpConfigOption(v));
         }
         if let Some(cmds) = snapshot.available_commands() {
@@ -858,8 +971,22 @@ impl AcpAgentManager {
         self.metadata.behavior_policy.supports_side_question
     }
 
-    fn resume_strategy(&self) -> ResumeStrategy {
-        self.metadata.behavior_policy.resume_strategy
+    /// Whether the agent supports `session/load` — read from the ACP
+    /// handshake's `agent_capabilities.load_session` bool. `false` until
+    /// initialization completes; `false` for agents that advertise no
+    /// load-session capability.
+    ///
+    /// The raw ACP wire field is `loadSession` (camelCase); we store
+    /// the snake_case form because every handshake blob is normalised
+    /// before being persisted (see `sdk_to_snake_value`).
+    fn supports_session_load(&self) -> bool {
+        self.metadata
+            .handshake
+            .agent_capabilities
+            .as_ref()
+            .and_then(|caps| caps.get("load_session"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
     }
 
     fn native_skill_support(&self) -> bool {
@@ -1052,12 +1179,6 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn resume_strategy_session_load_branch() {
-        assert!(ResumeStrategy::SessionLoad.is_session_load());
-        assert!(!ResumeStrategy::NewAndPrompt.is_session_load());
-    }
-
-    #[test]
     fn confirm_option_id_accepts_string_or_object() {
         assert_eq!(
             confirm_option_id(&Value::String("allow_once".into())).as_deref(),
@@ -1074,7 +1195,7 @@ mod tests {
     }
 
     fn metadata_with_yolo_id(yolo_id: Option<&str>) -> AgentMetadata {
-        use aionui_api_types::{AgentSource, AgentSourceInfo, BehaviorPolicy, ResumeStrategy};
+        use aionui_api_types::{AgentSource, AgentSourceInfo, BehaviorPolicy};
         AgentMetadata {
             id: "test".into(),
             icon: None,
@@ -1093,11 +1214,8 @@ mod tests {
             args: vec![],
             env: vec![],
             native_skills_dirs: None,
-            behavior_policy: BehaviorPolicy {
-                resume_strategy: ResumeStrategy::default(),
-                supports_side_question: false,
-                yolo_id: yolo_id.map(ToOwned::to_owned),
-            },
+            behavior_policy: BehaviorPolicy::default(),
+            yolo_id: yolo_id.map(ToOwned::to_owned),
             handshake: AgentHandshake::default(),
         }
     }

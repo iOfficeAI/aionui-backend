@@ -1,6 +1,7 @@
 //! Shared primitives: error types, enums, ID generation, crypto, timestamps, and pagination.
 pub mod constants;
 
+mod case_convert;
 mod crypto;
 mod enums;
 mod error;
@@ -9,6 +10,7 @@ mod pagination;
 mod timestamp;
 mod types;
 
+pub use case_convert::{camel_to_snake, normalize_keys_to_snake_case};
 pub use crypto::{decrypt_string, encrypt_string};
 pub use enums::{
     AgentKillReason, AgentType, ConversationSource, ConversationStatus, FileChangeOperation,

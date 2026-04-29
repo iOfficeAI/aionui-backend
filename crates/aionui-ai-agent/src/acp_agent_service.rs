@@ -98,19 +98,31 @@ impl PendingUpdate {
                 false
             }
             AgentStreamEvent::AcpConfigOption(v) => {
-                let Some(items) = v.as_array() else {
-                    return false;
-                };
+                // Event shape matches the SDK `ConfigOptionUpdate`:
+                //   { config_options: [ { id, kind: { current_value, ... }, ... } ] }
+                // We project each option to `id -> current_value` and
+                // persist that as the user's selection map. `current_value`
+                // lives inside the flattened `kind` payload (Select /
+                // Boolean / …), so read the top-level key directly.
+                let items = v
+                    .get("config_options")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default();
                 let mut selections = serde_json::Map::new();
-                for item in items {
-                    let cid = item
-                        .get("configId")
-                        .or_else(|| item.get("config_id"))
-                        .and_then(Value::as_str);
-                    let value = item.get("value").and_then(Value::as_str);
-                    if let (Some(cid), Some(val)) = (cid, value) {
-                        selections.insert(cid.to_owned(), Value::String(val.to_owned()));
-                    }
+                for item in &items {
+                    let Some(cid) = item.get("id").and_then(Value::as_str) else {
+                        continue;
+                    };
+                    // Only string-valued Select options are persisted as
+                    // user selections — Boolean / future kinds don't map
+                    // cleanly to the HashMap<String, String> that
+                    // `acp_session.session_config.runtime.config_selections`
+                    // expects. Missing `current_value` keys are skipped.
+                    let Some(current) = item.get("current_value").and_then(Value::as_str) else {
+                        continue;
+                    };
+                    selections.insert(cid.to_owned(), Value::String(current.to_owned()));
                 }
                 if selections.is_empty() {
                     return false;
@@ -272,6 +284,31 @@ async fn per_conversation_consumer(
 
         match recv {
             Ok(event) => {
+                // Persist the CLI-assigned session id immediately — this
+                // event fires exactly once per conversation and the id
+                // is needed for later resume-via-`session/load`. No
+                // debounce here; the cost is a single write.
+                if let AgentStreamEvent::SessionAssigned(data) = &event {
+                    match repo
+                        .update_session_id(&conversation_id, &data.session_id)
+                        .await
+                    {
+                        Ok(true) => {}
+                        Ok(false) => {
+                            debug!(
+                                conversation_id,
+                                "session-sync: acp_session row missing; session_id not written"
+                            );
+                        }
+                        Err(err) => {
+                            warn!(
+                                conversation_id,
+                                error = %err,
+                                "session-sync: update_session_id failed"
+                            );
+                        }
+                    }
+                }
                 if pending.merge_from_event(&event) {
                     flush_at = Some(Instant::now() + DEBOUNCE_WINDOW);
                 }

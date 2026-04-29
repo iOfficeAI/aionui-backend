@@ -71,6 +71,15 @@ pub enum AgentStreamEvent {
     System(serde_json::Value),
     /// Raw request trace (ACP debug info).
     RequestTrace(serde_json::Value),
+
+    /// Emitted exactly once per conversation, right after the ACP CLI
+    /// returns a fresh `session_id` from `session/new`. Subscribers
+    /// (e.g. `AcpAgentService`) persist the id into `acp_session` so a
+    /// later resume can call `session/load`.
+    ///
+    /// Not emitted on `session/load` — the id in that path is
+    /// already stored.
+    SessionAssigned(SessionAssignedEventData),
 }
 
 /// Data for the `Start` event.
@@ -79,6 +88,13 @@ pub struct StartEventData {
     /// Session ID for this turn (if available).
     #[serde(default)]
     pub session_id: Option<String>,
+}
+
+/// Data for the `SessionAssigned` event.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionAssignedEventData {
+    /// The CLI-assigned session id, freshly minted by `session/new`.
+    pub session_id: String,
 }
 
 /// Data for the `Text` event.
@@ -363,6 +379,11 @@ pub struct PlanEventData {
 }
 
 /// Data for the `AvailableCommands` event.
+///
+/// `commands` carries ACP SDK structs that serialise as camelCase on
+/// their own. Producers keep them typed; the case normalisation to
+/// snake_case happens at the stream-relay layer when the event is
+/// serialised for WebSocket delivery.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AvailableCommandsEventData {
     pub commands: Vec<AvailableCommand>,

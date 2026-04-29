@@ -56,22 +56,6 @@ pub struct AgentSourceInfo {
     pub version: Option<String>,
 }
 
-/// How the agent resumes an existing session.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ResumeStrategy {
-    #[default]
-    NewAndPrompt,
-    SessionLoad,
-}
-
-impl ResumeStrategy {
-    /// Whether this strategy resumes by calling `session/load` (Codex).
-    pub fn is_session_load(self) -> bool {
-        matches!(self, ResumeStrategy::SessionLoad)
-    }
-}
-
 /// Adapter-side behaviour switches. These drive code branches that used
 /// to be hardcoded per `AcpBackend`; new keys are added by extending
 /// this struct — we deliberately avoid a free-form "extra" bag so every
@@ -79,15 +63,7 @@ impl ResumeStrategy {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BehaviorPolicy {
     #[serde(default)]
-    pub resume_strategy: ResumeStrategy,
-    #[serde(default)]
     pub supports_side_question: bool,
-    /// Native mode id that AionUi's legacy `yolo` / `yoloNoSandbox`
-    /// aliases should resolve to before calling `session/set_mode`.
-    /// `None` means the backend has no "yolo" equivalent and the alias
-    /// should be passed through unchanged.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub yolo_id: Option<String>,
 }
 
 /// Handshake-derived fields captured from the ACP init/session-response.
@@ -164,6 +140,13 @@ pub struct AgentMetadata {
     #[serde(default)]
     pub behavior_policy: BehaviorPolicy,
 
+    /// Native mode id that AionUi's legacy `yolo` / `yoloNoSandbox`
+    /// aliases resolve to before calling `session/set_mode`. `None`
+    /// means the backend has no "yolo" equivalent and the alias should
+    /// pass through unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yolo_id: Option<String>,
+
     #[serde(default)]
     pub handshake: AgentHandshake,
 }
@@ -189,11 +172,6 @@ mod tests {
     }
 
     #[test]
-    fn resume_strategy_default_is_new_and_prompt() {
-        assert_eq!(ResumeStrategy::default(), ResumeStrategy::NewAndPrompt);
-    }
-
-    #[test]
     fn agent_metadata_skips_empty_fields() {
         let meta = AgentMetadata {
             id: "abc12345".into(),
@@ -214,6 +192,7 @@ mod tests {
             env: vec![],
             native_skills_dirs: None,
             behavior_policy: BehaviorPolicy::default(),
+            yolo_id: None,
             handshake: AgentHandshake::default(),
         };
         let v = serde_json::to_value(&meta).unwrap();
@@ -240,10 +219,7 @@ mod tests {
         assert_eq!(meta.agent_type, AgentType::Acp);
         assert_eq!(meta.agent_source, AgentSource::Custom);
         assert!(!meta.available);
-        assert_eq!(
-            meta.behavior_policy.resume_strategy,
-            ResumeStrategy::NewAndPrompt
-        );
+        assert!(!meta.behavior_policy.supports_side_question);
         assert!(meta.handshake.agent_capabilities.is_none());
     }
 }

@@ -293,10 +293,10 @@ impl ConversationService {
         // label; `agent_source` says builtin/extension/custom. The
         // frontend always posts agent_id for picked rows, but older
         // payloads may only carry `backend`, so we resolve defensively.
-        let agent_id = extra
+        let agent_id_from_extra = extra
             .get("agent_id")
             .and_then(|v| v.as_str())
-            .unwrap_or_default();
+            .filter(|s| !s.is_empty());
         let backend = extra
             .get("backend")
             .and_then(|v| v.as_str())
@@ -306,11 +306,29 @@ impl ConversationService {
             .and_then(|v| v.as_str())
             .unwrap_or("builtin");
 
+        // Fallback: older clients (electron main, legacy webhooks) only
+        // post `backend` without `agent_id`. Resolve the builtin row for
+        // that vendor so the session still has a concrete catalog
+        // reference. Non-builtin agents must provide `agent_id`
+        // explicitly — custom/extension rows have no unique lookup key
+        // from `(backend, agent_source)` alone.
+        let resolved_agent_id = match agent_id_from_extra {
+            Some(id) => id.to_owned(),
+            None if !backend.is_empty() && agent_source == "builtin" => self
+                .agent_metadata_repo
+                .find_builtin_by_backend(backend)
+                .await
+                .map_err(|e| AppError::Internal(format!("agent_metadata lookup: {e}")))?
+                .map(|row| row.id)
+                .unwrap_or_default(),
+            None => String::new(),
+        };
+
         let params = CreateAcpSessionParams {
             conversation_id,
             agent_backend: backend,
             agent_source,
-            agent_id,
+            agent_id: &resolved_agent_id,
         };
         self.acp_session_repo
             .create(&params)

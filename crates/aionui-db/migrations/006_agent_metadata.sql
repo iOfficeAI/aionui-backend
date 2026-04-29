@@ -18,12 +18,16 @@
 --                       `bridge_binary` is an additional binary required for
 --                       bridge-based ACP spawns (e.g. "bun").
 --   behavior_policy     JSON: adapter-side behaviour flags. Current keys:
---                         "resume_strategy": "new_and_prompt" | "session_load"
 --                         "supports_side_question": bool
---                         "yolo_id": native mode id that AionUi's legacy
---                             `yolo` / `yoloNoSandbox` aliases resolve to
---                             before `session/set_mode` (optional; omit
---                             when the backend has no yolo equivalent).
+--                       Whether the agent supports session/load is read
+--                       from the handshake's
+--                       `agent_capabilities.load_session` bool, not from
+--                       this column.
+--   yolo_id             Native mode id that AionUi's legacy `yolo` /
+--                       `yoloNoSandbox` aliases resolve to before
+--                       calling `session/set_mode`. NULL means the
+--                       backend has no yolo equivalent and the alias
+--                       should pass through unchanged.
 --   agent_capabilities / auth_methods / config_options /
 --   available_modes / available_models / available_commands:
 --     raw JSON captured from the ACP handshake, refreshed per init.
@@ -49,6 +53,7 @@ CREATE TABLE IF NOT EXISTS agent_metadata (
     native_skills_dirs  TEXT,
 
     behavior_policy     TEXT,
+    yolo_id             TEXT,
 
     agent_capabilities  TEXT,
     auth_methods        TEXT,
@@ -73,7 +78,7 @@ CREATE INDEX IF NOT EXISTS idx_agent_metadata_agent_type ON agent_metadata(agent
 INSERT OR IGNORE INTO agent_metadata
     (id, icon, name, name_i18n, description, description_i18n,
      backend, agent_type, agent_source, agent_source_info,
-     enabled, command, args, env, native_skills_dirs, behavior_policy,
+     enabled, command, args, env, native_skills_dirs, behavior_policy, yolo_id,
      agent_capabilities, auth_methods, config_options,
      available_modes, available_models, available_commands,
      created_at, updated_at)
@@ -85,7 +90,8 @@ VALUES
      '["x","--bun","@agentclientprotocol/claude-agent-acp@0.29.2"]',
      '[]',
      '[".claude/skills"]',
-     '{"resume_strategy":"new_and_prompt","supports_side_question":true,"yolo_id":"bypassPermissions"}',
+     '{"supports_side_question":true}',
+     'bypassPermissions',
      NULL, NULL, NULL, NULL, NULL, NULL,
      unixepoch('now','subsec')*1000, unixepoch('now','subsec')*1000),
 
@@ -96,7 +102,8 @@ VALUES
      '["x","--bun","@zed-industries/codex-acp@0.9.5"]',
      '[]',
      '[".codex/skills"]',
-     '{"resume_strategy":"session_load","supports_side_question":false,"yolo_id":"full-access"}',
+     '{"supports_side_question":false}',
+     'full-access',
      NULL, NULL, NULL, NULL, NULL, NULL,
      unixepoch('now','subsec')*1000, unixepoch('now','subsec')*1000),
 
@@ -105,7 +112,8 @@ VALUES
      '{"binary_name":"gemini"}',
      1, 'gemini', '["--experimental-acp"]', '[]',
      '[".gemini/skills"]',
-     '{"resume_strategy":"new_and_prompt","supports_side_question":false}',
+     '{"supports_side_question":false}',
+     NULL,
      NULL, NULL, NULL, NULL, NULL, NULL,
      unixepoch('now','subsec')*1000, unixepoch('now','subsec')*1000),
 
@@ -114,7 +122,8 @@ VALUES
      '{"binary_name":"qwen"}',
      1, 'qwen', '["--acp"]', '[]',
      '[".qwen/skills"]',
-     '{"resume_strategy":"new_and_prompt","supports_side_question":false}',
+     '{"supports_side_question":false}',
+     NULL,
      NULL, NULL, NULL, NULL, NULL, NULL,
      unixepoch('now','subsec')*1000, unixepoch('now','subsec')*1000),
 
@@ -126,7 +135,8 @@ VALUES
      '["x","--bun","@tencent-ai/codebuddy-code@2.73.0","--acp"]',
      '[]',
      '[".codebuddy/skills"]',
-     '{"resume_strategy":"new_and_prompt","supports_side_question":false}',
+     '{"supports_side_question":false}',
+     NULL,
      NULL, NULL, NULL, NULL, NULL, NULL,
      unixepoch('now','subsec')*1000, unixepoch('now','subsec')*1000),
 
@@ -135,7 +145,8 @@ VALUES
      '{"binary_name":"droid"}',
      1, 'droid', '["exec","--output-format","acp"]', '[]',
      '[".factory/skills"]',
-     '{"resume_strategy":"new_and_prompt","supports_side_question":false}',
+     '{"supports_side_question":false}',
+     NULL,
      NULL, NULL, NULL, NULL, NULL, NULL,
      unixepoch('now','subsec')*1000, unixepoch('now','subsec')*1000),
 
@@ -144,7 +155,8 @@ VALUES
      '{"binary_name":"goose"}',
      1, 'goose', '["acp"]', '[]',
      '[".goose/skills"]',
-     '{"resume_strategy":"new_and_prompt","supports_side_question":false}',
+     '{"supports_side_question":false}',
+     NULL,
      NULL, NULL, NULL, NULL, NULL, NULL,
      unixepoch('now','subsec')*1000, unixepoch('now','subsec')*1000),
 
@@ -153,7 +165,8 @@ VALUES
      '{"binary_name":"auggie"}',
      1, 'auggie', '["--acp"]', '[]',
      NULL,
-     '{"resume_strategy":"new_and_prompt","supports_side_question":false}',
+     '{"supports_side_question":false}',
+     NULL,
      NULL, NULL, NULL, NULL, NULL, NULL,
      unixepoch('now','subsec')*1000, unixepoch('now','subsec')*1000),
 
@@ -162,7 +175,8 @@ VALUES
      '{"binary_name":"kimi"}',
      1, 'kimi', '["acp"]', '[]',
      '[".kimi/skills"]',
-     '{"resume_strategy":"new_and_prompt","supports_side_question":false}',
+     '{"supports_side_question":false}',
+     NULL,
      NULL, NULL, NULL, NULL, NULL, NULL,
      unixepoch('now','subsec')*1000, unixepoch('now','subsec')*1000),
 
@@ -171,7 +185,8 @@ VALUES
      '{"binary_name":"opencode"}',
      1, 'opencode', '["acp"]', '[]',
      '[".opencode/skills"]',
-     '{"resume_strategy":"new_and_prompt","supports_side_question":false}',
+     '{"supports_side_question":false}',
+     NULL,
      NULL, NULL, NULL, NULL, NULL, NULL,
      unixepoch('now','subsec')*1000, unixepoch('now','subsec')*1000),
 
@@ -180,7 +195,8 @@ VALUES
      '{"binary_name":"copilot"}',
      1, 'copilot', '["--acp","--stdio"]', '[]',
      NULL,
-     '{"resume_strategy":"new_and_prompt","supports_side_question":false}',
+     '{"supports_side_question":false}',
+     NULL,
      NULL, NULL, NULL, NULL, NULL, NULL,
      unixepoch('now','subsec')*1000, unixepoch('now','subsec')*1000),
 
@@ -189,7 +205,8 @@ VALUES
      '{"binary_name":"qoder"}',
      1, 'qoder', '["--acp"]', '[]',
      NULL,
-     '{"resume_strategy":"new_and_prompt","supports_side_question":false}',
+     '{"supports_side_question":false}',
+     NULL,
      NULL, NULL, NULL, NULL, NULL, NULL,
      unixepoch('now','subsec')*1000, unixepoch('now','subsec')*1000),
 
@@ -198,7 +215,8 @@ VALUES
      '{"binary_name":"vibe"}',
      1, 'vibe', '[]', '[]',
      '[".vibe/skills"]',
-     '{"resume_strategy":"new_and_prompt","supports_side_question":false}',
+     '{"supports_side_question":false}',
+     NULL,
      NULL, NULL, NULL, NULL, NULL, NULL,
      unixepoch('now','subsec')*1000, unixepoch('now','subsec')*1000),
 
@@ -207,7 +225,8 @@ VALUES
      '{"binary_name":"cursor"}',
      1, 'cursor', '["acp"]', '[]',
      '[".cursor/skills"]',
-     '{"resume_strategy":"new_and_prompt","supports_side_question":false}',
+     '{"supports_side_question":false}',
+     NULL,
      NULL, NULL, NULL, NULL, NULL, NULL,
      unixepoch('now','subsec')*1000, unixepoch('now','subsec')*1000),
 
@@ -216,7 +235,8 @@ VALUES
      '{"binary_name":"kiro"}',
      1, 'kiro', '["acp"]', '[]',
      NULL,
-     '{"resume_strategy":"new_and_prompt","supports_side_question":false}',
+     '{"supports_side_question":false}',
+     NULL,
      NULL, NULL, NULL, NULL, NULL, NULL,
      unixepoch('now','subsec')*1000, unixepoch('now','subsec')*1000),
 
@@ -225,7 +245,8 @@ VALUES
      '{"binary_name":"hermes"}',
      1, 'hermes', '["acp"]', '[]',
      NULL,
-     '{"resume_strategy":"new_and_prompt","supports_side_question":false}',
+     '{"supports_side_question":false}',
+     NULL,
      NULL, NULL, NULL, NULL, NULL, NULL,
      unixepoch('now','subsec')*1000, unixepoch('now','subsec')*1000),
 
@@ -234,7 +255,8 @@ VALUES
      '{"binary_name":"snow"}',
      1, 'snow', '["--acp"]', '[]',
      NULL,
-     '{"resume_strategy":"new_and_prompt","supports_side_question":false}',
+     '{"supports_side_question":false}',
+     NULL,
      NULL, NULL, NULL, NULL, NULL, NULL,
      unixepoch('now','subsec')*1000, unixepoch('now','subsec')*1000);
 
@@ -243,7 +265,7 @@ VALUES
 INSERT OR IGNORE INTO agent_metadata
     (id, icon, name, name_i18n, description, description_i18n,
      backend, agent_type, agent_source, agent_source_info,
-     enabled, command, args, env, native_skills_dirs, behavior_policy,
+     enabled, command, args, env, native_skills_dirs, behavior_policy, yolo_id,
      agent_capabilities, auth_methods, config_options,
      available_modes, available_models, available_commands,
      created_at, updated_at)
@@ -254,6 +276,7 @@ VALUES
      1, 'nanobot', '["--experimental-acp"]', '[]',
      NULL,
      '{}',
+     NULL,
      NULL, NULL, NULL, NULL, NULL, NULL,
      unixepoch('now','subsec')*1000, unixepoch('now','subsec')*1000),
 
@@ -263,6 +286,7 @@ VALUES
      1, 'openclaw', '[]', '[]',
      NULL,
      '{}',
+     NULL,
      NULL, NULL, NULL, NULL, NULL, NULL,
      unixepoch('now','subsec')*1000, unixepoch('now','subsec')*1000),
 
@@ -272,5 +296,6 @@ VALUES
      1, NULL, '[]', '[]',
      '[".aionrs/skills"]',
      '{}',
+     NULL,
      NULL, NULL, NULL, NULL, NULL, NULL,
      unixepoch('now','subsec')*1000, unixepoch('now','subsec')*1000);

@@ -31,6 +31,11 @@ pub struct AgentMetadataRow {
     pub native_skills_dirs: Option<String>,
 
     pub behavior_policy: Option<String>,
+    /// Native mode id that AionUi's legacy `yolo` / `yoloNoSandbox`
+    /// aliases resolve to before calling `session/set_mode`. `None`
+    /// means the backend has no yolo equivalent and the alias should
+    /// pass through unchanged.
+    pub yolo_id: Option<String>,
 
     pub agent_capabilities: Option<String>,
     pub auth_methods: Option<String>,
@@ -65,6 +70,7 @@ pub struct UpsertAgentMetadataParams<'a> {
     pub env: Option<&'a str>,
     pub native_skills_dirs: Option<&'a str>,
     pub behavior_policy: Option<&'a str>,
+    pub yolo_id: Option<&'a str>,
     pub agent_capabilities: Option<&'a str>,
     pub auth_methods: Option<&'a str>,
     pub config_options: Option<&'a str>,
