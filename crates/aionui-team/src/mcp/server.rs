@@ -1,6 +1,8 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use aionui_api_types::{TeamMcpPhase, TeamMcpStatusPayload, WebSocketMessage};
+use aionui_realtime::EventBroadcaster;
 use serde_json::{Value, json};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::watch;
@@ -31,13 +33,44 @@ pub struct TeamMcpServer {
 }
 
 impl TeamMcpServer {
-    pub async fn start(auth_token: String, scheduler: Arc<TeammateManager>) -> Result<Self, TeamError> {
-        let listener = TcpListener::bind("127.0.0.1:0")
-            .await
-            .map_err(|e| TeamError::InvalidRequest(format!("Failed to bind TCP: {e}")))?;
+    pub async fn start(
+        auth_token: String,
+        scheduler: Arc<TeammateManager>,
+        team_id: String,
+        broadcaster: Arc<dyn EventBroadcaster>,
+    ) -> Result<Self, TeamError> {
+        let listener = match TcpListener::bind("127.0.0.1:0").await {
+            Ok(l) => l,
+            Err(e) => {
+                broadcast_mcp_status(
+                    broadcaster.as_ref(),
+                    TeamMcpStatusPayload {
+                        team_id: team_id.clone(),
+                        slot_id: String::new(),
+                        phase: TeamMcpPhase::TcpError,
+                        port: None,
+                        server_count: None,
+                        error: Some(e.to_string()),
+                    },
+                );
+                return Err(TeamError::InvalidRequest(format!("Failed to bind TCP: {e}")));
+            }
+        };
         let addr = listener
             .local_addr()
             .map_err(|e| TeamError::InvalidRequest(format!("Failed to get local addr: {e}")))?;
+
+        broadcast_mcp_status(
+            broadcaster.as_ref(),
+            TeamMcpStatusPayload {
+                team_id: team_id.clone(),
+                slot_id: String::new(),
+                phase: TeamMcpPhase::TcpReady,
+                port: Some(addr.port()),
+                server_count: None,
+                error: None,
+            },
+        );
 
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
@@ -93,6 +126,14 @@ impl Drop for TeamMcpServer {
     fn drop(&mut self) {
         let _ = self.shutdown_tx.send(true);
     }
+}
+
+fn broadcast_mcp_status(broadcaster: &dyn EventBroadcaster, payload: TeamMcpStatusPayload) {
+    let event = WebSocketMessage::new(
+        "team.mcpStatus",
+        serde_json::to_value(payload).expect("serialize mcp status payload"),
+    );
+    broadcaster.broadcast(event);
 }
 
 // ---------------------------------------------------------------------------

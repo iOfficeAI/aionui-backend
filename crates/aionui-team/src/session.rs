@@ -63,11 +63,11 @@ impl TeamSession {
             &team.agents,
             mailbox.clone(),
             task_board.clone(),
-            broadcaster,
+            broadcaster.clone(),
         ));
 
         let auth_token = aionui_common::generate_id();
-        let mcp_server = TeamMcpServer::start(auth_token, scheduler.clone()).await?;
+        let mcp_server = TeamMcpServer::start(auth_token, scheduler.clone(), team.id.clone(), broadcaster).await?;
 
         info!(
             team_id = %team.id,
