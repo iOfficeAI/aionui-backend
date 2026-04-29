@@ -53,15 +53,18 @@ fn normalize_requested_mode(backend: AcpBackend, mode: &str) -> String {
         return String::new();
     }
 
+    // "yolo" / "yoloNoSandbox" are generic full-auto identifiers used by
+    // channel and cron flows. Map them to whatever the specific backend
+    // actually calls its permissive mode (e.g. `bypassPermissions` for
+    // Claude, `full-access` for Codex, `yolo` for Gemini/Qwen).
+    if matches!(trimmed, "yolo" | "yoloNoSandbox") {
+        return backend.full_auto_mode_id().to_owned();
+    }
+
     match backend {
-        // Codex ACP now reports native mode ids (`read-only`, `auto`,
-        // `full-access`) while existing AionUi flows still persist the legacy
-        // semantic ids (`default`, `autoEdit`, `yolo`, `yoloNoSandbox`).
-        // Cron reuses the persisted value directly, so normalize it before
-        // comparing or calling `session/set_mode`.
+        // Codex also has legacy `default`/`autoEdit` that need mapping.
         AcpBackend::Codex => match trimmed {
             "default" | "autoEdit" => "auto".to_owned(),
-            "yolo" | "yoloNoSandbox" => "full-access".to_owned(),
             other => other.to_owned(),
         },
         _ => trimmed.to_owned(),
@@ -915,6 +918,26 @@ mod tests {
         assert_eq!(
             normalize_requested_mode(AcpBackend::Claude, "bypassPermissions"),
             "bypassPermissions"
+        );
+        assert_eq!(
+            normalize_requested_mode(AcpBackend::Claude, "yolo"),
+            "bypassPermissions"
+        );
+        assert_eq!(
+            normalize_requested_mode(AcpBackend::Claude, "yoloNoSandbox"),
+            "bypassPermissions"
+        );
+        assert_eq!(
+            normalize_requested_mode(AcpBackend::Opencode, "yolo"),
+            "build"
+        );
+        assert_eq!(
+            normalize_requested_mode(AcpBackend::Cursor, "yolo"),
+            "agent"
+        );
+        assert_eq!(
+            normalize_requested_mode(AcpBackend::Gemini, "yolo"),
+            "yolo"
         );
     }
 }

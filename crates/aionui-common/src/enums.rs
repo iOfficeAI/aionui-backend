@@ -280,7 +280,7 @@ impl AcpBackend {
     /// conversation without depending on a live ACP runtime snapshot.
     pub fn full_auto_mode_id(&self) -> &'static str {
         match self {
-            AcpBackend::Claude => "bypassPermissions",
+            AcpBackend::Claude | AcpBackend::Codebuddy => "bypassPermissions",
             AcpBackend::Codex => "full-access",
             AcpBackend::Opencode => "build",
             AcpBackend::Cursor => "agent",
@@ -723,6 +723,10 @@ mod tests {
     #[test]
     fn acp_backend_full_auto_mode_id_matches_backend_capabilities() {
         assert_eq!(AcpBackend::Claude.full_auto_mode_id(), "bypassPermissions");
+        assert_eq!(
+            AcpBackend::Codebuddy.full_auto_mode_id(),
+            "bypassPermissions"
+        );
         assert_eq!(AcpBackend::Codex.full_auto_mode_id(), "full-access");
         assert_eq!(AcpBackend::Opencode.full_auto_mode_id(), "build");
         assert_eq!(AcpBackend::Cursor.full_auto_mode_id(), "agent");
