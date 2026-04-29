@@ -341,6 +341,18 @@ impl TeamSession {
             return Err(TeamError::InvalidRequest(format!("agent name conflict: {normalized}")));
         }
 
+        // Step 3: backend whitelist — inherit caller's backend when the
+        // request does not specify, otherwise validate against the allowed set.
+        const SPAWN_BACKEND_WHITELIST: &[&str] = &["claude", "codex"];
+        let backend = req
+            .agent_type
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .unwrap_or(caller.backend.as_str());
+        if !SPAWN_BACKEND_WHITELIST.contains(&backend) {
+            return Err(TeamError::BackendNotAllowed(backend.to_owned()));
+        }
+
         let _ = req;
         todo!("W5-D29a-4..D29d will fill in the remaining spawn steps")
     }
@@ -1006,6 +1018,78 @@ mod tests {
         session.send_message("", None).await.unwrap();
 
         assert_eq!(sent.lock().unwrap().len(), 1);
+        session.stop();
+    }
+
+    async fn start_session_with_lead_backend(backend: &str) -> TeamSession {
+        let mut team = make_team();
+        team.agents[0].backend = backend.to_string();
+        let repo: Arc<dyn ITeamRepository> = Arc::new(MockTeamRepo::new());
+        let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(NullBroadcaster);
+        TeamSession::start(team, repo, broadcaster, backend_path(), empty_task_manager())
+            .await
+            .unwrap()
+    }
+
+    fn spawn_req(agent_type: Option<&str>) -> SpawnAgentRequest {
+        SpawnAgentRequest {
+            name: "Helper".into(),
+            agent_type: agent_type.map(str::to_owned),
+            custom_agent_id: None,
+            model: None,
+        }
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "W5-D29a")]
+    async fn spawn_agent_accepts_claude_backend() {
+        let session = start_session_with_lead_backend("claude").await;
+        let _ = session.spawn_agent("lead-1", spawn_req(Some("claude"))).await;
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "W5-D29a")]
+    async fn spawn_agent_accepts_codex_backend() {
+        let session = start_session_with_lead_backend("claude").await;
+        let _ = session.spawn_agent("lead-1", spawn_req(Some("codex"))).await;
+    }
+
+    #[tokio::test]
+    async fn spawn_agent_rejects_unknown_backend() {
+        let session = start_session_with_lead_backend("claude").await;
+        let err = session
+            .spawn_agent("lead-1", spawn_req(Some("unknown_backend")))
+            .await
+            .expect_err("unknown backend must be rejected");
+        assert!(
+            matches!(&err, TeamError::BackendNotAllowed(b) if b == "unknown_backend"),
+            "expected BackendNotAllowed(\"unknown_backend\"), got {err:?}"
+        );
+        session.stop();
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "W5-D29a")]
+    async fn spawn_agent_inherits_caller_backend_when_unspecified() {
+        // No agent_type on the request -> must fall back to the caller's
+        // backend ("claude"), which passes the whitelist and reaches todo!().
+        let session = start_session_with_lead_backend("claude").await;
+        let _ = session.spawn_agent("lead-1", spawn_req(None)).await;
+    }
+
+    #[tokio::test]
+    async fn spawn_agent_rejects_when_inherited_backend_not_whitelisted() {
+        // Caller's backend is "acp" (not whitelisted). With no explicit
+        // agent_type, the inherited backend must be rejected.
+        let session = start_session_with_lead_backend("acp").await;
+        let err = session
+            .spawn_agent("lead-1", spawn_req(None))
+            .await
+            .expect_err("non-whitelisted inherited backend must be rejected");
+        assert!(
+            matches!(&err, TeamError::BackendNotAllowed(b) if b == "acp"),
+            "expected BackendNotAllowed(\"acp\"), got {err:?}"
+        );
         session.stop();
     }
 }

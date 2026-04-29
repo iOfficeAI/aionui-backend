@@ -23,6 +23,9 @@ pub enum TeamError {
     #[error("Blocked task not found: {0}")]
     BlockedTaskNotFound(String),
 
+    #[error("Backend not allowed: {0}")]
+    BackendNotAllowed(String),
+
     #[error("{0}")]
     Database(#[from] aionui_db::DbError),
 
@@ -40,6 +43,7 @@ impl From<TeamError> for AppError {
             TeamError::LeaderOnly(msg) => AppError::Forbidden(msg),
             TeamError::SessionNotFound(msg) => AppError::NotFound(msg),
             TeamError::BlockedTaskNotFound(msg) => AppError::BadRequest(msg),
+            TeamError::BackendNotAllowed(msg) => AppError::BadRequest(msg),
             TeamError::Database(db_err) => AppError::from(db_err),
             TeamError::Json(e) => AppError::Internal(format!("JSON error: {e}")),
         }
@@ -90,6 +94,12 @@ mod tests {
     fn blocked_task_not_found_maps_to_bad_request() {
         let err: AppError = TeamError::BlockedTaskNotFound("tk-x".into()).into();
         assert!(matches!(err, AppError::BadRequest(_)));
+    }
+
+    #[test]
+    fn backend_not_allowed_maps_to_bad_request() {
+        let err: AppError = TeamError::BackendNotAllowed("gemini".into()).into();
+        assert!(matches!(err, AppError::BadRequest(msg) if msg == "gemini"));
     }
 
     #[test]
