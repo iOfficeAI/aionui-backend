@@ -713,6 +713,7 @@ dependencies = [
  "async-trait",
  "axum",
  "dashmap",
+ "regex",
  "serde",
  "serde_json",
  "sqlx",

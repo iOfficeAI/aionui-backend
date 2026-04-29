@@ -1,4 +1,5 @@
 //! Multi-agent team sessions with role-based prompts, task board, mailbox, and scheduling.
+pub mod crash_detection;
 pub mod error;
 pub mod events;
 pub mod mailbox;
@@ -13,6 +14,7 @@ pub mod task_board;
 pub(crate) mod test_utils;
 pub mod types;
 
+pub use crash_detection::is_rate_limited;
 pub use error::TeamError;
 pub use events::TeamEventEmitter;
 pub use mailbox::Mailbox;
