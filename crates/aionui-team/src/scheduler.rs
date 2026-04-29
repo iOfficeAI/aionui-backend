@@ -673,8 +673,11 @@ impl TeammateManager {
 
         {
             let slots = self.slots.lock().await;
-            if !slots.contains_key(target_slot_id) {
-                return Err(TeamError::AgentNotFound(target_slot_id.to_owned()));
+            let target = slots
+                .get(target_slot_id)
+                .ok_or_else(|| TeamError::AgentNotFound(target_slot_id.to_owned()))?;
+            if target.agent.role == TeammateRole::Lead {
+                return Err(TeamError::InvalidRequest("cannot shutdown the team lead".into()));
             }
         }
 
@@ -1208,6 +1211,52 @@ mod tests {
         };
         let result = mgr.execute_action("worker-1", &action).await;
         assert!(matches!(result, Err(TeamError::InvalidRequest(_))));
+    }
+
+    #[tokio::test]
+    async fn lead_cannot_shutdown_lead() {
+        let agents = make_team_agents();
+        let repo = Arc::new(MockTeamRepo::new());
+        let mailbox = Arc::new(Mailbox::new(repo.clone()));
+        let task_board = Arc::new(TaskBoard::new(repo));
+        let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(RecordingBroadcaster::new());
+        let mgr = TeammateManager::new("t1".into(), &agents, mailbox.clone(), task_board, broadcaster);
+
+        let action = SchedulerAction::ShutdownAgent {
+            slot_id: "lead-1".into(),
+            reason: Some("trying to shutdown self".into()),
+        };
+        let result = mgr.execute_action("lead-1", &action).await;
+        assert!(
+            matches!(&result, Err(TeamError::InvalidRequest(msg)) if msg.contains("lead")),
+            "lead shutting down lead must be rejected, got {result:?}"
+        );
+
+        // No ShutdownRequest message should have been written to the lead's mailbox.
+        let lead_msgs = mailbox.read_unread("t1", "lead-1").await.unwrap();
+        assert!(lead_msgs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn lead_can_shutdown_worker() {
+        // Positive-path sanity check that the new target-role guard does not
+        // regress the normal shutdown flow.
+        let agents = make_team_agents();
+        let repo = Arc::new(MockTeamRepo::new());
+        let mailbox = Arc::new(Mailbox::new(repo.clone()));
+        let task_board = Arc::new(TaskBoard::new(repo));
+        let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(RecordingBroadcaster::new());
+        let mgr = TeammateManager::new("t1".into(), &agents, mailbox.clone(), task_board, broadcaster);
+
+        let action = SchedulerAction::ShutdownAgent {
+            slot_id: "worker-1".into(),
+            reason: Some("not needed".into()),
+        };
+        mgr.execute_action("lead-1", &action).await.unwrap();
+
+        let msgs = mailbox.read_unread("t1", "worker-1").await.unwrap();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].msg_type, MailboxMessageType::ShutdownRequest);
     }
 
     // -- execute_action: RenameAgent -----------------------------------------
