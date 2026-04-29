@@ -904,11 +904,7 @@ async fn wait_for_terminal_event(mut rx: broadcast::Receiver<AgentStreamEvent>) 
 }
 
 fn parse_agent_type(agent_type_str: &str) -> AgentType {
-    if serde_json::from_value::<aionui_common::AcpBackend>(serde_json::Value::String(
-        agent_type_str.to_owned(),
-    ))
-    .is_ok()
-    {
+    if is_known_acp_backend(agent_type_str) {
         return AgentType::Acp;
     }
 
@@ -943,15 +939,40 @@ fn infer_acp_backend(job: &CronJob) -> Option<String> {
     }
 
     let agent_type = job.agent_type.trim();
-    if serde_json::from_value::<aionui_common::AcpBackend>(serde_json::Value::String(
-        agent_type.to_owned(),
-    ))
-    .is_ok()
-    {
+    if is_known_acp_backend(agent_type) {
         return Some(agent_type.to_owned());
     }
 
     None
+}
+
+/// Builtin ACP vendor identifiers seeded in `004_agent_metadata.sql`.
+/// Cron uses this as a sync heuristic to decide whether a stored
+/// `agent_type` string should be treated as ACP. Non-builtin catalog
+/// rows are not covered here — callers that need full accuracy should
+/// consult the `AgentRegistry` instead.
+const KNOWN_ACP_BACKENDS: &[&str] = &[
+    "claude",
+    "gemini",
+    "qwen",
+    "codex",
+    "codebuddy",
+    "droid",
+    "goose",
+    "auggie",
+    "kimi",
+    "opencode",
+    "copilot",
+    "qoder",
+    "vibe",
+    "cursor",
+    "kiro",
+    "hermes",
+    "snow",
+];
+
+fn is_known_acp_backend(name: &str) -> bool {
+    KNOWN_ACP_BACKENDS.iter().any(|b| *b == name)
 }
 
 fn build_task_extra(job: &CronJob, skills: &[String]) -> serde_json::Value {
@@ -2154,11 +2175,17 @@ mod tests {
         let stub_broadcaster: Arc<dyn aionui_realtime::EventBroadcaster> =
             Arc::new(StubBroadcaster);
         let stub_repo: Arc<dyn IConversationRepository> = Arc::new(StubConvRepo);
+        let agent_metadata_repo: Arc<dyn aionui_db::IAgentMetadataRepository> =
+            Arc::new(StubAgentMetadataRepo);
+        let acp_session_repo: Arc<dyn aionui_db::IAcpSessionRepository> =
+            Arc::new(StubAcpSessionRepo);
         let conv_service = Arc::new(ConversationService::new_with_workspace_root(
             Arc::clone(&stub_repo),
             stub_broadcaster,
             std::env::temp_dir(),
             Arc::new(StubSkillResolver),
+            agent_metadata_repo,
+            acp_session_repo,
         ));
 
         JobExecutor::new(
@@ -2805,11 +2832,17 @@ mod tests {
             }
         }
 
+        let agent_metadata_repo: Arc<dyn aionui_db::IAgentMetadataRepository> =
+            Arc::new(StubAgentMetadataRepo);
+        let acp_session_repo: Arc<dyn aionui_db::IAcpSessionRepository> =
+            Arc::new(StubAcpSessionRepo);
         let conversation_service = Arc::new(ConversationService::new_with_workspace_root(
             Arc::clone(&repo),
             Arc::clone(&broadcaster),
             std::env::temp_dir(),
             Arc::new(StubSkillResolver),
+            agent_metadata_repo,
+            acp_session_repo,
         ));
 
         JobExecutor::new(
@@ -2820,5 +2853,95 @@ mod tests {
             std::env::temp_dir(),
             broadcaster,
         )
+    }
+
+    struct StubAcpSessionRepo;
+
+    #[async_trait::async_trait]
+    impl aionui_db::IAcpSessionRepository for StubAcpSessionRepo {
+        async fn get(
+            &self,
+            _conversation_id: &str,
+        ) -> Result<Option<aionui_db::models::AcpSessionRow>, aionui_db::DbError> {
+            Ok(None)
+        }
+        async fn create(
+            &self,
+            _params: &aionui_db::CreateAcpSessionParams<'_>,
+        ) -> Result<aionui_db::models::AcpSessionRow, aionui_db::DbError> {
+            Err(aionui_db::DbError::Init("stub".into()))
+        }
+        async fn update_session_id(
+            &self,
+            _conversation_id: &str,
+            _session_id: &str,
+        ) -> Result<bool, aionui_db::DbError> {
+            Ok(false)
+        }
+        async fn delete(&self, _conversation_id: &str) -> Result<bool, aionui_db::DbError> {
+            Ok(false)
+        }
+        async fn load_runtime_state(
+            &self,
+            _conversation_id: &str,
+        ) -> Result<Option<aionui_db::PersistedSessionState>, aionui_db::DbError> {
+            Ok(None)
+        }
+        async fn save_runtime_state(
+            &self,
+            _conversation_id: &str,
+            _params: &aionui_db::SaveRuntimeStateParams<'_>,
+        ) -> Result<bool, aionui_db::DbError> {
+            Ok(false)
+        }
+    }
+
+    struct StubAgentMetadataRepo;
+
+    #[async_trait::async_trait]
+    impl aionui_db::IAgentMetadataRepository for StubAgentMetadataRepo {
+        async fn list_all(
+            &self,
+        ) -> Result<Vec<aionui_db::models::AgentMetadataRow>, aionui_db::DbError> {
+            Ok(Vec::new())
+        }
+        async fn get(
+            &self,
+            _id: &str,
+        ) -> Result<Option<aionui_db::models::AgentMetadataRow>, aionui_db::DbError> {
+            Ok(None)
+        }
+        async fn find_by_source_and_name(
+            &self,
+            _agent_source: &str,
+            _name: &str,
+        ) -> Result<Option<aionui_db::models::AgentMetadataRow>, aionui_db::DbError> {
+            Ok(None)
+        }
+        async fn find_builtin_by_backend(
+            &self,
+            _backend: &str,
+        ) -> Result<Option<aionui_db::models::AgentMetadataRow>, aionui_db::DbError> {
+            Ok(None)
+        }
+        async fn upsert(
+            &self,
+            _params: &aionui_db::models::UpsertAgentMetadataParams<'_>,
+        ) -> Result<aionui_db::models::AgentMetadataRow, aionui_db::DbError> {
+            Err(aionui_db::DbError::Init("stub".into()))
+        }
+        async fn apply_handshake(
+            &self,
+            _id: &str,
+            _params: &aionui_db::models::UpdateAgentHandshakeParams<'_>,
+        ) -> Result<Option<aionui_db::models::AgentMetadataRow>, aionui_db::DbError> {
+            Ok(None)
+        }
+        async fn set_enabled(&self, _id: &str, _enabled: bool) -> Result<bool, aionui_db::DbError> {
+            Ok(false)
+        }
+        async fn delete(&self, _id: &str) -> Result<bool, aionui_db::DbError> {
+            Ok(false)
+        }
     }
 }

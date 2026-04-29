@@ -17,8 +17,10 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use aionui_ai_agent::acp_agent::AcpAgentManager;
+use aionui_ai_agent::agent_registry::AgentRegistry;
 use aionui_ai_agent::{AgentStreamEvent, IAgentManager};
-use aionui_common::{AcpBackend, ConversationStatus};
+use aionui_common::ConversationStatus;
+use aionui_db::{SqliteAgentMetadataRepository, init_database_memory};
 use tokio::sync::broadcast;
 
 /// Timeout for receiving events from the relay.
@@ -39,7 +41,7 @@ fn serial() -> MutexGuard<'static, ()> {
 /// (subscribed BEFORE the relay starts, so no events are missed).
 async fn make_mock_agent(
     script: &str,
-    backend: AcpBackend,
+    backend: &str,
 ) -> (Arc<AcpAgentManager>, broadcast::Receiver<AgentStreamEvent>) {
     let temp_dir = std::env::temp_dir();
     let script_path = temp_dir.join(format!(
@@ -56,7 +58,7 @@ async fn make_mock_agent(
 
     let config = aionui_ai_agent::AcpBuildExtra {
         agent_id: None,
-        backend: Some(backend),
+        backend: Some(backend.to_owned()),
         cli_path: Some(script_path.to_string_lossy().into_owned()),
         agent_name: None,
         custom_agent_id: None,
@@ -75,8 +77,20 @@ async fn make_mock_agent(
     ));
     let skill_manager = aionui_ai_agent::skill_manager::AcpSkillManager::new(skill_paths);
 
+    let db = init_database_memory().await.unwrap();
+    let repo = Arc::new(SqliteAgentMetadataRepository::new(db.pool().clone()));
+    let registry = AgentRegistry::new(repo);
+    registry.hydrate().await.unwrap();
+
+    let metadata = registry
+        .find_builtin_by_backend(backend)
+        .await
+        .expect("seeded backend row must exist");
+    let catalog_tx = registry.catalog_sender();
+
     let manager = AcpAgentManager::new(
         "test-conv-1".into(),
+        metadata,
         "/tmp".into(),
         // This fixture uses an explicit workspace path, matching the
         // production case where the caller supplied `extra.workspace`.
@@ -90,6 +104,7 @@ async fn make_mock_agent(
         config,
         skill_manager,
         Arc::new(std::path::PathBuf::from("/tmp/aionui-backend")),
+        catalog_tx,
     )
     .await
     .expect("Failed to spawn mock ACP agent");
@@ -163,7 +178,6 @@ fn event_type_name(event: &AgentStreamEvent) -> &'static str {
         AgentStreamEvent::System(_) => "System",
         AgentStreamEvent::RequestTrace(_) => "RequestTrace",
         AgentStreamEvent::SlashCommandsUpdated(_) => "SlashCommandsUpdated",
-        AgentStreamEvent::AcpPermission(_) => "AcpPermission",
     }
 }
 
@@ -185,13 +199,12 @@ fn acp_build_extra_populates_skills_from_extra_json() {
 #[ignore = "requires JSON-RPC mock agent"]
 async fn acp_agent_type_is_acp() {
     let _guard = serial();
-    let (agent, _rx) =
-        make_mock_agent(r#"echo '{"type":"finish","data":{}}'"#, AcpBackend::Claude).await;
+    let (agent, _rx) = make_mock_agent(r#"echo '{"type":"finish","data":{}}'"#, "claude").await;
 
     assert_eq!(agent.agent_type(), aionui_common::AgentType::Acp);
     assert_eq!(agent.conversation_id(), "test-conv-1");
     assert_eq!(agent.workspace(), "/tmp");
-    assert_eq!(agent.backend(), AcpBackend::Claude);
+    assert_eq!(agent.backend(), Some("claude"));
 }
 
 #[tokio::test]
@@ -200,7 +213,7 @@ async fn acp_agent_receives_stream_events() {
     let _guard = serial();
     let (_agent, mut rx) = make_mock_agent(
         r#"echo '{"type":"start","data":{"session_id":"sess-1"}}' && echo '{"type":"text","data":{"content":"Hello"}}' && echo '{"type":"finish","data":{"session_id":"sess-1"}}'"#,
-        AcpBackend::Claude,
+        "claude",
     )
     .await;
 
@@ -230,7 +243,7 @@ async fn acp_agent_session_id_captured_from_start() {
     let _guard = serial();
     let (agent, mut rx) = make_mock_agent(
         r#"echo '{"type":"start","data":{"session_id":"sess-abc"}}' && sleep 1"#,
-        AcpBackend::Claude,
+        "claude",
     )
     .await;
 
@@ -248,7 +261,7 @@ async fn acp_agent_status_transitions() {
     let _guard = serial();
     let (agent, mut rx) = make_mock_agent(
         r#"sleep 0.1 && echo '{"type":"start","data":{}}' && sleep 0.3 && echo '{"type":"finish","data":{}}'"#,
-        AcpBackend::Claude,
+        "claude",
     )
     .await;
 
@@ -270,7 +283,7 @@ async fn acp_agent_error_event_sets_finished() {
     let _guard = serial();
     let (agent, mut rx) = make_mock_agent(
         r#"echo '{"type":"start","data":{}}' && sleep 0.1 && echo '{"type":"error","data":{"message":"timeout"}}'"#,
-        AcpBackend::Claude,
+        "claude",
     )
     .await;
 
@@ -284,7 +297,7 @@ async fn acp_agent_model_info_captured() {
     let _guard = serial();
     let (agent, mut rx) = make_mock_agent(
         r#"echo '{"type":"acp_model_info","data":{"current_model_id":"claude-sonnet-4","current_model_label":"Claude Sonnet 4","available_models":[{"id":"claude-sonnet-4","label":"Claude Sonnet 4"},{"id":"claude-opus-4","label":"Claude Opus 4"}],"can_switch":true,"source":"models","source_detail":"acp-models"}}' && sleep 0.5"#,
-        AcpBackend::Claude,
+        "claude",
     )
     .await;
 
@@ -304,11 +317,8 @@ async fn acp_agent_model_info_captured() {
 #[ignore = "requires JSON-RPC mock agent"]
 async fn acp_agent_kill_terminates_process() {
     let _guard = serial();
-    let (agent, _rx) = make_mock_agent(
-        r#"trap '' TERM; while true; do sleep 1; done"#,
-        AcpBackend::Claude,
-    )
-    .await;
+    let (agent, _rx) =
+        make_mock_agent(r#"trap '' TERM; while true; do sleep 1; done"#, "claude").await;
 
     assert!(agent.last_activity_at() > 0);
 
@@ -323,7 +333,7 @@ async fn acp_agent_kill_terminates_process() {
 #[ignore = "requires JSON-RPC mock agent"]
 async fn acp_agent_last_activity_updates() {
     let _guard = serial();
-    let (agent, _rx) = make_mock_agent(r#"sleep 10"#, AcpBackend::Claude).await;
+    let (agent, _rx) = make_mock_agent(r#"sleep 10"#, "claude").await;
 
     let initial = agent.last_activity_at();
     assert!(initial > 0);
@@ -340,7 +350,7 @@ async fn acp_agent_text_content_received() {
     let _guard = serial();
     let (_agent, mut rx) = make_mock_agent(
         r#"echo '{"type":"text","data":{"content":"Hello from ACP"}}'"#,
-        AcpBackend::Claude,
+        "claude",
     )
     .await;
 
@@ -358,7 +368,7 @@ async fn acp_agent_agent_status_event_captures_session() {
     let _guard = serial();
     let (agent, mut rx) = make_mock_agent(
         r#"echo '{"type":"agent_status","data":{"backend":"claude","status":"running","session_id":"sess-xyz"}}' && sleep 1"#,
-        AcpBackend::Claude,
+        "claude",
     )
     .await;
 
@@ -376,7 +386,7 @@ async fn acp_agent_multiple_event_types() {
     let _guard = serial();
     let (_agent, mut rx) = make_mock_agent(
         r#"echo '{"type":"start","data":{"session_id":"sess-multi"}}' && echo '{"type":"thinking","data":{"content":"Analyzing...","subject":"code","duration":100,"status":"in_progress"}}' && echo '{"type":"text","data":{"content":"Result"}}' && echo '{"type":"finish","data":{"session_id":"sess-multi"}}'"#,
-        AcpBackend::Claude,
+        "claude",
     )
     .await;
 

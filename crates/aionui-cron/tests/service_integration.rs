@@ -20,9 +20,10 @@ use aionui_api_types::{
 use aionui_common::{PaginatedResult, TimestampMs, now_ms};
 use aionui_conversation::ConversationService;
 use aionui_db::{
-    ConversationFilters, ConversationRowUpdate, IConversationRepository, ICronRepository,
-    MessageRowUpdate, MessageSearchRow, SortOrder, SqliteCronRepository, init_database_memory,
-    models::MessageRow,
+    ConversationFilters, ConversationRowUpdate, IAcpSessionRepository, IAgentMetadataRepository,
+    IConversationRepository, ICronRepository, MessageRowUpdate, MessageSearchRow, SortOrder,
+    SqliteAcpSessionRepository, SqliteAgentMetadataRepository, SqliteCronRepository,
+    init_database_memory, models::MessageRow,
 };
 use aionui_realtime::EventBroadcaster;
 
@@ -537,7 +538,11 @@ async fn setup_with_conv_repo() -> (
 ) {
     let db = init_database_memory().await.unwrap();
     let pool = db.pool().clone();
-    let cron_repo: Arc<dyn ICronRepository> = Arc::new(SqliteCronRepository::new(pool));
+    let cron_repo: Arc<dyn ICronRepository> = Arc::new(SqliteCronRepository::new(pool.clone()));
+    let agent_metadata_repo: Arc<dyn IAgentMetadataRepository> =
+        Arc::new(SqliteAgentMetadataRepository::new(pool.clone()));
+    let acp_session_repo: Arc<dyn IAcpSessionRepository> =
+        Arc::new(SqliteAcpSessionRepository::new(pool));
     let bc = Arc::new(MockBroadcaster::new());
     let data_dir = std::env::temp_dir().join(format!("aionui-cron-test-{}", now_ms()));
     std::fs::create_dir_all(&data_dir).unwrap();
@@ -573,6 +578,8 @@ async fn setup_with_conv_repo() -> (
         bc.clone() as Arc<dyn EventBroadcaster>,
         std::env::temp_dir(),
         Arc::new(StubSkillResolver),
+        agent_metadata_repo,
+        acp_session_repo,
     ));
     let busy_guard = Arc::new(CronBusyGuard::new());
     let executor = Arc::new(JobExecutor::new(

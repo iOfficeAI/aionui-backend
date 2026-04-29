@@ -1,3 +1,5 @@
+pub mod acp_session;
+pub mod agent_metadata;
 pub mod assistant;
 pub mod channel;
 mod client_preference;
@@ -8,6 +10,8 @@ pub mod oauth_token;
 pub mod provider;
 pub mod remote_agent;
 mod settings;
+mod sqlite_acp_session;
+mod sqlite_agent_metadata;
 mod sqlite_assistant;
 mod sqlite_channel;
 mod sqlite_client_preference;
@@ -23,6 +27,10 @@ mod sqlite_user;
 pub mod team;
 mod user;
 
+pub use acp_session::{
+    CreateAcpSessionParams, IAcpSessionRepository, PersistedSessionState, SaveRuntimeStateParams,
+};
+pub use agent_metadata::IAgentMetadataRepository;
 pub use assistant::{IAssistantOverrideRepository, IAssistantRepository};
 pub use channel::IChannelRepository;
 pub use client_preference::IClientPreferenceRepository;
@@ -33,6 +41,8 @@ pub use oauth_token::IOAuthTokenRepository;
 pub use provider::IProviderRepository;
 pub use remote_agent::IRemoteAgentRepository;
 pub use settings::ISettingsRepository;
+pub use sqlite_acp_session::SqliteAcpSessionRepository;
+pub use sqlite_agent_metadata::SqliteAgentMetadataRepository;
 pub use sqlite_assistant::{SqliteAssistantOverrideRepository, SqliteAssistantRepository};
 pub use sqlite_channel::SqliteChannelRepository;
 pub use sqlite_client_preference::SqliteClientPreferenceRepository;

@@ -8,21 +8,24 @@ use std::time::Duration;
 use crate::acp_protocol::{AcpProtocol, PermissionDecision, PermissionRequest};
 
 use crate::acp_runtime_snapshot::AcpRuntimeSnapshot;
+use crate::acp_runtime_snapshot::PersistedSessionState;
+use crate::agent_registry::CatalogSender;
+use crate::cli_process::CliAgentProcess;
+use crate::skill_manager::AcpSkillManager;
+use crate::stream_event::{AgentStreamEvent, permission_request_to_event_data};
+use crate::types::{AcpBuildExtra, SendMessageData, SlashCommandItem};
 use agent_client_protocol::schema::{
     AgentCapabilities, AvailableCommand, CancelNotification, ContentBlock, EnvVariable,
     HttpHeader, LoadSessionRequest, McpServer, McpServerHttp, NewSessionRequest, PromptRequest,
     SessionConfigOption, SessionId, SessionModeState, SessionModelState,
     SetSessionConfigOptionRequest, SetSessionModeRequest, SetSessionModelRequest, UsageUpdate,
 };
-
-use crate::cli_process::CliAgentProcess;
-use crate::stream_event::{AgentStreamEvent, permission_request_to_event_data};
-use crate::types::{AcpBuildExtra, SendMessageData, SlashCommandItem};
+use aionui_api_types::{AgentHandshake, AgentMetadata, ResumeStrategy};
 
 use aionui_api_types::TeamMcpStdioConfig;
 use aionui_common::{
-    AcpBackend, AgentKillReason, AgentType, AppError, CommandSpec, Confirmation,
-    ConversationStatus, TimestampMs, now_ms,
+    AgentKillReason, AgentType, AppError, CommandSpec, Confirmation, ConversationStatus,
+    TimestampMs, now_ms,
 };
 use serde_json::Value;
 use tokio::sync::{Mutex, RwLock, broadcast, mpsc, oneshot};
@@ -31,46 +34,36 @@ use tracing::{debug, error, info};
 /// Grace period before force-killing an ACP process (ms).
 const ACP_KILL_GRACE_MS: u64 = 500;
 
-/// Session resume strategy varies by ACP backend.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SessionResumeStrategy {
-    /// Use `session/load` command (Codex).
-    SessionLoad,
-    /// Use `session/new` — resume not needed, just create a new session and prompt.
-    NewAndPrompt,
-}
-
-impl SessionResumeStrategy {
-    fn for_backend(backend: AcpBackend) -> Self {
-        match backend {
-            AcpBackend::Codex => Self::SessionLoad,
-            _ => Self::NewAndPrompt,
-        }
-    }
-}
-
-fn normalize_requested_mode(backend: AcpBackend, mode: &str) -> String {
+fn normalize_requested_mode(metadata: &AgentMetadata, mode: &str) -> String {
     let trimmed = mode.trim();
     if trimmed.is_empty() {
         return String::new();
     }
 
-    // "yolo" / "yoloNoSandbox" are generic full-auto identifiers used by
-    // channel and cron flows. Map them to whatever the specific backend
-    // actually calls its permissive mode (e.g. `bypassPermissions` for
-    // Claude, `full-access` for Codex, `yolo` for Gemini/Qwen).
-    if matches!(trimmed, "yolo" | "yoloNoSandbox") {
-        return backend.full_auto_mode_id().to_owned();
+    // AionUi persists the legacy aliases `yolo` / `yoloNoSandbox` while
+    // ACP backends expect their native mode id (e.g. `full-access` for
+    // Codex). Resolution is data-driven: the mapping lives on each
+    // catalog row's `behavior_policy.yolo_id`. Backends without a
+    // `yolo_id` have no equivalent, so the alias passes through
+    // unchanged and `session/set_mode` gets the caller's original
+    // value.
+    if matches!(trimmed, "yolo" | "yoloNoSandbox")
+        && let Some(native) = metadata.behavior_policy.yolo_id.as_deref()
+    {
+        return native.to_owned();
     }
 
-    match backend {
-        // Codex also has legacy `default`/`autoEdit` that need mapping.
-        AcpBackend::Codex => match trimmed {
-            "default" | "autoEdit" => "auto".to_owned(),
-            other => other.to_owned(),
-        },
-        _ => trimmed.to_owned(),
+    // Codex has legacy `default`/`autoEdit` aliases that map to its
+    // native `auto` mode. Keep the mapping data-driven by keying on the
+    // vendor backend label rather than re-introducing an AcpBackend
+    // enum variant.
+    if matches!(metadata.backend.as_deref(), Some("codex"))
+        && matches!(trimmed, "default" | "autoEdit")
+    {
+        return "auto".to_owned();
     }
+
+    trimmed.to_owned()
 }
 
 fn confirm_option_id(data: &Value) -> Option<String> {
@@ -142,6 +135,34 @@ struct AcpState {
     has_messages: bool,
 }
 
+/// Project an `AgentStreamEvent` onto the subset of `AgentHandshake`
+/// fields the catalog cares about. Returns `None` for unrelated
+/// events — the forwarder filters on that.
+fn catalog_partial_from_event(event: &AgentStreamEvent) -> Option<AgentHandshake> {
+    match event {
+        AgentStreamEvent::AcpModeInfo(v) => Some(AgentHandshake {
+            available_modes: Some(v.clone()),
+            ..Default::default()
+        }),
+        AgentStreamEvent::AcpModelInfo(v) => Some(AgentHandshake {
+            available_models: Some(v.clone()),
+            ..Default::default()
+        }),
+        AgentStreamEvent::AcpConfigOption(v) => Some(AgentHandshake {
+            config_options: Some(v.clone()),
+            ..Default::default()
+        }),
+        AgentStreamEvent::AvailableCommands(data) => {
+            let cmds = serde_json::to_value(&data.commands).ok()?;
+            Some(AgentHandshake {
+                available_commands: Some(cmds),
+                ..Default::default()
+            })
+        }
+        _ => None,
+    }
+}
+
 /// Manages a single ACP Agent instance.
 ///
 /// ACP is the most complex agent type, supporting 20+ CLI sub-backends
@@ -160,8 +181,14 @@ pub struct AcpAgentManager {
     /// which is fragile (user paths may happen to contain
     /// `"conversations"` or `"-temp-"`).
     is_custom_workspace: bool,
-    /// ACP sub-backend.
-    backend: AcpBackend,
+    /// Snapshot of the `agent_metadata` row this session was spawned
+    /// from. Captured once at construction — the catalog row does not
+    /// change during a session's lifetime, so we read it locally
+    /// instead of round-tripping through the registry on every call.
+    metadata: AgentMetadata,
+    /// Handle used to push partial handshake updates back into the
+    /// catalog. The consumer task lives inside the registry.
+    catalog_tx: CatalogSender,
     /// Build configuration (preset context, enabled/excluded skills, session mode, …).
     config: AcpBuildExtra,
     /// Preferred session mode to apply on the next session initialization.
@@ -224,7 +251,7 @@ impl AcpAgentManager {
         let Some(mode) = self.preferred_mode().await else {
             return Ok(());
         };
-        let normalized_mode = normalize_requested_mode(self.backend, &mode);
+        let normalized_mode = normalize_requested_mode(&self.metadata, &mode);
         if normalized_mode.is_empty() {
             return Ok(());
         }
@@ -342,21 +369,24 @@ impl AcpAgentManager {
     /// Create a new ACP agent manager by spawning a CLI subprocess and
     /// establishing an ACP protocol connection.
     ///
-    /// `spawn_command` and `spawn_args` come from the `AgentRegistry`
-    /// (resolved by factory). They include the full command and ACP-specific
-    /// arguments (bridge package args or direct CLI ACP flags).
+    /// `command_spec` already points at the resolved binary — the factory
+    /// reads it off `metadata` and passes it in here. `metadata` is a
+    /// snapshot of the `agent_metadata` row captured by the factory; it
+    /// never changes over this session's lifetime. `catalog_tx` is the
+    /// MPSC sender the manager uses for both the one-shot initialize
+    /// handshake write and the session-driven forwarder.
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         conversation_id: String,
+        metadata: AgentMetadata,
         workspace: String,
         is_custom_workspace: bool,
         command_spec: CommandSpec,
         config: AcpBuildExtra,
-        skill_manager: Arc<crate::skill_manager::AcpSkillManager>,
+        skill_manager: Arc<AcpSkillManager>,
         backend_binary_path: Arc<PathBuf>,
+        catalog_tx: CatalogSender,
     ) -> Result<Self, AppError> {
-        let backend = config
-            .backend
-            .ok_or_else(|| AppError::BadRequest("ACP backend is required".into()))?;
         let process = CliAgentProcess::spawn_for_sdk(command_spec).await?;
 
         // Take raw stdio for the SDK transport
@@ -388,11 +418,29 @@ impl AcpAgentManager {
             runtime_snapshot.set_auth_methods(auth_methods);
         }
 
+        // Push the static handshake payloads (agent_capabilities +
+        // auth_methods) through the catalog sync channel. Session-driven
+        // fields — modes, models, config_options, commands — flow
+        // through the forwarder started in `start_catalog_sync`.
+        let init_handshake = AgentHandshake {
+            agent_capabilities: protocol
+                .agent_capabilities()
+                .and_then(|c| serde_json::to_value(c).ok()),
+            auth_methods: protocol
+                .auth_methods()
+                .and_then(|m| serde_json::to_value(m).ok()),
+            ..Default::default()
+        };
+        if init_handshake.agent_capabilities.is_some() || init_handshake.auth_methods.is_some() {
+            catalog_tx.send_partial(metadata.id.clone(), init_handshake);
+        }
+
         let manager = Self {
             conversation_id,
             workspace,
             is_custom_workspace,
-            backend,
+            metadata,
+            catalog_tx,
             preferred_mode: RwLock::new(config.session_mode.clone()),
             config,
             process: Arc::new(process),
@@ -469,6 +517,40 @@ impl AcpAgentManager {
                 }
             }
         });
+    }
+
+    /// Forward session-driven ACP events into the catalog sync channel
+    /// so the `agent_metadata` row stays in sync with what the CLI is
+    /// actually reporting. Runs as a subscriber on this manager's
+    /// broadcast bus; the registry owns the single consumer that drains
+    /// the resulting MPSC.
+    pub fn start_catalog_sync(self: &Arc<Self>) {
+        let id = self.metadata.id.clone();
+        let sender = self.catalog_tx.clone();
+        let this = Arc::clone(self);
+        tokio::spawn(async move {
+            let mut rx = this.event_tx.subscribe();
+            loop {
+                match rx.recv().await {
+                    Ok(event) => {
+                        if let Some(partial) = catalog_partial_from_event(&event) {
+                            sender.send_partial(id.clone(), partial);
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                }
+            }
+        });
+    }
+
+    /// Seed the runtime snapshot with the user's last choices. Called
+    /// by `ConversationService` on resume paths, before dispatching
+    /// `send_message`. `None` fields are ignored — the CLI's
+    /// `session/load` response fills in whatever the preload omits.
+    pub async fn preload_snapshot(&self, state: PersistedSessionState) {
+        let mut snapshot = self.runtime_snapshot.write().await;
+        snapshot.preload_persisted(state);
     }
 
     /// Initialize or resume a session, then send the user message.
@@ -557,7 +639,7 @@ impl AcpAgentManager {
             crate::first_message_injector::InjectionConfig {
                 preset_context: self.config.preset_context.as_deref(),
                 skills: &self.config.skills,
-                native_skill_support: self.backend.native_skills_dirs().is_some(),
+                native_skill_support: self.native_skill_support(),
                 // Whether the user chose this workspace — determined at
                 // factory-time and stored on the manager. Do NOT derive
                 // from `self.workspace`; path heuristics are fragile
@@ -588,16 +670,37 @@ impl AcpAgentManager {
     }
 
     /// Resume an existing session and send a message.
+    ///
+    /// Assumes `preload_snapshot` has already been called by the
+    /// caller (conversation service) on resume paths — the snapshot
+    /// may therefore already carry `current_mode_id` / `current_model_id`
+    /// from `acp_session.session_config.runtime`. When the CLI's
+    /// `session/load` response arrives, we merge it in but keep the
+    /// preloaded `current_*` values because they reflect the user's
+    /// last explicit choice; the CLI's own `current_*` is only used
+    /// when the snapshot has nothing yet.
     async fn session_resume_and_send(
         &self,
         data: &SendMessageData,
         session_id: Option<&str>,
     ) -> Result<(), AppError> {
-        let strategy = SessionResumeStrategy::for_backend(self.backend);
+        let strategy = self.resume_strategy();
 
-        if strategy == SessionResumeStrategy::SessionLoad
+        if strategy.is_session_load()
             && let Some(sid) = session_id
         {
+            // Capture anything preload put into the snapshot so the
+            // CLI merge below can keep it.
+            let (preloaded_mode, preloaded_model) = {
+                let snapshot = self.runtime_snapshot.read().await;
+                (
+                    snapshot.modes().map(|m| m.current_mode_id.to_string()),
+                    snapshot
+                        .model_info()
+                        .map(|m| m.current_model_id.to_string()),
+                )
+            };
+
             let resp = self
                 .protocol
                 .load_session(LoadSessionRequest::new(
@@ -608,10 +711,20 @@ impl AcpAgentManager {
                 .map_err(AppError::from)?;
 
             let mut snapshot = self.runtime_snapshot.write().await;
-            if let Some(models) = resp.models {
+            // Available lists always come from the CLI (source of truth
+            // for what the agent now supports). `current_*` prefers
+            // the preloaded value when present — that's the user's
+            // last explicit choice.
+            if let Some(mut models) = resp.models {
+                if let Some(db_current) = preloaded_model {
+                    models.current_model_id = db_current.into();
+                }
                 snapshot.set_model_info(models);
             }
-            if let Some(modes) = resp.modes {
+            if let Some(mut modes) = resp.modes {
+                if let Some(db_current) = preloaded_mode {
+                    modes.current_mode_id = db_current.into();
+                }
                 snapshot.set_modes(modes);
             }
             if let Some(config_options) = resp.config_options {
@@ -730,9 +843,30 @@ impl AcpAgentManager {
         self.state.read().await.session_id.clone()
     }
 
-    /// ACP sub-backend (Claude, Codex, …).
-    pub fn backend(&self) -> AcpBackend {
-        self.backend
+    /// Vendor label this session was spawned as (e.g. "claude"), if any.
+    pub fn backend(&self) -> Option<&str> {
+        self.metadata.backend.as_deref()
+    }
+
+    /// Agent metadata id this session was spawned from.
+    pub fn agent_metadata_id(&self) -> &str {
+        &self.metadata.id
+    }
+
+    /// Whether the configured agent supports side questions.
+    pub fn supports_side_question(&self) -> bool {
+        self.metadata.behavior_policy.supports_side_question
+    }
+
+    fn resume_strategy(&self) -> ResumeStrategy {
+        self.metadata.behavior_policy.resume_strategy
+    }
+
+    fn native_skill_support(&self) -> bool {
+        self.metadata
+            .native_skills_dirs
+            .as_ref()
+            .is_some_and(|v| !v.is_empty())
     }
 
     /// Return the active session id or a `BadRequest` error.
@@ -871,7 +1005,7 @@ impl crate::agent_manager::IAgentManager for AcpAgentManager {
         let preferred_mode = self
             .preferred_mode()
             .await
-            .map(|mode| normalize_requested_mode(self.backend, &mode))
+            .map(|mode| normalize_requested_mode(&self.metadata, &mode))
             .filter(|mode| !mode.is_empty());
         Ok(aionui_api_types::AgentModeResponse {
             mode: self
@@ -879,13 +1013,13 @@ impl crate::agent_manager::IAgentManager for AcpAgentManager {
                 .await
                 .map(|modes| modes.current_mode_id.to_string())
                 .or(preferred_mode)
-                .unwrap_or_else(|| normalize_requested_mode(self.backend, "default")),
+                .unwrap_or_else(|| normalize_requested_mode(&self.metadata, "default")),
             initialized: self.session_id().await.is_some(),
         })
     }
 
     async fn set_mode(&self, mode: &str) -> Result<(), AppError> {
-        let normalized_mode = normalize_requested_mode(self.backend, mode);
+        let normalized_mode = normalize_requested_mode(&self.metadata, mode);
         if normalized_mode.is_empty() {
             return Ok(());
         }
@@ -918,27 +1052,9 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn session_resume_strategy_for_backends() {
-        assert_eq!(
-            SessionResumeStrategy::for_backend(AcpBackend::Codex),
-            SessionResumeStrategy::SessionLoad
-        );
-        assert_eq!(
-            SessionResumeStrategy::for_backend(AcpBackend::Claude),
-            SessionResumeStrategy::NewAndPrompt
-        );
-        assert_eq!(
-            SessionResumeStrategy::for_backend(AcpBackend::Codebuddy),
-            SessionResumeStrategy::NewAndPrompt
-        );
-        assert_eq!(
-            SessionResumeStrategy::for_backend(AcpBackend::Qwen),
-            SessionResumeStrategy::NewAndPrompt
-        );
-        assert_eq!(
-            SessionResumeStrategy::for_backend(AcpBackend::Kiro),
-            SessionResumeStrategy::NewAndPrompt
-        );
+    fn resume_strategy_session_load_branch() {
+        assert!(ResumeStrategy::SessionLoad.is_session_load());
+        assert!(!ResumeStrategy::NewAndPrompt.is_session_load());
     }
 
     #[test]
@@ -957,30 +1073,64 @@ mod tests {
         );
     }
 
+    fn metadata_with_yolo_id(yolo_id: Option<&str>) -> AgentMetadata {
+        use aionui_api_types::{AgentSource, AgentSourceInfo, BehaviorPolicy, ResumeStrategy};
+        AgentMetadata {
+            id: "test".into(),
+            icon: None,
+            name: "Test".into(),
+            name_i18n: None,
+            description: None,
+            description_i18n: None,
+            backend: None,
+            agent_type: AgentType::Acp,
+            agent_source: AgentSource::Builtin,
+            agent_source_info: AgentSourceInfo::default(),
+            enabled: true,
+            available: true,
+            command: None,
+            resolved_command: None,
+            args: vec![],
+            env: vec![],
+            native_skills_dirs: None,
+            behavior_policy: BehaviorPolicy {
+                resume_strategy: ResumeStrategy::default(),
+                supports_side_question: false,
+                yolo_id: yolo_id.map(ToOwned::to_owned),
+            },
+            handshake: AgentHandshake::default(),
+        }
+    }
+
     #[test]
-    fn normalize_requested_mode_maps_legacy_codex_modes() {
+    fn normalize_requested_mode_rewrites_yolo_when_behavior_policy_maps_it() {
+        let meta = metadata_with_yolo_id(Some("full-access"));
+        assert_eq!(normalize_requested_mode(&meta, "yolo"), "full-access");
         assert_eq!(
-            normalize_requested_mode(AcpBackend::Codex, "default"),
-            "auto"
-        );
-        assert_eq!(
-            normalize_requested_mode(AcpBackend::Codex, "autoEdit"),
-            "auto"
-        );
-        assert_eq!(
-            normalize_requested_mode(AcpBackend::Codex, "yolo"),
+            normalize_requested_mode(&meta, "yoloNoSandbox"),
             "full-access"
         );
+    }
+
+    #[test]
+    fn normalize_requested_mode_passes_through_when_no_yolo_id() {
+        let meta = metadata_with_yolo_id(None);
+        // No mapping configured — aliases flow through unchanged.
+        assert_eq!(normalize_requested_mode(&meta, "yolo"), "yolo");
         assert_eq!(
-            normalize_requested_mode(AcpBackend::Codex, "yoloNoSandbox"),
-            "full-access"
+            normalize_requested_mode(&meta, "yoloNoSandbox"),
+            "yoloNoSandbox"
         );
+    }
+
+    #[test]
+    fn normalize_requested_mode_passes_through_non_yolo_modes() {
+        let meta = metadata_with_yolo_id(Some("full-access"));
+        assert_eq!(normalize_requested_mode(&meta, "default"), "default");
+        assert_eq!(normalize_requested_mode(&meta, "autoEdit"), "autoEdit");
+        assert_eq!(normalize_requested_mode(&meta, "read-only"), "read-only");
         assert_eq!(
-            normalize_requested_mode(AcpBackend::Codex, "read-only"),
-            "read-only"
-        );
-        assert_eq!(
-            normalize_requested_mode(AcpBackend::Claude, "bypassPermissions"),
+            normalize_requested_mode(&meta, "bypassPermissions"),
             "bypassPermissions"
         );
         assert_eq!(
@@ -1065,5 +1215,40 @@ mod tests {
         assert_eq!(env.get(TeamMcpStdioConfig::ENV_PORT), Some(&"54321"));
         assert_eq!(env.get(TeamMcpStdioConfig::ENV_TOKEN), Some(&"tok-abc"));
         assert_eq!(env.get(TeamMcpStdioConfig::ENV_SLOT_ID), Some(&"slot-lead"));
+    }
+
+    #[test]
+    fn normalize_requested_mode_trims_and_returns_empty_for_blank() {
+        let meta = metadata_with_yolo_id(Some("full-access"));
+        assert_eq!(normalize_requested_mode(&meta, "   "), "");
+    }
+
+    /// Each session-driven event projects onto exactly one handshake
+    /// field. Unrelated events produce `None` so the forwarder sends
+    /// nothing for them.
+    #[test]
+    fn catalog_partial_covers_session_fields() {
+        let modes = catalog_partial_from_event(&AgentStreamEvent::AcpModeInfo(json!({"x": 1})))
+            .expect("mode event must project");
+        assert_eq!(modes.available_modes, Some(json!({"x": 1})));
+        assert!(modes.available_models.is_none());
+
+        let models = catalog_partial_from_event(&AgentStreamEvent::AcpModelInfo(json!([1])))
+            .expect("model event must project");
+        assert_eq!(models.available_models, Some(json!([1])));
+
+        let cfg = catalog_partial_from_event(&AgentStreamEvent::AcpConfigOption(json!([
+            {"id":"mode"}
+        ])))
+        .expect("config event must project");
+        assert_eq!(cfg.config_options, Some(json!([{"id":"mode"}])));
+
+        // An unrelated event emits no update.
+        assert!(
+            catalog_partial_from_event(&AgentStreamEvent::Start(
+                crate::stream_event::StartEventData { session_id: None }
+            ))
+            .is_none()
+        );
     }
 }

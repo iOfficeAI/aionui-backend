@@ -16,10 +16,14 @@ use aionui_common::{
     AgentKillReason, AgentType, AppError, Confirmation, ConversationSource, ConversationStatus,
     PaginatedResult, TimestampMs,
 };
-use aionui_db::models::{ConversationArtifactRow, ConversationRow, MessageRow};
+use aionui_db::models::{
+    AcpSessionRow, AgentMetadataRow, ConversationArtifactRow, ConversationRow, MessageRow,
+    UpdateAgentHandshakeParams, UpsertAgentMetadataParams,
+};
 use aionui_db::{
-    ConversationFilters, ConversationRowUpdate, IConversationRepository, MessageRowUpdate,
-    MessageSearchRow, SortOrder,
+    ConversationFilters, ConversationRowUpdate, CreateAcpSessionParams, DbError,
+    IAcpSessionRepository, IAgentMetadataRepository, IConversationRepository, MessageRowUpdate,
+    MessageSearchRow, PersistedSessionState, SaveRuntimeStateParams, SortOrder,
 };
 use aionui_realtime::EventBroadcaster;
 use serde_json::json;
@@ -393,6 +397,99 @@ impl IConversationRepository for MockRepo {
 
 // ── Helpers ────────────────────────────────────────────────────────
 
+/// Stub repository for tests — every lookup returns `None` so the
+/// service falls back to `AgentType::native_skills_dirs()` paths.
+struct StubAgentMetadataRepo;
+
+#[async_trait::async_trait]
+impl IAgentMetadataRepository for StubAgentMetadataRepo {
+    async fn list_all(&self) -> Result<Vec<AgentMetadataRow>, DbError> {
+        Ok(Vec::new())
+    }
+    async fn get(&self, _id: &str) -> Result<Option<AgentMetadataRow>, DbError> {
+        Ok(None)
+    }
+    async fn find_by_source_and_name(
+        &self,
+        _agent_source: &str,
+        _name: &str,
+    ) -> Result<Option<AgentMetadataRow>, DbError> {
+        Ok(None)
+    }
+    async fn find_builtin_by_backend(
+        &self,
+        _backend: &str,
+    ) -> Result<Option<AgentMetadataRow>, DbError> {
+        Ok(None)
+    }
+    async fn upsert(
+        &self,
+        _params: &UpsertAgentMetadataParams<'_>,
+    ) -> Result<AgentMetadataRow, DbError> {
+        Err(DbError::Init("stub".into()))
+    }
+    async fn apply_handshake(
+        &self,
+        _id: &str,
+        _params: &UpdateAgentHandshakeParams<'_>,
+    ) -> Result<Option<AgentMetadataRow>, DbError> {
+        Ok(None)
+    }
+    async fn set_enabled(&self, _id: &str, _enabled: bool) -> Result<bool, DbError> {
+        Ok(false)
+    }
+    async fn delete(&self, _id: &str) -> Result<bool, DbError> {
+        Ok(false)
+    }
+}
+
+struct StubAcpSessionRepo;
+
+#[async_trait::async_trait]
+impl IAcpSessionRepository for StubAcpSessionRepo {
+    async fn get(&self, _conversation_id: &str) -> Result<Option<AcpSessionRow>, DbError> {
+        Ok(None)
+    }
+    async fn create(&self, _params: &CreateAcpSessionParams<'_>) -> Result<AcpSessionRow, DbError> {
+        // Return a synthetic row so `ConversationService::create` can
+        // succeed for ACP conversations in unit tests.
+        Ok(AcpSessionRow {
+            conversation_id: "stub".into(),
+            agent_backend: "stub".into(),
+            agent_source: "stub".into(),
+            agent_id: "stub".into(),
+            session_id: None,
+            session_status: "idle".into(),
+            session_config: "{}".into(),
+            last_active_at: None,
+            suspended_at: None,
+        })
+    }
+    async fn update_session_id(
+        &self,
+        _conversation_id: &str,
+        _session_id: &str,
+    ) -> Result<bool, DbError> {
+        Ok(false)
+    }
+    async fn delete(&self, _conversation_id: &str) -> Result<bool, DbError> {
+        Ok(false)
+    }
+    async fn load_runtime_state(
+        &self,
+        _conversation_id: &str,
+    ) -> Result<Option<PersistedSessionState>, DbError> {
+        Ok(None)
+    }
+    async fn save_runtime_state(
+        &self,
+        _conversation_id: &str,
+        _params: &SaveRuntimeStateParams<'_>,
+    ) -> Result<bool, DbError> {
+        Ok(false)
+    }
+}
+
 fn make_service() -> (
     ConversationService,
     Arc<MockBroadcaster>,
@@ -412,11 +509,15 @@ fn make_service_with_resolver(
 ) {
     let repo = Arc::new(MockRepo::new());
     let broadcaster = Arc::new(MockBroadcaster::new());
+    let agent_metadata_repo: Arc<dyn IAgentMetadataRepository> = Arc::new(StubAgentMetadataRepo);
+    let acp_session_repo: Arc<dyn IAcpSessionRepository> = Arc::new(StubAcpSessionRepo);
     let svc = ConversationService::new_with_workspace_root(
         repo.clone(),
         broadcaster.clone(),
         std::path::PathBuf::from(std::env::temp_dir()),
         skill_resolver,
+        agent_metadata_repo,
+        acp_session_repo,
     );
     let task_mgr: Arc<dyn IWorkerTaskManager> = Arc::new(MockTaskManager::new());
     (svc, broadcaster, repo, task_mgr)
@@ -1526,7 +1627,7 @@ fn make_send_req() -> SendMessageRequest {
 
 #[tokio::test]
 async fn send_message_returns_accepted() {
-    let (svc, _broadcaster, _repo, task_mgr) = make_service();
+    let (svc, _broadcaster, _repo, _task_mgr) = make_service();
     let task_mgr: Arc<dyn IWorkerTaskManager> = Arc::new(MockTaskManager::new());
 
     let conv = svc.create("user_1", make_create_req()).await.unwrap();
@@ -1568,7 +1669,7 @@ async fn send_message_persists_hidden_user_message_when_requested() {
 
 #[tokio::test]
 async fn send_message_empty_content_returns_bad_request() {
-    let (svc, _broadcaster, _repo, task_mgr) = make_service();
+    let (svc, _broadcaster, _repo, _task_mgr) = make_service();
     let task_mgr: Arc<dyn IWorkerTaskManager> = Arc::new(MockTaskManager::new());
 
     let conv = svc.create("user_1", make_create_req()).await.unwrap();
@@ -1587,7 +1688,7 @@ async fn send_message_empty_content_returns_bad_request() {
 
 #[tokio::test]
 async fn send_message_whitespace_content_returns_bad_request() {
-    let (svc, _broadcaster, _repo, task_mgr) = make_service();
+    let (svc, _broadcaster, _repo, _task_mgr) = make_service();
     let task_mgr: Arc<dyn IWorkerTaskManager> = Arc::new(MockTaskManager::new());
 
     let conv = svc.create("user_1", make_create_req()).await.unwrap();
@@ -1606,7 +1707,7 @@ async fn send_message_whitespace_content_returns_bad_request() {
 
 #[tokio::test]
 async fn send_message_conversation_not_found() {
-    let (svc, _broadcaster, _repo, task_mgr) = make_service();
+    let (svc, _broadcaster, _repo, _task_mgr) = make_service();
     let task_mgr: Arc<dyn IWorkerTaskManager> = Arc::new(MockTaskManager::new());
 
     let err = svc
@@ -1618,7 +1719,7 @@ async fn send_message_conversation_not_found() {
 
 #[tokio::test]
 async fn send_message_wrong_user_returns_not_found() {
-    let (svc, _broadcaster, _repo, task_mgr) = make_service();
+    let (svc, _broadcaster, _repo, _task_mgr) = make_service();
     let task_mgr: Arc<dyn IWorkerTaskManager> = Arc::new(MockTaskManager::new());
 
     let conv = svc.create("user_1", make_create_req()).await.unwrap();
@@ -1631,7 +1732,7 @@ async fn send_message_wrong_user_returns_not_found() {
 
 #[tokio::test]
 async fn send_message_running_conversation_returns_conflict() {
-    let (svc, _broadcaster, repo, task_mgr) = make_service();
+    let (svc, _broadcaster, repo, _task_mgr) = make_service();
     let task_mgr: Arc<dyn IWorkerTaskManager> = Arc::new(MockTaskManager::new());
 
     let conv = svc.create("user_1", make_create_req()).await.unwrap();
@@ -1761,7 +1862,7 @@ async fn send_message_continues_cron_system_responses() {
 
 #[tokio::test]
 async fn stop_stream_with_active_agent() {
-    let (svc, _broadcaster, _repo, task_mgr) = make_service();
+    let (svc, _broadcaster, _repo, _task_mgr) = make_service();
     let task_mgr = Arc::new(MockTaskManager::new());
 
     let conv = svc.create("user_1", make_create_req()).await.unwrap();
@@ -1789,7 +1890,7 @@ async fn stop_stream_with_active_agent() {
 
 #[tokio::test]
 async fn stop_stream_conversation_not_found() {
-    let (svc, _broadcaster, _repo, task_mgr) = make_service();
+    let (svc, _broadcaster, _repo, _task_mgr) = make_service();
     let task_mgr: Arc<dyn IWorkerTaskManager> = Arc::new(MockTaskManager::new());
 
     let err = svc
@@ -1801,7 +1902,7 @@ async fn stop_stream_conversation_not_found() {
 
 #[tokio::test]
 async fn stop_stream_no_active_agent_returns_conflict() {
-    let (svc, _broadcaster, _repo, task_mgr) = make_service();
+    let (svc, _broadcaster, _repo, _task_mgr) = make_service();
     let task_mgr: Arc<dyn IWorkerTaskManager> = Arc::new(MockTaskManager::new());
 
     let conv = svc.create("user_1", make_create_req()).await.unwrap();
@@ -1815,7 +1916,7 @@ async fn stop_stream_no_active_agent_returns_conflict() {
 
 #[tokio::test]
 async fn stop_stream_wrong_user_returns_not_found() {
-    let (svc, _broadcaster, _repo, task_mgr) = make_service();
+    let (svc, _broadcaster, _repo, _task_mgr) = make_service();
     let task_mgr: Arc<dyn IWorkerTaskManager> = Arc::new(MockTaskManager::new());
 
     let conv = svc.create("user_1", make_create_req()).await.unwrap();
@@ -1830,7 +1931,7 @@ async fn stop_stream_wrong_user_returns_not_found() {
 
 #[tokio::test]
 async fn warmup_creates_agent_task() {
-    let (svc, _broadcaster, _repo, task_mgr) = make_service();
+    let (svc, _broadcaster, _repo, _task_mgr) = make_service();
     let task_mgr = Arc::new(MockTaskManager::new());
 
     let conv = svc.create("user_1", make_create_req()).await.unwrap();
@@ -1850,7 +1951,7 @@ async fn warmup_creates_agent_task() {
 
 #[tokio::test]
 async fn warmup_conversation_not_found() {
-    let (svc, _broadcaster, _repo, task_mgr) = make_service();
+    let (svc, _broadcaster, _repo, _task_mgr) = make_service();
     let task_mgr: Arc<dyn IWorkerTaskManager> = Arc::new(MockTaskManager::new());
 
     let err = svc
@@ -1862,7 +1963,7 @@ async fn warmup_conversation_not_found() {
 
 #[tokio::test]
 async fn warmup_wrong_user_returns_not_found() {
-    let (svc, _broadcaster, _repo, task_mgr) = make_service();
+    let (svc, _broadcaster, _repo, _task_mgr) = make_service();
     let task_mgr: Arc<dyn IWorkerTaskManager> = Arc::new(MockTaskManager::new());
 
     let conv = svc.create("user_1", make_create_req()).await.unwrap();
@@ -1897,7 +1998,7 @@ fn make_test_confirmations() -> Vec<Confirmation> {
 
 #[tokio::test]
 async fn list_confirmations_empty_when_no_agent() {
-    let (svc, _broadcaster, _repo, task_mgr) = make_service();
+    let (svc, _broadcaster, _repo, _task_mgr) = make_service();
     let task_mgr: Arc<dyn IWorkerTaskManager> = Arc::new(MockTaskManager::new());
 
     let conv = svc.create("user_1", make_create_req()).await.unwrap();
@@ -1910,7 +2011,7 @@ async fn list_confirmations_empty_when_no_agent() {
 
 #[tokio::test]
 async fn list_confirmations_returns_items() {
-    let (svc, _broadcaster, _repo, task_mgr) = make_service();
+    let (svc, _broadcaster, _repo, _task_mgr) = make_service();
     let task_mgr = Arc::new(MockTaskManager::new());
 
     let conv = svc.create("user_1", make_create_req()).await.unwrap();
@@ -1936,7 +2037,7 @@ async fn list_confirmations_returns_items() {
 
 #[tokio::test]
 async fn list_confirmations_not_found() {
-    let (svc, _broadcaster, _repo, task_mgr) = make_service();
+    let (svc, _broadcaster, _repo, _task_mgr) = make_service();
     let task_mgr: Arc<dyn IWorkerTaskManager> = Arc::new(MockTaskManager::new());
 
     let err = svc
@@ -1948,7 +2049,7 @@ async fn list_confirmations_not_found() {
 
 #[tokio::test]
 async fn list_confirmations_wrong_user() {
-    let (svc, _broadcaster, _repo, task_mgr) = make_service();
+    let (svc, _broadcaster, _repo, _task_mgr) = make_service();
     let task_mgr: Arc<dyn IWorkerTaskManager> = Arc::new(MockTaskManager::new());
 
     let conv = svc.create("user_1", make_create_req()).await.unwrap();
@@ -1961,7 +2062,7 @@ async fn list_confirmations_wrong_user() {
 
 #[tokio::test]
 async fn confirm_removes_confirmation_and_broadcasts() {
-    let (svc, broadcaster, _repo, task_mgr) = make_service();
+    let (svc, broadcaster, _repo, _task_mgr) = make_service();
     let task_mgr = Arc::new(MockTaskManager::new());
 
     let conv = svc.create("user_1", make_create_req()).await.unwrap();
@@ -2003,7 +2104,7 @@ async fn confirm_removes_confirmation_and_broadcasts() {
 
 #[tokio::test]
 async fn confirm_with_always_allow_stores_approval() {
-    let (svc, _broadcaster, _repo, task_mgr) = make_service();
+    let (svc, _broadcaster, _repo, _task_mgr) = make_service();
     let task_mgr = Arc::new(MockTaskManager::new());
 
     let conv = svc.create("user_1", make_create_req()).await.unwrap();
@@ -2032,7 +2133,7 @@ async fn confirm_with_always_allow_stores_approval() {
 
 #[tokio::test]
 async fn confirm_nonexistent_call_id_returns_not_found() {
-    let (svc, _broadcaster, _repo, task_mgr) = make_service();
+    let (svc, _broadcaster, _repo, _task_mgr) = make_service();
     let task_mgr = Arc::new(MockTaskManager::new());
 
     let conv = svc.create("user_1", make_create_req()).await.unwrap();
@@ -2092,7 +2193,7 @@ async fn confirm_without_confirmation_state_still_calls_agent() {
 
 #[tokio::test]
 async fn confirm_no_agent_returns_not_found() {
-    let (svc, _broadcaster, _repo, task_mgr) = make_service();
+    let (svc, _broadcaster, _repo, _task_mgr) = make_service();
     let task_mgr: Arc<dyn IWorkerTaskManager> = Arc::new(MockTaskManager::new());
 
     let conv = svc.create("user_1", make_create_req()).await.unwrap();
@@ -2111,7 +2212,7 @@ async fn confirm_no_agent_returns_not_found() {
 
 #[tokio::test]
 async fn check_approval_returns_false_when_not_set() {
-    let (svc, _broadcaster, _repo, task_mgr) = make_service();
+    let (svc, _broadcaster, _repo, _task_mgr) = make_service();
     let task_mgr = Arc::new(MockTaskManager::new());
 
     let conv = svc.create("user_1", make_create_req()).await.unwrap();
@@ -2134,7 +2235,7 @@ async fn check_approval_returns_false_when_not_set() {
 
 #[tokio::test]
 async fn check_approval_returns_true_after_always_allow() {
-    let (svc, _broadcaster, _repo, task_mgr) = make_service();
+    let (svc, _broadcaster, _repo, _task_mgr) = make_service();
     let task_mgr = Arc::new(MockTaskManager::new());
 
     let conv = svc.create("user_1", make_create_req()).await.unwrap();
@@ -2166,7 +2267,7 @@ async fn check_approval_returns_true_after_always_allow() {
 
 #[tokio::test]
 async fn check_approval_returns_false_when_no_agent() {
-    let (svc, _broadcaster, _repo, task_mgr) = make_service();
+    let (svc, _broadcaster, _repo, _task_mgr) = make_service();
     let task_mgr: Arc<dyn IWorkerTaskManager> = Arc::new(MockTaskManager::new());
 
     let conv = svc.create("user_1", make_create_req()).await.unwrap();
@@ -2180,7 +2281,7 @@ async fn check_approval_returns_false_when_no_agent() {
 
 #[tokio::test]
 async fn check_approval_not_found() {
-    let (svc, _broadcaster, _repo, task_mgr) = make_service();
+    let (svc, _broadcaster, _repo, _task_mgr) = make_service();
     let task_mgr: Arc<dyn IWorkerTaskManager> = Arc::new(MockTaskManager::new());
 
     let err = svc

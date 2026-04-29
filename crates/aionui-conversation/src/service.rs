@@ -10,11 +10,14 @@ use aionui_api_types::{
     UpdateConversationArtifactRequest, UpdateConversationRequest, WebSocketMessage,
 };
 use aionui_common::{
-    AcpBackend, AgentType, AppError, ConversationSource, ConversationStatus, PaginatedResult,
-    generate_id, generate_short_id, now_ms,
+    AgentType, AppError, ConversationSource, ConversationStatus, PaginatedResult, generate_id,
+    generate_short_id, now_ms,
 };
 use aionui_db::models::MessageRow;
-use aionui_db::{ConversationFilters, ConversationRowUpdate, IConversationRepository, SortOrder};
+use aionui_db::{
+    ConversationFilters, ConversationRowUpdate, CreateAcpSessionParams, IAcpSessionRepository,
+    IAgentMetadataRepository, IConversationRepository, SortOrder,
+};
 use aionui_realtime::EventBroadcaster;
 use tracing::{debug, info, warn};
 
@@ -40,6 +43,8 @@ pub struct ConversationService {
     workspace_root: std::path::PathBuf,
     skill_resolver: Arc<dyn SkillResolver>,
     cron_service: Arc<std::sync::RwLock<Option<Arc<dyn ICronService>>>>,
+    agent_metadata_repo: Arc<dyn IAgentMetadataRepository>,
+    acp_session_repo: Arc<dyn IAcpSessionRepository>,
 }
 
 impl ConversationService {
@@ -47,6 +52,8 @@ impl ConversationService {
         repo: Arc<dyn IConversationRepository>,
         broadcaster: Arc<dyn EventBroadcaster>,
         skill_resolver: Arc<dyn SkillResolver>,
+        agent_metadata_repo: Arc<dyn IAgentMetadataRepository>,
+        acp_session_repo: Arc<dyn IAcpSessionRepository>,
     ) -> Self {
         Self {
             repo,
@@ -55,6 +62,8 @@ impl ConversationService {
             workspace_root: std::path::PathBuf::from("data"),
             skill_resolver,
             cron_service: Arc::new(std::sync::RwLock::new(None)),
+            agent_metadata_repo,
+            acp_session_repo,
         }
     }
 
@@ -63,6 +72,8 @@ impl ConversationService {
         broadcaster: Arc<dyn EventBroadcaster>,
         workspace_root: std::path::PathBuf,
         skill_resolver: Arc<dyn SkillResolver>,
+        agent_metadata_repo: Arc<dyn IAgentMetadataRepository>,
+        acp_session_repo: Arc<dyn IAcpSessionRepository>,
     ) -> Self {
         Self {
             repo,
@@ -71,6 +82,8 @@ impl ConversationService {
             workspace_root,
             skill_resolver,
             cron_service: Arc::new(std::sync::RwLock::new(None)),
+            agent_metadata_repo,
+            acp_session_repo,
         }
     }
 
@@ -79,6 +92,8 @@ impl ConversationService {
         broadcaster: Arc<dyn EventBroadcaster>,
         delete_hooks: Vec<Arc<dyn OnConversationDelete>>,
         skill_resolver: Arc<dyn SkillResolver>,
+        agent_metadata_repo: Arc<dyn IAgentMetadataRepository>,
+        acp_session_repo: Arc<dyn IAcpSessionRepository>,
     ) -> Self {
         Self {
             repo,
@@ -87,6 +102,8 @@ impl ConversationService {
             workspace_root: std::path::PathBuf::from("data"),
             skill_resolver,
             cron_service: Arc::new(std::sync::RwLock::new(None)),
+            agent_metadata_repo,
+            acp_session_repo,
         }
     }
 
@@ -196,13 +213,16 @@ impl ConversationService {
         if let Some(ws_path) = auto_provisioned_workspace.as_ref()
             && !is_custom_workspace
             && !initial_skills.is_empty()
-            && let Some(rel_dirs) = native_skills_dirs(&req.r#type, extra.get("backend"))
+            && let Some(rel_dirs) =
+                native_skills_dirs(&self.agent_metadata_repo, &req.r#type, extra.get("backend"))
+                    .await
         {
             let resolved = self.skill_resolver.resolve_skills(&initial_skills).await;
             if !resolved.is_empty() {
+                let rel_dirs_refs: Vec<&str> = rel_dirs.iter().map(String::as_str).collect();
                 let n = self
                     .skill_resolver
-                    .link_workspace_skills(ws_path, rel_dirs, &resolved)
+                    .link_workspace_skills(ws_path, &rel_dirs_refs, &resolved)
                     .await;
                 debug!(
                     conversation_id = %id,
@@ -249,11 +269,54 @@ impl ConversationService {
 
         self.repo.create(&row).await?;
 
+        // ACP conversations own one `acp_session` row (1:1 by
+        // conversation_id). Other agent types have no session-level
+        // state so we only create it for ACP.
+        if req.r#type == AgentType::Acp {
+            self.create_acp_session_row(&id, &extra).await?;
+        }
+
         let response = row_to_response(row, &self.workspace_root)?;
 
         self.broadcast_list_changed(&response.id, "created", response.source.as_ref());
 
         Ok(response)
+    }
+
+    async fn create_acp_session_row(
+        &self,
+        conversation_id: &str,
+        extra: &serde_json::Value,
+    ) -> Result<(), AppError> {
+        // Identity comes from the user's agent choice in `extra`.
+        // `agent_id` is the catalog row id; `backend` is the vendor
+        // label; `agent_source` says builtin/extension/custom. The
+        // frontend always posts agent_id for picked rows, but older
+        // payloads may only carry `backend`, so we resolve defensively.
+        let agent_id = extra
+            .get("agent_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        let backend = extra
+            .get("backend")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        let agent_source = extra
+            .get("agent_source")
+            .and_then(|v| v.as_str())
+            .unwrap_or("builtin");
+
+        let params = CreateAcpSessionParams {
+            conversation_id,
+            agent_backend: backend,
+            agent_source,
+            agent_id,
+        };
+        self.acp_session_repo
+            .create(&params)
+            .await
+            .map_err(|e| AppError::Internal(format!("Failed to create acp_session row: {e}")))?;
+        Ok(())
     }
 
     /// Get a single conversation by ID.
@@ -465,6 +528,16 @@ impl ConversationService {
             .and_then(|s| string_to_enum::<ConversationSource>(s).ok());
 
         self.repo.delete(id).await?;
+        // No FK / CASCADE on `acp_session`: clean it up here so non-ACP
+        // conversations that used to be ACP (shouldn't happen but is
+        // cheap to cover) still drop their orphaned session row.
+        if let Err(err) = self.acp_session_repo.delete(id).await {
+            warn!(
+                conversation_id = %id,
+                error = %err,
+                "Failed to delete acp_session row on conversation delete"
+            );
+        }
 
         for hook in &self.delete_hooks {
             hook.on_conversation_deleted(id).await;
@@ -1229,40 +1302,43 @@ fn backfill_cron_job_id_alias(extra: &mut serde_json::Value) -> bool {
 
 /// Compute the label used in auto-provisioned workspace directory names.
 ///
-/// For ACP conversations the label is the sub-backend id
-/// (e.g. `"claude"`, `"gemini"`); otherwise it's the serde name of the
-/// `AgentType` (e.g. `"aionrs"`). Falls back to the agent type's serde
-/// name when the backend field is missing or unparseable.
+/// For ACP conversations the label is the vendor string from
+/// `extra.backend` (e.g. `"claude"`); otherwise the `AgentType` serde
+/// name (e.g. `"aionrs"`). Falls back to the agent type's serde name
+/// when the backend field is missing or not a string.
 fn conversation_label(agent_type: &AgentType, backend: Option<&serde_json::Value>) -> String {
     if *agent_type == AgentType::Acp
-        && let Some(v) = backend
-        && let Ok(be) = serde_json::from_value::<AcpBackend>(v.clone())
+        && let Some(serde_json::Value::String(s)) = backend
+        && !s.is_empty()
     {
-        // AcpBackend's Display uses the serde rename — re-serialize to get it.
-        if let Ok(serde_json::Value::String(s)) = serde_json::to_value(be) {
-            return s;
-        }
+        return s.clone();
     }
     agent_type.serde_name().to_owned()
 }
 
-/// Resolve the native skills directory list (relative to the workspace
-/// root) for the given agent_type + backend combination.
+/// Resolve the native skills directory list for an agent by looking it
+/// up in the `agent_metadata` catalog (ACP vendors) or the bundled
+/// `AgentType` table (non-ACP built-ins).
 ///
-/// Returns `None` when the backend does not support native skill
+/// Returns `None` when the agent does not support native skill
 /// discovery — callers should then skip the workspace-symlink step and
 /// rely on prompt injection instead.
-fn native_skills_dirs(
+async fn native_skills_dirs(
+    repo: &Arc<dyn IAgentMetadataRepository>,
     agent_type: &AgentType,
     backend: Option<&serde_json::Value>,
-) -> Option<&'static [&'static str]> {
+) -> Option<Vec<String>> {
     if *agent_type == AgentType::Acp
-        && let Some(v) = backend
-        && let Ok(be) = serde_json::from_value::<AcpBackend>(v.clone())
+        && let Some(serde_json::Value::String(vendor)) = backend
+        && !vendor.is_empty()
     {
-        return be.native_skills_dirs();
+        let row = repo.find_builtin_by_backend(vendor).await.ok().flatten()?;
+        let raw = row.native_skills_dirs?;
+        return serde_json::from_str::<Vec<String>>(&raw).ok();
     }
-    agent_type.native_skills_dirs()
+    agent_type
+        .native_skills_dirs()
+        .map(|dirs| dirs.iter().map(|s| (*s).to_owned()).collect())
 }
 
 /// Serialize a serde-compatible enum to its JSON string form for DB storage.

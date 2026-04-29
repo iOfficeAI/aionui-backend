@@ -52,21 +52,17 @@ impl AgentType {
 
     /// Native skill-discovery directories for non-ACP agent types.
     ///
-    /// ACP backends expose their own skill dirs via
-    /// [`AcpBackend::native_skills_dirs`]; this method covers the few
-    /// non-ACP agent types that still support native skill discovery.
-    /// Returns `None` for agent types that require prompt-injection
-    /// instead of workspace symlinks.
+    /// ACP vendors own their skill dirs through the `agent_metadata`
+    /// table; this method covers the few non-ACP agent types that still
+    /// support native skill discovery. Returns `None` for agent types
+    /// that require prompt-injection instead of workspace symlinks.
     ///
     /// `AgentType::Gemini` is intentionally absent: new Gemini
-    /// conversations use `AgentType::Acp` with `backend = gemini`, so
-    /// their skill dirs come from `AcpBackend::Gemini.native_skills_dirs()`.
+    /// conversations use `AgentType::Acp` with `backend = "gemini"`, so
+    /// their skill dirs come from the Gemini row in the catalog.
     /// Historical `AgentType::Gemini` rows cannot start a new runtime
     /// (see the variant's doc comment) and therefore never reach this
     /// path during workspace provisioning.
-    ///
-    /// Mirrors the `NON_ACP_SKILLS_DIRS` table in
-    /// `src/common/types/acpTypes.ts`.
     pub fn native_skills_dirs(&self) -> Option<&'static [&'static str]> {
         match self {
             AgentType::Aionrs => Some(&[".aionrs/skills"]),
@@ -82,209 +78,26 @@ impl AgentType {
     ///
     /// ACP agents need backend-specific mode ids, while other agent types
     /// currently converge on the permissive `yolo` mode.
-    pub fn full_auto_mode_id(&self, backend: Option<AcpBackend>) -> &'static str {
+    ///
+    /// `backend` is the vendor label (e.g. `"claude"`, `"codex"`) used
+    /// only by ACP; pass `None` for non-ACP agents. This mapping is
+    /// duplicated in the seed of `agent_metadata.yolo_id` — code paths
+    /// with DB access should prefer reading that column. This function
+    /// is a fallback for offline / pre-hydrate callers (cron, tests).
+    pub fn full_auto_mode_id(&self, backend: Option<&str>) -> &'static str {
         match self {
-            AgentType::Acp => backend
-                .map(|backend| backend.full_auto_mode_id())
-                .unwrap_or("yolo"),
+            AgentType::Acp => match backend {
+                Some("claude") | Some("codebuddy") => "bypassPermissions",
+                Some("codex") => "full-access",
+                Some("opencode") => "build",
+                Some("cursor") => "agent",
+                _ => "yolo",
+            },
             AgentType::Aionrs
             | AgentType::Gemini
             | AgentType::OpenclawGateway
             | AgentType::Nanobot
             | AgentType::Remote => "yolo",
-        }
-    }
-}
-
-/// ACP sub-backend identifier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum AcpBackend {
-    Claude,
-    Gemini,
-    Qwen,
-    Codex,
-    Codebuddy,
-    Droid,
-    Goose,
-    Auggie,
-    Kimi,
-    Opencode,
-    Copilot,
-    Qoder,
-    Vibe,
-    Cursor,
-    Kiro,
-    Hermes,
-    Snow,
-}
-
-impl AcpBackend {
-    /// All backends that have a detectable CLI binary.
-    pub const CLI_BACKENDS: &[AcpBackend] = &[
-        AcpBackend::Claude,
-        AcpBackend::Gemini,
-        AcpBackend::Qwen,
-        AcpBackend::Codex,
-        AcpBackend::Codebuddy,
-        AcpBackend::Kiro,
-        AcpBackend::Opencode,
-        AcpBackend::Copilot,
-        AcpBackend::Goose,
-        AcpBackend::Cursor,
-        AcpBackend::Droid,
-        AcpBackend::Auggie,
-        AcpBackend::Kimi,
-        AcpBackend::Qoder,
-        AcpBackend::Vibe,
-        AcpBackend::Hermes,
-        AcpBackend::Snow,
-    ];
-
-    pub fn id(&self) -> String {
-        let hash = fnv1a_hex8(self.display_name().as_bytes());
-        // SAFETY: fnv1a_hex8 only produces ASCII hex digits
-        unsafe { std::str::from_utf8_unchecked(&hash) }.into()
-    }
-
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            AcpBackend::Claude => "Claude",
-            AcpBackend::Gemini => "Gemini",
-            AcpBackend::Qwen => "Qwen",
-            AcpBackend::Codex => "Codex",
-            AcpBackend::Codebuddy => "CodeBuddy",
-            AcpBackend::Droid => "Droid",
-            AcpBackend::Goose => "Goose",
-            AcpBackend::Auggie => "Auggie",
-            AcpBackend::Kimi => "Kimi",
-            AcpBackend::Opencode => "OpenCode",
-            AcpBackend::Copilot => "Copilot",
-            AcpBackend::Qoder => "Qoder",
-            AcpBackend::Vibe => "Vibe",
-            AcpBackend::Cursor => "Cursor",
-            AcpBackend::Kiro => "Kiro",
-            AcpBackend::Hermes => "Hermes",
-            AcpBackend::Snow => "Snow",
-        }
-    }
-
-    /// Returns the name of the CLI binary for this backend, if it has one.
-    pub fn binary_name(&self) -> Option<&'static str> {
-        match self {
-            AcpBackend::Claude => Some("claude"),
-            AcpBackend::Gemini => Some("gemini"),
-            AcpBackend::Qwen => Some("qwen"),
-            AcpBackend::Codex => Some("codex"),
-            AcpBackend::Codebuddy => Some("codebuddy"),
-            AcpBackend::Kiro => Some("kiro"),
-            AcpBackend::Opencode => Some("opencode"),
-            AcpBackend::Copilot => Some("copilot"),
-            AcpBackend::Goose => Some("goose"),
-            AcpBackend::Cursor => Some("cursor"),
-            AcpBackend::Droid => Some("droid"),
-            AcpBackend::Auggie => Some("auggie"),
-            AcpBackend::Kimi => Some("kimi"),
-            AcpBackend::Qoder => Some("qoder"),
-            AcpBackend::Vibe => Some("vibe"),
-            AcpBackend::Hermes => Some("hermes"),
-            AcpBackend::Snow => Some("snow"),
-        }
-    }
-
-    /// CLI arguments for direct-CLI backends (no bridge).
-    ///
-    /// These are appended after the CLI command itself.
-    /// Returns `None` for bridge-based backends (use [`bridge_package`] instead)
-    /// and for backends that don't have a standalone CLI.
-    pub fn args(&self) -> Option<&'static [&'static str]> {
-        match self {
-            // Bridge-based — args handled by bridge_package + bridge_extra_args
-            AcpBackend::Claude | AcpBackend::Codex | AcpBackend::Codebuddy => None,
-            // Direct CLI with specific ACP args
-            AcpBackend::Gemini => Some(&["--experimental-acp"]),
-            AcpBackend::Goose => Some(&["acp"]),
-            AcpBackend::Droid => Some(&["exec", "--output-format", "acp"]),
-            AcpBackend::Auggie => Some(&["--acp"]),
-            AcpBackend::Kimi => Some(&["acp"]),
-            AcpBackend::Opencode => Some(&["acp"]),
-            AcpBackend::Copilot => Some(&["--acp", "--stdio"]),
-            AcpBackend::Qoder => Some(&["--acp"]),
-            AcpBackend::Vibe => Some(&[]),
-            AcpBackend::Cursor => Some(&["acp"]),
-            AcpBackend::Kiro => Some(&["acp"]),
-            AcpBackend::Hermes => Some(&["acp"]),
-            AcpBackend::Snow => Some(&["--acp"]),
-            AcpBackend::Qwen => Some(&["--acp"]),
-        }
-    }
-
-    /// ACP bridge package for backends that require an NPX/bun bridge.
-    ///
-    /// Returns `None` for backends whose native CLI speaks ACP directly.
-    pub fn bridge_package(&self) -> Option<&'static str> {
-        match self {
-            AcpBackend::Claude => Some("@agentclientprotocol/claude-agent-acp@0.29.2"),
-            AcpBackend::Codex => Some("@zed-industries/codex-acp@0.9.5"),
-            AcpBackend::Codebuddy => Some("@tencent-ai/codebuddy-code@2.73.0"),
-            _ => None,
-        }
-    }
-
-    /// Extra arguments appended when spawning via bridge package.
-    ///
-    /// Only relevant when [`bridge_package`](Self::bridge_package) returns `Some`.
-    pub fn bridge_extra_args(&self) -> &'static [&'static str] {
-        match self {
-            AcpBackend::Codebuddy => &["--acp"],
-            _ => &[],
-        }
-    }
-
-    /// Native workspace skill directories the CLI reads on its own,
-    /// without backend prompt-side injection.
-    ///
-    /// Returns `Some(&[".xxx/skills"])` for backends that support native
-    /// skill discovery via workspace symlinks, and `None` for backends
-    /// that must receive skills through prompt injection.
-    ///
-    /// Mirrors `src/common/types/acpTypes.ts` `ACP_BACKENDS_ALL` `skillsDirs`
-    /// entries. Keep in sync when adding or modifying backends.
-    pub fn native_skills_dirs(&self) -> Option<&'static [&'static str]> {
-        match self {
-            AcpBackend::Claude => Some(&[".claude/skills"]),
-            AcpBackend::Gemini => Some(&[".gemini/skills"]),
-            AcpBackend::Qwen => Some(&[".qwen/skills"]),
-            AcpBackend::Codex => Some(&[".codex/skills"]),
-            AcpBackend::Codebuddy => Some(&[".codebuddy/skills"]),
-            AcpBackend::Goose => Some(&[".goose/skills"]),
-            AcpBackend::Kimi => Some(&[".kimi/skills"]),
-            AcpBackend::Opencode => Some(&[".opencode/skills"]),
-            AcpBackend::Droid => Some(&[".factory/skills"]),
-            AcpBackend::Vibe => Some(&[".vibe/skills"]),
-            AcpBackend::Cursor => Some(&[".cursor/skills"]),
-            // Explicitly no native skill discovery:
-            AcpBackend::Copilot
-            | AcpBackend::Qoder
-            | AcpBackend::Kiro
-            | AcpBackend::Hermes
-            | AcpBackend::Snow
-            | AcpBackend::Auggie => None,
-        }
-    }
-
-    /// Canonical full-auto session mode id for this ACP backend.
-    ///
-    /// This mirrors the frontend `getFullAutoMode()` mapping and is used by
-    /// backend flows that need to materialize a new cron job from an existing
-    /// conversation without depending on a live ACP runtime snapshot.
-    pub fn full_auto_mode_id(&self) -> &'static str {
-        match self {
-            AcpBackend::Claude | AcpBackend::Codebuddy => "bypassPermissions",
-            AcpBackend::Codex => "full-access",
-            AcpBackend::Opencode => "build",
-            AcpBackend::Cursor => "agent",
-            _ => "yolo",
         }
     }
 }
@@ -457,50 +270,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn claude_supports_native_skills() {
-        assert_eq!(
-            AcpBackend::Claude.native_skills_dirs(),
-            Some(&[".claude/skills"][..])
-        );
-    }
-
-    #[test]
-    fn copilot_has_no_native_skills() {
-        assert_eq!(AcpBackend::Copilot.native_skills_dirs(), None);
-    }
-
-    #[test]
-    fn qoder_kiro_hermes_snow_have_no_native_skills() {
-        assert_eq!(AcpBackend::Qoder.native_skills_dirs(), None);
-        assert_eq!(AcpBackend::Kiro.native_skills_dirs(), None);
-        assert_eq!(AcpBackend::Hermes.native_skills_dirs(), None);
-        assert_eq!(AcpBackend::Snow.native_skills_dirs(), None);
-    }
-
-    #[test]
-    fn all_backends_with_skills_dirs() {
-        // Mirrors src/common/types/acpTypes.ts ACP_BACKENDS_ALL skillsDirs entries.
-        let expected_with_skills: &[AcpBackend] = &[
-            AcpBackend::Claude,
-            AcpBackend::Qwen,
-            AcpBackend::Codex,
-            AcpBackend::Codebuddy,
-            AcpBackend::Goose,
-            AcpBackend::Kimi,
-            AcpBackend::Opencode,
-            AcpBackend::Droid,
-            AcpBackend::Vibe,
-            AcpBackend::Cursor,
-        ];
-        for b in expected_with_skills {
-            assert!(
-                b.native_skills_dirs().is_some(),
-                "{b:?} should expose native_skills_dirs"
-            );
-        }
-    }
-
-    #[test]
     fn test_agent_type_display_names() {
         assert_eq!(
             AgentType::OpenclawGateway.display_name(),
@@ -559,38 +328,6 @@ mod tests {
             assert_eq!(json, format!("\"{expected}\""), "serialize {variant:?}");
             let parsed: AgentType = serde_json::from_str(&json).unwrap();
             assert_eq!(parsed, variant, "deserialize {expected}");
-        }
-    }
-
-    #[test]
-    fn test_acp_backend_lowercase_variants() {
-        let cases = [
-            (AcpBackend::Claude, "claude"),
-            (AcpBackend::Codebuddy, "codebuddy"),
-            (AcpBackend::Opencode, "opencode"),
-            (AcpBackend::Hermes, "hermes"),
-            (AcpBackend::Snow, "snow"),
-        ];
-        for (variant, expected) in cases {
-            let json = serde_json::to_string(&variant).unwrap();
-            assert_eq!(json, format!("\"{expected}\""), "serialize {variant:?}");
-            let parsed: AcpBackend = serde_json::from_str(&json).unwrap();
-            assert_eq!(parsed, variant, "deserialize {expected}");
-        }
-    }
-
-    #[test]
-    fn acp_backend_rejects_non_acp_engine_names() {
-        // Non-ACP execution engines are dispatched via AgentType, not AcpBackend.
-        // Rejecting them at the HTTP deserialization boundary prevents accidental
-        // regression where a future change re-adds one of these variants.
-        //
-        // Note: "gemini" is intentionally NOT in this list — it is a valid
-        // AcpBackend variant (spawned via `gemini --experimental-acp`).
-        for name in ["nanobot", "remote", "aionrs", "openclaw-gateway"] {
-            let json = format!("\"{name}\"");
-            let result: Result<AcpBackend, _> = serde_json::from_str(&json);
-            assert!(result.is_err(), "AcpBackend should not accept {name:?}");
         }
     }
 
@@ -676,77 +413,14 @@ mod tests {
     }
 
     #[test]
-    fn test_acp_backend_cli_binary_name_known() {
-        assert_eq!(AcpBackend::Claude.binary_name(), Some("claude"));
-        assert_eq!(AcpBackend::Qwen.binary_name(), Some("qwen"));
-        assert_eq!(AcpBackend::Codex.binary_name(), Some("codex"));
-        assert_eq!(AcpBackend::Kiro.binary_name(), Some("kiro"));
-        assert_eq!(AcpBackend::Goose.binary_name(), Some("goose"));
-        assert_eq!(AcpBackend::Cursor.binary_name(), Some("cursor"));
-        assert_eq!(AcpBackend::Snow.binary_name(), Some("snow"));
-    }
-
-    #[test]
-    fn test_acp_backend_display_name() {
-        assert_eq!(AcpBackend::Claude.display_name(), "Claude");
-        assert_eq!(AcpBackend::Codebuddy.display_name(), "CodeBuddy");
-        assert_eq!(AcpBackend::Opencode.display_name(), "OpenCode");
-    }
-
-    #[test]
-    fn test_acp_backend_cli_backends_only_contains_some() {
-        for backend in AcpBackend::CLI_BACKENDS {
-            assert!(
-                backend.binary_name().is_some(),
-                "{backend:?} is in CLI_BACKENDS but cli_binary_name() returns None"
-            );
-        }
-    }
-
-    #[test]
-    fn test_acp_backend_id_deterministic() {
-        let a = AcpBackend::Claude.id();
-        let b = AcpBackend::Claude.id();
-        assert_eq!(a, b);
-        assert_eq!(a.len(), 8);
-    }
-
-    #[test]
-    fn test_acp_backend_id_unique_per_variant() {
-        let claude_id = AcpBackend::Claude.id();
-        let codex_id = AcpBackend::Codex.id();
-        assert_ne!(claude_id, codex_id);
-    }
-
-    #[test]
-    fn acp_gemini_is_registered_as_cli_backend() {
-        assert!(AcpBackend::CLI_BACKENDS.contains(&AcpBackend::Gemini));
-        assert_eq!(AcpBackend::Gemini.binary_name(), Some("gemini"));
-        assert_eq!(AcpBackend::Gemini.args(), Some(&["--experimental-acp"][..]));
-        // Gemini is a direct-CLI backend, no bridge
-        assert_eq!(AcpBackend::Gemini.bridge_package(), None);
-    }
-
-    #[test]
-    fn acp_backend_full_auto_mode_id_matches_backend_capabilities() {
-        assert_eq!(AcpBackend::Claude.full_auto_mode_id(), "bypassPermissions");
-        assert_eq!(
-            AcpBackend::Codebuddy.full_auto_mode_id(),
-            "bypassPermissions"
-        );
-        assert_eq!(AcpBackend::Codex.full_auto_mode_id(), "full-access");
-        assert_eq!(AcpBackend::Opencode.full_auto_mode_id(), "build");
-        assert_eq!(AcpBackend::Cursor.full_auto_mode_id(), "agent");
-        assert_eq!(AcpBackend::Gemini.full_auto_mode_id(), "yolo");
-        assert_eq!(AcpBackend::Qwen.full_auto_mode_id(), "yolo");
-    }
-
-    #[test]
     fn agent_type_full_auto_mode_id_supports_non_acp_agents() {
         assert_eq!(
-            AgentType::Acp.full_auto_mode_id(Some(AcpBackend::Codex)),
+            AgentType::Acp.full_auto_mode_id(Some("codex")),
             "full-access"
         );
+        assert_eq!(AgentType::Acp.full_auto_mode_id(Some("claude")), "bypassPermissions");
+        assert_eq!(AgentType::Acp.full_auto_mode_id(Some("gemini")), "yolo");
+        assert_eq!(AgentType::Acp.full_auto_mode_id(None), "yolo");
         assert_eq!(AgentType::Aionrs.full_auto_mode_id(None), "yolo");
         assert_eq!(AgentType::Remote.full_auto_mode_id(None), "yolo");
     }

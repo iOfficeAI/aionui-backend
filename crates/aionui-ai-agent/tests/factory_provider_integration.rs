@@ -1,14 +1,16 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use aionui_ai_agent::acp_agent_service::AcpAgentService;
 use aionui_ai_agent::agent_registry::AgentRegistry;
 use aionui_ai_agent::factory::{AgentFactoryDeps, build_agent_factory};
 use aionui_ai_agent::skill_manager::AcpSkillManager;
 use aionui_ai_agent::types::BuildTaskOptions;
 use aionui_common::{AgentType, ProviderWithModel, encrypt_string};
 use aionui_db::{
-    CreateProviderParams, IProviderRepository, SqliteProviderRepository,
-    SqliteRemoteAgentRepository, init_database_memory,
+    CreateProviderParams, IAcpSessionRepository, IProviderRepository, SqliteAcpSessionRepository,
+    SqliteAgentMetadataRepository, SqliteProviderRepository, SqliteRemoteAgentRepository,
+    init_database_memory,
 };
 
 fn test_encryption_key() -> [u8; 32] {
@@ -18,13 +20,26 @@ fn test_encryption_key() -> [u8; 32] {
 async fn setup() -> (
     Arc<dyn IProviderRepository>,
     Arc<SqliteRemoteAgentRepository>,
+    Arc<AgentRegistry>,
+    Arc<AcpAgentService>,
 ) {
     let db = init_database_memory().await.unwrap();
     let pool = db.pool().clone();
     let provider_repo: Arc<dyn IProviderRepository> =
         Arc::new(SqliteProviderRepository::new(pool.clone()));
-    let remote_agent_repo = Arc::new(SqliteRemoteAgentRepository::new(pool));
-    (provider_repo, remote_agent_repo)
+    let remote_agent_repo = Arc::new(SqliteRemoteAgentRepository::new(pool.clone()));
+    let metadata_repo = Arc::new(SqliteAgentMetadataRepository::new(pool.clone()));
+    let registry = AgentRegistry::new(metadata_repo);
+    registry.hydrate().await.unwrap();
+    let session_repo: Arc<dyn IAcpSessionRepository> =
+        Arc::new(SqliteAcpSessionRepository::new(pool));
+    let acp_agent_service = AcpAgentService::new(session_repo);
+    (
+        provider_repo,
+        remote_agent_repo,
+        registry,
+        acp_agent_service,
+    )
 }
 
 async fn insert_test_provider(repo: &dyn IProviderRepository, id: &str, platform: &str) {
@@ -52,6 +67,8 @@ async fn insert_test_provider(repo: &dyn IProviderRepository, id: &str, platform
 fn make_factory(
     provider_repo: Arc<dyn IProviderRepository>,
     remote_agent_repo: Arc<SqliteRemoteAgentRepository>,
+    agent_registry: Arc<AgentRegistry>,
+    acp_agent_service: Arc<AcpAgentService>,
 ) -> aionui_ai_agent::AgentFactory {
     let tmp = tempfile::TempDir::new().unwrap();
     let skill_paths = Arc::new(aionui_extension::resolve_skill_paths(
@@ -63,7 +80,8 @@ fn make_factory(
         remote_agent_repo,
         provider_repo,
         encryption_key: test_encryption_key(),
-        agent_registry: Arc::new(AgentRegistry::new()),
+        agent_registry,
+        acp_agent_service,
         data_dir: PathBuf::from("/tmp/aionrs-test"),
         backend_binary_path: Arc::new(PathBuf::from("/tmp/aionrs-test/aionui-backend")),
     })
@@ -71,8 +89,13 @@ fn make_factory(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn aionrs_factory_returns_error_for_missing_provider() {
-    let (provider_repo, remote_agent_repo) = setup().await;
-    let factory = make_factory(provider_repo, remote_agent_repo);
+    let (provider_repo, remote_agent_repo, agent_registry, acp_agent_service) = setup().await;
+    let factory = make_factory(
+        provider_repo,
+        remote_agent_repo,
+        agent_registry,
+        acp_agent_service,
+    );
 
     let options = BuildTaskOptions {
         agent_type: AgentType::Aionrs,
@@ -101,9 +124,14 @@ async fn aionrs_factory_returns_error_for_missing_provider() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn aionrs_factory_resolves_provider_from_db() {
-    let (provider_repo, remote_agent_repo) = setup().await;
+    let (provider_repo, remote_agent_repo, agent_registry, acp_agent_service) = setup().await;
     insert_test_provider(&*provider_repo, "prov-001", "openai").await;
-    let factory = make_factory(provider_repo, remote_agent_repo);
+    let factory = make_factory(
+        provider_repo,
+        remote_agent_repo,
+        agent_registry,
+        acp_agent_service,
+    );
 
     let options = BuildTaskOptions {
         agent_type: AgentType::Aionrs,
@@ -123,9 +151,14 @@ async fn aionrs_factory_resolves_provider_from_db() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn aionrs_factory_respects_use_model_override() {
-    let (provider_repo, remote_agent_repo) = setup().await;
+    let (provider_repo, remote_agent_repo, agent_registry, acp_agent_service) = setup().await;
     insert_test_provider(&*provider_repo, "prov-002", "openai").await;
-    let factory = make_factory(provider_repo, remote_agent_repo);
+    let factory = make_factory(
+        provider_repo,
+        remote_agent_repo,
+        agent_registry,
+        acp_agent_service,
+    );
 
     let options = BuildTaskOptions {
         agent_type: AgentType::Aionrs,

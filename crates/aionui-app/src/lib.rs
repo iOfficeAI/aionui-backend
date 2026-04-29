@@ -14,10 +14,10 @@ use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
 use aionui_ai_agent::{
-    AcpRouterState, AcpSkillManager, AgentFactoryDeps, AgentRegistry, AgentRouterState,
-    AuxiliaryRouterState, ConnectionTestRouterState, IWorkerTaskManager, RemoteAgentRouterState,
-    WorkerTaskManagerImpl, acp_routes, agent_routes, auxiliary_routes, build_agent_factory,
-    connection_test_routes, remote_agent_routes,
+    AcpAgentService, AcpRouterState, AcpSkillManager, AgentFactoryDeps, AgentRegistry,
+    AgentRouterState, AuxiliaryRouterState, ConnectionTestRouterState, IWorkerTaskManager,
+    RemoteAgentRouterState, WorkerTaskManagerImpl, acp_routes, agent_routes, auxiliary_routes,
+    build_agent_factory, connection_test_routes, remote_agent_routes,
 };
 use aionui_assistant::{AssistantRouterState, assistant_routes};
 use aionui_auth::{
@@ -30,8 +30,9 @@ use aionui_channel::{ChannelRouterState, channel_routes};
 use aionui_conversation::{ConversationRouterState, conversation_routes};
 use aionui_cron::{CronRouterState, cron_routes};
 use aionui_db::{
-    Database, IUserRepository, SqliteProviderRepository, SqliteRemoteAgentRepository,
-    SqliteUserRepository,
+    Database, IAcpSessionRepository, IAgentMetadataRepository, IUserRepository,
+    SqliteAcpSessionRepository, SqliteAgentMetadataRepository, SqliteProviderRepository,
+    SqliteRemoteAgentRepository, SqliteUserRepository,
 };
 use aionui_extension::{
     ExtensionRouterState, HubRouterState, SkillRouterState, extension_routes, hub_routes,
@@ -156,7 +157,18 @@ impl AppServices {
 
         let remote_agent_repo = Arc::new(SqliteRemoteAgentRepository::new(database.pool().clone()));
         let provider_repo = Arc::new(SqliteProviderRepository::new(database.pool().clone()));
-        let agent_registry = Arc::new(AgentRegistry::new());
+
+        let agent_metadata_repo: Arc<dyn IAgentMetadataRepository> =
+            Arc::new(SqliteAgentMetadataRepository::new(database.pool().clone()));
+        let agent_registry = AgentRegistry::new(agent_metadata_repo);
+        agent_registry
+            .hydrate()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to hydrate agent registry: {e}"))?;
+
+        let acp_session_repo: Arc<dyn IAcpSessionRepository> =
+            Arc::new(SqliteAcpSessionRepository::new(database.pool().clone()));
+        let acp_agent_service = AcpAgentService::new(acp_session_repo.clone());
 
         // Skill paths need app resource dir (for builtin rules) + data dir
         // (for user skills + materialized views). AcpSkillManager uses these
@@ -184,9 +196,14 @@ impl AppServices {
             provider_repo,
             encryption_key,
             agent_registry: agent_registry.clone(),
+            acp_agent_service: acp_agent_service.clone(),
             data_dir: std::path::PathBuf::from(&data_dir),
             backend_binary_path: backend_binary_path.clone(),
         });
+
+        // Agent factory is now wired. Future extension/custom agents
+        // that get written to `agent_metadata` will show up after the
+        // relevant service calls `AgentRegistry::hydrate`.
         let worker_task_manager: Arc<dyn IWorkerTaskManager> =
             Arc::new(WorkerTaskManagerImpl::new(factory));
 

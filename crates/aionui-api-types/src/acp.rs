@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 
-use aionui_common::AcpBackend;
 use serde::{Deserialize, Serialize};
 
 /// Request body for detecting an ACP CLI executable.
+///
+/// `backend` is a vendor label (e.g. "claude"). The service resolves it
+/// against the `agent_metadata` catalog.
 #[derive(Debug, Deserialize)]
 pub struct DetectCliRequest {
-    pub backend: AcpBackend,
+    pub backend: String,
 }
 
 /// Response for CLI detection.
@@ -20,7 +22,7 @@ pub struct DetectCliResponse {
 /// Request body for ACP health check.
 #[derive(Debug, Deserialize)]
 pub struct AcpHealthCheckRequest {
-    pub backend: AcpBackend,
+    pub backend: String,
 }
 
 /// Response for ACP health check.
@@ -85,7 +87,7 @@ pub struct ModelInfoPayload {
 /// Request body for probing model information.
 #[derive(Debug, Deserialize)]
 pub struct ProbeModelRequest {
-    pub backend: AcpBackend,
+    pub backend: String,
 }
 
 /// Request body for setting a config option.
@@ -163,7 +165,7 @@ mod tests {
     fn detect_cli_request_serde() {
         let json = json!({ "backend": "claude" });
         let req: DetectCliRequest = serde_json::from_value(json).unwrap();
-        assert_eq!(req.backend, AcpBackend::Claude);
+        assert_eq!(req.backend, "claude");
     }
 
     #[test]
@@ -279,6 +281,6 @@ mod tests {
     fn probe_model_request_serde() {
         let json = json!({ "backend": "claude" });
         let req: ProbeModelRequest = serde_json::from_value(json).unwrap();
-        assert_eq!(req.backend, AcpBackend::Claude);
+        assert_eq!(req.backend, "claude");
     }
 }

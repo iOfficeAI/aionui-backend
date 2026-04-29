@@ -6,10 +6,14 @@ use std::sync::Mutex;
 use aionui_ai_agent::{AgentFactory, BuildTaskOptions, IWorkerTaskManager, WorkerTaskManagerImpl};
 use aionui_api_types::{AddAgentRequest, CreateTeamRequest, TeamAgentInput, WebSocketMessage};
 use aionui_common::{AgentKillReason, AppError, PaginatedResult};
-use aionui_db::models::{ConversationRow, MessageRow};
+use aionui_db::models::{
+    AcpSessionRow, AgentMetadataRow, ConversationRow, MessageRow, UpdateAgentHandshakeParams,
+    UpsertAgentMetadataParams,
+};
 use aionui_db::{
-    ConversationFilters, ConversationRowUpdate, DbError, IConversationRepository, ITeamRepository,
-    MessageRowUpdate, MessageSearchRow, SortOrder,
+    ConversationFilters, ConversationRowUpdate, CreateAcpSessionParams, DbError,
+    IAcpSessionRepository, IAgentMetadataRepository, IConversationRepository, ITeamRepository,
+    MessageRowUpdate, MessageSearchRow, PersistedSessionState, SaveRuntimeStateParams, SortOrder,
 };
 use aionui_realtime::EventBroadcaster;
 
@@ -312,6 +316,85 @@ impl aionui_conversation::skill_resolver::SkillResolver for StubSkillResolver {
     }
 }
 
+struct StubAgentMetadataRepo;
+
+#[async_trait::async_trait]
+impl IAgentMetadataRepository for StubAgentMetadataRepo {
+    async fn list_all(&self) -> Result<Vec<AgentMetadataRow>, DbError> {
+        Ok(Vec::new())
+    }
+    async fn get(&self, _id: &str) -> Result<Option<AgentMetadataRow>, DbError> {
+        Ok(None)
+    }
+    async fn find_by_source_and_name(
+        &self,
+        _agent_source: &str,
+        _name: &str,
+    ) -> Result<Option<AgentMetadataRow>, DbError> {
+        Ok(None)
+    }
+    async fn find_builtin_by_backend(
+        &self,
+        _backend: &str,
+    ) -> Result<Option<AgentMetadataRow>, DbError> {
+        Ok(None)
+    }
+    async fn upsert(
+        &self,
+        _params: &UpsertAgentMetadataParams<'_>,
+    ) -> Result<AgentMetadataRow, DbError> {
+        Err(DbError::Init("stub".into()))
+    }
+    async fn apply_handshake(
+        &self,
+        _id: &str,
+        _params: &UpdateAgentHandshakeParams<'_>,
+    ) -> Result<Option<AgentMetadataRow>, DbError> {
+        Ok(None)
+    }
+    async fn set_enabled(&self, _id: &str, _enabled: bool) -> Result<bool, DbError> {
+        Ok(false)
+    }
+    async fn delete(&self, _id: &str) -> Result<bool, DbError> {
+        Ok(false)
+    }
+}
+
+struct StubAcpSessionRepo;
+
+#[async_trait::async_trait]
+impl IAcpSessionRepository for StubAcpSessionRepo {
+    async fn get(&self, _conversation_id: &str) -> Result<Option<AcpSessionRow>, DbError> {
+        Ok(None)
+    }
+    async fn create(&self, _params: &CreateAcpSessionParams<'_>) -> Result<AcpSessionRow, DbError> {
+        Err(DbError::Init("stub".into()))
+    }
+    async fn update_session_id(
+        &self,
+        _conversation_id: &str,
+        _session_id: &str,
+    ) -> Result<bool, DbError> {
+        Ok(false)
+    }
+    async fn delete(&self, _conversation_id: &str) -> Result<bool, DbError> {
+        Ok(false)
+    }
+    async fn load_runtime_state(
+        &self,
+        _conversation_id: &str,
+    ) -> Result<Option<PersistedSessionState>, DbError> {
+        Ok(None)
+    }
+    async fn save_runtime_state(
+        &self,
+        _conversation_id: &str,
+        _params: &SaveRuntimeStateParams<'_>,
+    ) -> Result<bool, DbError> {
+        Ok(false)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Counting task manager — wraps WorkerTaskManagerImpl so tests can assert
 // kill / get_or_build_task call counts by conversation id.
@@ -468,11 +551,15 @@ fn setup_with_factory(factory: AgentFactory) -> (TeamSessionService, Arc<Countin
     let team_repo: Arc<dyn ITeamRepository> = Arc::new(FullMockTeamRepo::new());
     let conv_repo: Arc<dyn IConversationRepository> = Arc::new(MockConversationRepo::new());
     let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(NullBroadcaster);
+    let agent_metadata_repo: Arc<dyn IAgentMetadataRepository> = Arc::new(StubAgentMetadataRepo);
+    let acp_session_repo: Arc<dyn IAcpSessionRepository> = Arc::new(StubAcpSessionRepo);
     let conv_service = ConversationService::new_with_workspace_root(
         conv_repo,
         broadcaster.clone(),
         std::env::temp_dir(),
         Arc::new(StubSkillResolver),
+        agent_metadata_repo,
+        acp_session_repo,
     );
     let backend_binary_path = Arc::new(std::path::PathBuf::from("/tmp/aionui-backend-test"));
     let task_manager = Arc::new(CountingTaskManager::new(factory));

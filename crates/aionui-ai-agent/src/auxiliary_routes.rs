@@ -218,9 +218,8 @@ async fn side_question(
 
     let acp = downcast_acp(&handle)?;
 
-    // Check if the backend is Claude (side question is only supported for Claude)
-    let backend = acp.backend();
-    if backend != aionui_common::AcpBackend::Claude {
+    // Side question is gated by the agent's behavior_policy flag.
+    if !acp.supports_side_question() {
         return Ok(Json(ApiResponse::ok(SideQuestionResponse {
             status: "unsupported".into(),
             answer: None,

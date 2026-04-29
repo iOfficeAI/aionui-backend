@@ -1,6 +1,5 @@
 //! All HTTP request/response DTOs shared across the API surface.
 mod acp;
-mod agent;
 mod agent_discovery;
 mod assistant;
 mod auth;
@@ -31,8 +30,10 @@ pub use acp::{
     SetModeRequest, SetModelRequest, SideQuestionRequest, SideQuestionResponse,
     TestCustomAgentRequest, TestCustomAgentResponse, WorkspaceBrowseQuery, WorkspaceEntry,
 };
-pub use agent::AgentInfo;
-pub use agent_discovery::{AgentSource, DetectedAgent, EnvVar};
+pub use agent_discovery::{
+    AgentEnvEntry, AgentHandshake, AgentMetadata, AgentSource, AgentSourceInfo, BehaviorPolicy,
+    ResumeStrategy,
+};
 pub use assistant::{
     AssistantResponse, AssistantSource, CreateAssistantRequest, ImportAssistantsRequest,
     ImportAssistantsResult, ImportError, SetAssistantStateRequest, UpdateAssistantRequest,

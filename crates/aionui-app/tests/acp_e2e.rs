@@ -47,10 +47,14 @@ async fn detect_cli_returns_path_or_null() {
 }
 
 #[tokio::test]
-async fn detect_cli_invalid_backend() {
+async fn detect_cli_unknown_backend_returns_null_path() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "user1", "pass123").await;
 
+    // Unknown vendor labels succeed at the HTTP layer and surface as a
+    // null `path` — the service no longer validates against a closed
+    // enum, so "backend not in catalog" and "backend present but CLI
+    // missing" share the same response shape.
     let req = json_with_token(
         "POST",
         "/api/acp/detect-cli",
@@ -59,25 +63,10 @@ async fn detect_cli_invalid_backend() {
         &csrf,
     );
     let resp = app.oneshot(req).await.unwrap();
-    // Invalid backend should fail deserialization → 400
-    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
-}
-
-#[tokio::test]
-async fn detect_cli_unknown_backend_returns_bad_request() {
-    let (mut app, services) = build_app().await;
-    let (token, csrf) = setup_and_login(&mut app, &services, "user1", "pass123").await;
-
-    // Unknown backend should fail request deserialization.
-    let req = json_with_token(
-        "POST",
-        "/api/acp/detect-cli",
-        json!({ "backend": "iFlow" }),
-        &token,
-        &csrf,
-    );
-    let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = body_json(resp).await;
+    assert_eq!(body["success"], true);
+    assert!(body["data"]["path"].is_null());
 }
 
 #[tokio::test]
@@ -150,10 +139,13 @@ async fn health_check_returns_status() {
 }
 
 #[tokio::test]
-async fn health_check_unknown_backend_returns_bad_request() {
+async fn health_check_unknown_backend_reports_unavailable() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "user1", "pass123").await;
 
+    // Same rationale as `detect_cli_unknown_backend_returns_null_path`:
+    // unknown backends are valid at the request layer and surface as
+    // `available: false` with an error string.
     let req = json_with_token(
         "POST",
         "/api/acp/health-check",
@@ -162,7 +154,10 @@ async fn health_check_unknown_backend_returns_bad_request() {
         &csrf,
     );
     let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = body_json(resp).await;
+    assert_eq!(body["success"], true);
+    assert_eq!(body["data"]["available"], false);
 }
 
 #[tokio::test]

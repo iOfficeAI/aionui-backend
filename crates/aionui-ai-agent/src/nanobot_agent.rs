@@ -15,6 +15,7 @@ use aionui_common::CommandSpec;
 use crate::cli_process::CliAgentProcess;
 use crate::stream_event::AgentStreamEvent;
 use crate::types::SendMessageData;
+use std::path::PathBuf;
 
 /// Grace period before force-killing a Nanobot process (ms).
 const NANOBOT_KILL_GRACE_MS: u64 = 500;
@@ -47,9 +48,9 @@ impl NanobotAgentManager {
     pub async fn new(
         conversation_id: String,
         workspace: String,
-        cli_path: String,
+        cli_path: PathBuf,
     ) -> Result<Self, AppError> {
-        let spawn_config = Self::build_spawn_config(&cli_path, &workspace);
+        let spawn_config = Self::build_spawn_config(cli_path, &workspace);
         let process = CliAgentProcess::spawn(spawn_config).await?;
 
         let raw_rx = process
@@ -71,9 +72,9 @@ impl NanobotAgentManager {
         })
     }
 
-    fn build_spawn_config(cli_path: &str, workspace: &str) -> CommandSpec {
+    fn build_spawn_config(cli_path: PathBuf, workspace: &str) -> CommandSpec {
         CommandSpec {
-            command: cli_path.into(),
+            command: cli_path,
             args: vec![],
             env: vec![],
             cwd: Some(workspace.to_owned()),
@@ -267,7 +268,8 @@ mod tests {
 
     #[test]
     fn build_spawn_config_basic() {
-        let config = NanobotAgentManager::build_spawn_config("/usr/bin/nanobot", "/project");
+        let config =
+            NanobotAgentManager::build_spawn_config(PathBuf::from("/usr/bin/nanobot"), "/project");
         assert_eq!(config.command.to_str().unwrap(), "/usr/bin/nanobot");
         assert_eq!(config.cwd, Some("/project".into()));
         assert!(config.args.is_empty());

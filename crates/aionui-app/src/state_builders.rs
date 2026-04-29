@@ -4,17 +4,17 @@ use aionui_ai_agent::{
     AcpRouterState, AgentRouterState, AuxiliaryRouterState, ConnectionTestRouterState,
     ConnectionTestService, RemoteAgentRouterState, RemoteAgentService,
 };
-use aionui_api_types::{AgentSource, DetectedAgent};
 use aionui_assistant::{AssistantRouterState, AssistantService, BuiltinAssistantRegistry};
 use aionui_auth::extract_token_from_ws_headers;
 use aionui_channel::ChannelRouterState;
-use aionui_common::{AgentType, EnvVar};
 use aionui_conversation::{ConversationRouterState, ConversationService};
 use aionui_cron::{CronEventEmitter, CronRouterState};
 use aionui_db::{
-    IAssistantOverrideRepository, IAssistantRepository, SqliteAssistantOverrideRepository,
-    SqliteAssistantRepository, SqliteClientPreferenceRepository, SqliteConversationRepository,
-    SqliteProviderRepository, SqliteRemoteAgentRepository, SqliteSettingsRepository,
+    IAcpSessionRepository, IAgentMetadataRepository, IAssistantOverrideRepository,
+    IAssistantRepository, SqliteAcpSessionRepository, SqliteAgentMetadataRepository,
+    SqliteAssistantOverrideRepository, SqliteAssistantRepository, SqliteClientPreferenceRepository,
+    SqliteConversationRepository, SqliteProviderRepository, SqliteRemoteAgentRepository,
+    SqliteSettingsRepository,
 };
 use aionui_extension::{
     AssistantRuleDispatcher, ExtensionRegistry, ExtensionRouterState, ExtensionStateStore,
@@ -40,35 +40,6 @@ use aionui_team::{TeamRouterState, TeamSessionService};
 
 use crate::{AppServices, ModuleStates, derive_encryption_key};
 
-/// Convert extension-contributed ACP adapters into `DetectedAgent` values.
-pub(crate) async fn resolve_extension_agents(registry: &ExtensionRegistry) -> Vec<DetectedAgent> {
-    registry
-        .get_acp_adapters()
-        .await
-        .into_iter()
-        .filter(|a| {
-            a.connection_type
-                .as_deref()
-                .is_none_or(|ct| ct == "cli" || ct == "stdio")
-        })
-        .map(|a| DetectedAgent {
-            id: a.id,
-            name: a.name,
-            agent_type: AgentType::Acp,
-            backend: None,
-            available: true,
-            source: AgentSource::Extension,
-            command: a.default_cli_path.or(a.cli_command),
-            args: a.acp_args,
-            env: a
-                .env
-                .into_iter()
-                .map(|(k, v)| EnvVar { name: k, value: v })
-                .collect(),
-        })
-        .collect()
-}
-
 /// Components needed to start the channel orchestrator.
 ///
 /// Returned alongside `ChannelRouterState` by `build_channel_state`.
@@ -90,8 +61,9 @@ pub async fn build_module_states(
     let cron = build_cron_state(services);
     cron.cron_service.init().await;
 
-    let extensions = resolve_extension_agents(&ext_state.registry).await;
-    services.agent_registry.initialize(extensions, vec![]).await;
+    // The agent catalog already hydrated at startup (see `lib.rs`).
+    // Extension-contributed rows will land in `agent_metadata` in a
+    // later step; for now we rely on the builtin + internal seed rows.
 
     let dispatcher: Arc<dyn AssistantRuleDispatcher> = assistant.service.clone();
     skill_state.assistant_dispatcher = Some(dispatcher);
@@ -189,7 +161,11 @@ pub fn build_conversation_state(
     cron_service: Option<Arc<aionui_cron::service::CronService>>,
 ) -> ConversationRouterState {
     let pool = services.database.pool().clone();
-    let repo = Arc::new(SqliteConversationRepository::new(pool));
+    let repo = Arc::new(SqliteConversationRepository::new(pool.clone()));
+    let agent_metadata_repo: Arc<dyn IAgentMetadataRepository> =
+        Arc::new(SqliteAgentMetadataRepository::new(pool.clone()));
+    let acp_session_repo: Arc<dyn IAcpSessionRepository> =
+        Arc::new(SqliteAcpSessionRepository::new(pool));
     let skill_resolver = Arc::new(
         aionui_conversation::skill_resolver::ExtensionSkillResolver::new(
             services.skill_paths.clone(),
@@ -200,6 +176,8 @@ pub fn build_conversation_state(
         services.event_bus.clone(),
         std::path::PathBuf::from(&services.data_dir),
         skill_resolver,
+        agent_metadata_repo,
+        acp_session_repo,
     );
     if let Some(cron_service) = cron_service {
         conversation_service.set_cron_service(Some(cron_service));
@@ -224,6 +202,7 @@ pub fn build_remote_agent_state(services: &AppServices) -> RemoteAgentRouterStat
 pub fn build_acp_state(services: &AppServices) -> AcpRouterState {
     AcpRouterState {
         worker_task_manager: services.worker_task_manager.clone(),
+        agent_registry: services.agent_registry.clone(),
     }
 }
 
@@ -345,11 +324,20 @@ pub async fn build_channel_state(
             services.skill_paths.clone(),
         ),
     );
+    let agent_metadata_repo: Arc<dyn aionui_db::IAgentMetadataRepository> =
+        Arc::new(aionui_db::SqliteAgentMetadataRepository::new(
+            services.database.pool().clone(),
+        ));
+    let acp_session_repo: Arc<dyn aionui_db::IAcpSessionRepository> = Arc::new(
+        aionui_db::SqliteAcpSessionRepository::new(services.database.pool().clone()),
+    );
     let conversation_svc = Arc::new(ConversationService::new_with_workspace_root(
         conv_repo,
         services.event_bus.clone(),
         std::path::PathBuf::from(&services.data_dir),
         skill_resolver,
+        agent_metadata_repo,
+        acp_session_repo,
     ));
 
     let owner_user_id = services
@@ -409,7 +397,11 @@ pub fn build_team_state(
     let team_repo: Arc<dyn aionui_db::ITeamRepository> =
         Arc::new(aionui_db::SqliteTeamRepository::new(pool.clone()));
     let conv_repo: Arc<dyn aionui_db::IConversationRepository> =
-        Arc::new(SqliteConversationRepository::new(pool));
+        Arc::new(SqliteConversationRepository::new(pool.clone()));
+    let agent_metadata_repo: Arc<dyn IAgentMetadataRepository> =
+        Arc::new(SqliteAgentMetadataRepository::new(pool.clone()));
+    let acp_session_repo: Arc<dyn IAcpSessionRepository> =
+        Arc::new(SqliteAcpSessionRepository::new(pool));
     let skill_resolver = Arc::new(
         aionui_conversation::skill_resolver::ExtensionSkillResolver::new(
             services.skill_paths.clone(),
@@ -420,6 +412,8 @@ pub fn build_team_state(
         services.event_bus.clone(),
         std::path::PathBuf::from(&services.data_dir),
         skill_resolver,
+        agent_metadata_repo,
+        acp_session_repo,
     );
     if let Some(cron_service) = cron_service {
         conv_service.set_cron_service(Some(cron_service));
@@ -441,7 +435,11 @@ pub fn build_cron_state(services: &AppServices) -> CronRouterState {
         Arc::new(aionui_db::SqliteCronRepository::new(pool.clone()));
 
     let conv_repo: Arc<dyn aionui_db::IConversationRepository> =
-        Arc::new(SqliteConversationRepository::new(pool));
+        Arc::new(SqliteConversationRepository::new(pool.clone()));
+    let agent_metadata_repo: Arc<dyn IAgentMetadataRepository> =
+        Arc::new(SqliteAgentMetadataRepository::new(pool.clone()));
+    let acp_session_repo: Arc<dyn IAcpSessionRepository> =
+        Arc::new(SqliteAcpSessionRepository::new(pool));
     let skill_resolver = Arc::new(
         aionui_conversation::skill_resolver::ExtensionSkillResolver::new(
             services.skill_paths.clone(),
@@ -452,6 +450,8 @@ pub fn build_cron_state(services: &AppServices) -> CronRouterState {
         services.event_bus.clone(),
         std::path::PathBuf::from(&services.data_dir),
         skill_resolver,
+        agent_metadata_repo,
+        acp_session_repo,
     );
 
     let busy_guard = Arc::new(aionui_cron::busy_guard::CronBusyGuard::new());

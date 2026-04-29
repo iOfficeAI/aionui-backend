@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use aionui_api_types::TeamMcpStdioConfig;
-use aionui_common::{AcpBackend, AgentType, ProviderWithModel};
+use aionui_common::{AgentType, ProviderWithModel};
 
 /// Data payload for sending a user message to an Agent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,9 +43,10 @@ pub struct AcpBuildExtra {
     /// from the registry and need not be supplied by the caller.
     #[serde(default)]
     pub agent_id: Option<String>,
-    /// ACP sub-backend identifier.
+    /// Vendor label (e.g. "claude"). When present without `agent_id`, the
+    /// factory looks up the first builtin row matching this label.
     #[serde(default)]
-    pub backend: Option<AcpBackend>,
+    pub backend: Option<String>,
     /// Path to the CLI executable (resolved from registry when `agent_id` is set).
     #[serde(default)]
     pub cli_path: Option<String>,
@@ -97,7 +98,7 @@ pub struct OpenClawGatewayConfig {
 pub struct OpenClawBuildExtra {
     /// Optional downstream AI backend (informational only).
     #[serde(default)]
-    pub backend: Option<AcpBackend>,
+    pub backend: Option<String>,
     /// Agent name.
     #[serde(default)]
     pub agent_name: Option<String>,

@@ -375,7 +375,7 @@ impl OpenClawAgentManager {
 
         json!({
             "workspace": self.workspace,
-            "backend": serde_json::to_value(self.config.backend).unwrap_or_default(),
+            "backend": serde_json::to_value(&self.config.backend).unwrap_or_default(),
             "agentName": self.config.agent_name,
             "cliPath": self.config.gateway.cli_path,
             "gatewayHost": host,

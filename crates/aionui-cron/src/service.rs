@@ -6,7 +6,7 @@ use aionui_api_types::{
     CreateCronJobRequest, CronJobResponse, CronScheduleDto, HasSkillResponse, ListCronJobsQuery,
     RunNowResponse, SaveCronSkillRequest, UpdateCronJobRequest,
 };
-use aionui_common::{AcpBackend, AgentType, ProviderWithModel, generate_prefixed_id, now_ms};
+use aionui_common::{AgentType, ProviderWithModel, generate_prefixed_id, now_ms};
 use aionui_db::{ICronRepository, UpdateCronJobParams};
 use tracing::{error, info, warn};
 
@@ -1034,11 +1034,11 @@ fn build_agent_config_from_conversation(
 
     let agent_type_enum =
         serde_json::from_value::<AgentType>(serde_json::Value::String(row.r#type.clone())).ok();
-    let backend_enum =
-        serde_json::from_value::<AcpBackend>(serde_json::Value::String(backend.clone())).ok();
+    // Backend is now the vendor label (e.g. "claude"); pass through as
+    // &str so `full_auto_mode_id` can key on it without re-parsing.
     let full_auto_mode = agent_type_enum
         .unwrap_or(AgentType::Acp)
-        .full_auto_mode_id(backend_enum)
+        .full_auto_mode_id(Some(backend.as_str()))
         .to_owned();
     let agent_config = aionui_api_types::CronAgentConfigDto {
         backend,

@@ -63,11 +63,19 @@ async fn setup() -> (
     let db = init_database_memory().await.unwrap();
     let repo = Arc::new(SqliteConversationRepository::new(db.pool().clone()));
     let broadcaster = Arc::new(TestBroadcaster::new());
+    let agent_metadata_repo: Arc<dyn aionui_db::IAgentMetadataRepository> = Arc::new(
+        aionui_db::SqliteAgentMetadataRepository::new(db.pool().clone()),
+    );
+    let acp_session_repo: Arc<dyn aionui_db::IAcpSessionRepository> = Arc::new(
+        aionui_db::SqliteAcpSessionRepository::new(db.pool().clone()),
+    );
     let svc = ConversationService::new_with_workspace_root(
         repo.clone(),
         broadcaster.clone(),
         std::env::temp_dir(),
         Arc::new(EmptySkillResolver),
+        agent_metadata_repo,
+        acp_session_repo,
     );
     (svc, repo, broadcaster)
 }

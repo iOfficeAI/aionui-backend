@@ -1,46 +1,47 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Instant;
 
 use aionui_api_types::{
     AcpEnvResponse, AcpHealthCheckResponse, DetectCliResponse, TestCustomAgentResponse,
 };
-use aionui_common::{AcpBackend, AppError};
+use aionui_common::AppError;
 use tracing::debug;
 
+use crate::agent_registry::AgentRegistry;
+use aionui_api_types::AgentMetadata;
+
 /// Detect the CLI path for a given ACP backend using PATH lookup.
-pub fn detect_cli(backend: AcpBackend) -> DetectCliResponse {
-    let binary = match backend.binary_name() {
-        Some(name) => name,
-        None => return DetectCliResponse { path: None },
+///
+/// Resolves the vendor label to the first `builtin` row in the metadata
+/// catalog, then checks that the row's spawn command is on `$PATH`.
+pub async fn detect_cli(registry: &Arc<AgentRegistry>, backend: &str) -> DetectCliResponse {
+    let Some(meta) = registry.find_builtin_by_backend(backend).await else {
+        return DetectCliResponse { path: None };
     };
 
-    let path = which::which(binary)
-        .ok()
-        .map(|p| p.to_string_lossy().into_owned());
-
-    debug!(backend = ?backend, binary, ?path, "CLI detection result");
+    let path = probe_command(&meta);
+    debug!(backend, ?path, "CLI detection result");
     DetectCliResponse { path }
 }
 
 /// Perform a health check for an ACP backend.
 ///
 /// Checks CLI availability and measures detection latency.
-pub fn health_check(backend: AcpBackend) -> AcpHealthCheckResponse {
+pub async fn health_check(registry: &Arc<AgentRegistry>, backend: &str) -> AcpHealthCheckResponse {
     let start = Instant::now();
 
-    let binary = match backend.binary_name() {
-        Some(name) => name,
-        None => {
-            return AcpHealthCheckResponse {
-                available: false,
-                latency: None,
-                error: Some(format!("Backend {backend:?} has no CLI binary")),
-            };
-        }
+    let Some(meta) = registry.find_builtin_by_backend(backend).await else {
+        return AcpHealthCheckResponse {
+            available: false,
+            latency: None,
+            error: Some(format!("No agent_metadata row for backend '{backend}'")),
+        };
     };
 
-    let available = which::which(binary).is_ok();
+    let path = probe_command(&meta);
     let latency_ms = start.elapsed().as_millis() as u64;
+    let available = path.is_some();
 
     AcpHealthCheckResponse {
         available,
@@ -48,9 +49,18 @@ pub fn health_check(backend: AcpBackend) -> AcpHealthCheckResponse {
         error: if available {
             None
         } else {
-            Some(format!("CLI '{binary}' not found in PATH"))
+            Some(format!(
+                "Spawn command for backend '{backend}' not found in PATH"
+            ))
         },
     }
+}
+
+fn probe_command(meta: &AgentMetadata) -> Option<String> {
+    let cmd = meta.command.as_deref()?;
+    which::which(cmd)
+        .ok()
+        .map(|p| p.to_string_lossy().into_owned())
 }
 
 /// Get relevant environment variables for ACP operations.

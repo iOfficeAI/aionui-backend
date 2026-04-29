@@ -1,33 +1,171 @@
-pub use aionui_common::EnvVar;
-use aionui_common::{AcpBackend, AgentType};
-use serde::{Deserialize, Serialize};
+//! Unified agent metadata surfaced to the frontend.
+//!
+//! A single type replaces the previous split of `DetectedAgent` (API
+//! response) and `AgentMetadata` (internal cache): the same shape is
+//! stored in the `agent_metadata` table, cached in the process, and
+//! returned over HTTP. The DB row feeds everything.
+//!
+//! Handshake-derived fields (`agent_capabilities` / `auth_methods` /
+//! `config_options` / `available_modes` / `available_models` /
+//! `available_commands`) stay as opaque JSON so this crate does not
+//! depend on the ACP protocol SDK — the ai-agent crate typed-decodes
+//! them when it needs to.
 
-/// How an agent was discovered.
+use aionui_common::AgentType;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+
+/// How an agent row was sourced.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AgentSource {
+    /// Ships with the backend binary (no CLI install required — e.g. `aionrs`).
     Internal,
+    /// Seeded from the migration (ACP vendors, nanobot, openclaw).
     Builtin,
+    /// Installed from the extension hub.
     Extension,
+    /// User-defined row.
     Custom,
 }
 
-/// A discovered agent from any source.
+/// Environment variable entry passed to a spawned agent process.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DetectedAgent {
-    pub id: String,
+pub struct AgentEnvEntry {
     pub name: String,
+    pub value: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+/// Source-specific bookkeeping (how to probe, how to upgrade, which Hub
+/// package it came from).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AgentSourceInfo {
+    /// Primary CLI binary checked for availability.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binary_name: Option<String>,
+    /// Extra binary required when the row spawns via a bridge (e.g. `bun`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bridge_binary: Option<String>,
+    /// Hub package identifier when `agent_source = "extension"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hub_package_id: Option<String>,
+    /// Version string for Hub or custom rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+}
+
+/// How the agent resumes an existing session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResumeStrategy {
+    #[default]
+    NewAndPrompt,
+    SessionLoad,
+}
+
+impl ResumeStrategy {
+    /// Whether this strategy resumes by calling `session/load` (Codex).
+    pub fn is_session_load(self) -> bool {
+        matches!(self, ResumeStrategy::SessionLoad)
+    }
+}
+
+/// Adapter-side behaviour switches. These drive code branches that used
+/// to be hardcoded per `AcpBackend`; new keys are added by extending
+/// this struct — we deliberately avoid a free-form "extra" bag so every
+/// flag is type-checked at its usage sites.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct BehaviorPolicy {
+    #[serde(default)]
+    pub resume_strategy: ResumeStrategy,
+    #[serde(default)]
+    pub supports_side_question: bool,
+    /// Native mode id that AionUi's legacy `yolo` / `yoloNoSandbox`
+    /// aliases should resolve to before calling `session/set_mode`.
+    /// `None` means the backend has no "yolo" equivalent and the alias
+    /// should be passed through unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yolo_id: Option<String>,
+}
+
+/// Handshake-derived fields captured from the ACP init/session-response.
+///
+/// All fields are opaque JSON at this layer: they are passed through to
+/// the frontend verbatim, and typed-decoded inside `aionui-ai-agent`
+/// when the adapter needs them.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AgentHandshake {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_capabilities: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_methods: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_options: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub available_modes: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub available_models: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub available_commands: Option<serde_json::Value>,
+}
+
+/// The unified, decoded view of an `agent_metadata` row.
+///
+/// Also the API response shape: `/api/agents` returns a list of these
+/// directly, no adapter required.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentMetadata {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_i18n: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description_i18n: Option<serde_json::Value>,
+
+    /// Vendor label (e.g. "claude"). `None` for agents without vendor
+    /// grouping (remote / internal / nanobot).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend: Option<String>,
     pub agent_type: AgentType,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub backend: Option<AcpBackend>,
+    pub agent_source: AgentSource,
+    #[serde(default)]
+    pub agent_source_info: AgentSourceInfo,
+
+    pub enabled: bool,
+
+    /// Whether the spawn command was resolvable on `$PATH` at hydrate time.
+    ///
+    /// Derived at discovery time — not a persisted column. Serialized so
+    /// the frontend can show "installed / missing" status without a
+    /// second round-trip.
     pub available: bool,
-    pub source: AgentSource,
-    #[serde(skip_serializing_if = "Option::is_none")]
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
+    /// Absolute path to the spawn command, resolved via `which()` at
+    /// hydrate time. `Some` iff `available` is `true`. Server-internal:
+    /// the frontend only cares about `available`, so this field is
+    /// never serialized over the wire.
+    #[serde(default, skip)]
+    pub resolved_command: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub args: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub env: Vec<EnvVar>,
+    pub env: Vec<AgentEnvEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_skills_dirs: Option<Vec<String>>,
+
+    #[serde(default)]
+    pub behavior_policy: BehaviorPolicy,
+
+    #[serde(default)]
+    pub handshake: AgentHandshake,
 }
 
 #[cfg(test)]
@@ -37,79 +175,75 @@ mod tests {
 
     #[test]
     fn agent_source_serde_roundtrip() {
-        let cases = [
+        for (variant, expected) in [
             (AgentSource::Internal, "internal"),
             (AgentSource::Builtin, "builtin"),
             (AgentSource::Extension, "extension"),
             (AgentSource::Custom, "custom"),
-        ];
-        for (variant, expected) in cases {
-            let json = serde_json::to_string(&variant).unwrap();
-            assert_eq!(json, format!("\"{expected}\""));
-            let parsed: AgentSource = serde_json::from_str(&json).unwrap();
+        ] {
+            let s = serde_json::to_string(&variant).unwrap();
+            assert_eq!(s, format!("\"{expected}\""));
+            let parsed: AgentSource = serde_json::from_str(&s).unwrap();
             assert_eq!(parsed, variant);
         }
     }
 
     #[test]
-    fn detected_agent_serialization_skips_empty_fields() {
-        let agent = DetectedAgent {
+    fn resume_strategy_default_is_new_and_prompt() {
+        assert_eq!(ResumeStrategy::default(), ResumeStrategy::NewAndPrompt);
+    }
+
+    #[test]
+    fn agent_metadata_skips_empty_fields() {
+        let meta = AgentMetadata {
             id: "abc12345".into(),
+            icon: None,
             name: "Claude".into(),
+            name_i18n: None,
+            description: None,
+            description_i18n: None,
+            backend: Some("claude".into()),
             agent_type: AgentType::Acp,
-            backend: Some(AcpBackend::Claude),
+            agent_source: AgentSource::Builtin,
+            agent_source_info: AgentSourceInfo::default(),
+            enabled: true,
             available: true,
-            source: AgentSource::Builtin,
             command: None,
+            resolved_command: None,
             args: vec![],
             env: vec![],
+            native_skills_dirs: None,
+            behavior_policy: BehaviorPolicy::default(),
+            handshake: AgentHandshake::default(),
         };
-        let json = serde_json::to_value(&agent).unwrap();
-        assert_eq!(json["id"], "abc12345");
-        assert_eq!(json["agent_type"], "acp");
-        assert_eq!(json["backend"], "claude");
-        assert_eq!(json["source"], "builtin");
-        assert!(json.get("command").is_none());
-        assert!(json.get("args").is_none());
-        assert!(json.get("env").is_none());
+        let v = serde_json::to_value(&meta).unwrap();
+        assert_eq!(v["id"], "abc12345");
+        // Server-internal fields are stripped from the wire form.
+        assert!(v.get("resolved_command").is_none());
+        assert_eq!(v["backend"], "claude");
+        assert_eq!(v["available"], true);
+        assert!(v.get("command").is_none());
+        assert!(v.get("icon").is_none());
     }
 
     #[test]
-    fn detected_agent_deserialization() {
-        let json = json!({
-            "id": "ext123",
-            "name": "MyAgent",
+    fn agent_metadata_deserializes_minimal_payload() {
+        let payload = json!({
+            "id": "x",
+            "name": "y",
             "agent_type": "acp",
-            "backend": "claude",
-            "available": true,
-            "source": "extension",
-            "command": "/usr/bin/my-cli",
-            "env": [{"name": "FOO", "value": "bar"}]
+            "agent_source": "custom",
+            "enabled": true,
+            "available": false,
         });
-        let agent: DetectedAgent = serde_json::from_value(json).unwrap();
-        assert_eq!(agent.agent_type, AgentType::Acp);
-        assert_eq!(agent.backend, Some(AcpBackend::Claude));
-        assert_eq!(agent.source, AgentSource::Extension);
-        assert_eq!(agent.command.as_deref(), Some("/usr/bin/my-cli"));
-        assert_eq!(agent.env.len(), 1);
-        assert_eq!(agent.env[0].name, "FOO");
-    }
-
-    #[test]
-    fn detected_agent_without_backend() {
-        let agent = DetectedAgent {
-            id: "oc123".into(),
-            name: "OpenClaw Gateway".into(),
-            agent_type: AgentType::OpenclawGateway,
-            backend: None,
-            available: true,
-            source: AgentSource::Builtin,
-            command: Some("/usr/bin/openclaw".into()),
-            args: vec![],
-            env: vec![],
-        };
-        let json = serde_json::to_value(&agent).unwrap();
-        assert_eq!(json["agent_type"], "openclaw-gateway");
-        assert!(json.get("backend").is_none());
+        let meta: AgentMetadata = serde_json::from_value(payload).unwrap();
+        assert_eq!(meta.agent_type, AgentType::Acp);
+        assert_eq!(meta.agent_source, AgentSource::Custom);
+        assert!(!meta.available);
+        assert_eq!(
+            meta.behavior_policy.resume_strategy,
+            ResumeStrategy::NewAndPrompt
+        );
+        assert!(meta.handshake.agent_capabilities.is_none());
     }
 }

@@ -592,14 +592,38 @@ impl TeamSessionService {
     }
 }
 
+/// Known ACP vendor labels. Kept in lockstep with the `agent_metadata`
+/// seed in `005_agent_metadata.sql` — a caller hitting an unknown
+/// vendor should trigger a schema drift discussion, not silently fall
+/// through.
+const ACP_VENDOR_LABELS: &[&str] = &[
+    "claude",
+    "codex",
+    "gemini",
+    "qwen",
+    "codebuddy",
+    "droid",
+    "goose",
+    "auggie",
+    "kimi",
+    "opencode",
+    "copilot",
+    "qoder",
+    "vibe",
+    "cursor",
+    "kiro",
+    "hermes",
+    "snow",
+];
+
 fn parse_agent_type(backend: &str) -> Result<AgentType, TeamError> {
-    use aionui_common::AcpBackend;
-    let quoted = format!("\"{backend}\"");
-    // Try as AcpBackend sub-type first (e.g. "claude", "gemini", "qwen").
-    if serde_json::from_str::<AcpBackend>(&quoted).is_ok() {
+    // Any registered ACP vendor label collapses to `AgentType::Acp`.
+    if ACP_VENDOR_LABELS.contains(&backend) {
         return Ok(AgentType::Acp);
     }
-    // Then try as AgentType (e.g. "acp", "nanobot", "aionrs").
+    // Otherwise interpret as a top-level `AgentType` (e.g. "acp",
+    // "nanobot", "aionrs", "remote", "openclaw-gateway").
+    let quoted = format!("\"{backend}\"");
     if let Ok(t) = serde_json::from_str::<AgentType>(&quoted) {
         return Ok(t);
     }

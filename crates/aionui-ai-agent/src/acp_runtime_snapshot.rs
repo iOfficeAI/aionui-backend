@@ -1,8 +1,26 @@
+use std::collections::HashMap;
+
 use crate::stream_event::AgentStreamEvent;
 use agent_client_protocol::schema::{
-    AgentCapabilities, AuthMethod, AvailableCommand, SessionConfigOption, SessionModeState,
-    SessionModelState, UsageUpdate,
+    AgentCapabilities, AuthMethod, AvailableCommand, LoadSessionResponse, SessionConfigOption,
+    SessionModeState, SessionModelState, UsageUpdate,
 };
+
+/// Decoded per-session runtime state loaded from `acp_session.session_config.runtime`.
+///
+/// Only carries the user's last *choices* — the enumerations of what
+/// the agent supports (mode list, model list, config schema) come from
+/// the `agent_metadata` cache on the frontend, or from the ACP
+/// load-session response on the backend. See
+/// [`AcpRuntimeSnapshot::preload_persisted`] for how these merge.
+#[derive(Debug, Clone, Default)]
+pub struct PersistedSessionState {
+    pub current_mode_id: Option<String>,
+    pub current_model_id: Option<String>,
+    /// Map of `config_id -> value` captured from user selections.
+    pub config_selections: HashMap<String, String>,
+    pub context_usage: Option<UsageUpdate>,
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct AcpRuntimeSnapshot {
@@ -13,6 +31,16 @@ pub struct AcpRuntimeSnapshot {
     agent_capabilities: Option<AgentCapabilities>,
     auth_methods: Option<Vec<AuthMethod>>,
     available_commands: Option<Vec<AvailableCommand>>,
+
+    /// User-selected `config_id -> value` pairs. Populated from
+    /// `acp_session.session_config.runtime` on resume; on a fresh
+    /// `session/new` it stays empty because the CLI's own response
+    /// carries the initial values via `config_options`.
+    ///
+    /// Kept separate from `config_options` because the DB row only
+    /// stores the values, not the labels/schema — those live in
+    /// `config_options` once the CLI replies.
+    config_selections: HashMap<String, String>,
 }
 
 impl AcpRuntimeSnapshot {
@@ -59,6 +87,38 @@ impl AcpRuntimeSnapshot {
     pub fn set_available_commands(&mut self, available_commands: Vec<AvailableCommand>) {
         self.available_commands = Some(available_commands);
     }
+}
+
+impl AcpRuntimeSnapshot {
+    pub fn config_selections(&self) -> &HashMap<String, String> {
+        &self.config_selections
+    }
+
+    /// Seed the snapshot with the user's last choices from
+    /// `acp_session.session_config.runtime`. Called by
+    /// `AcpAgentManager::session_resume_and_send` **before** the CLI
+    /// `session/load` response arrives — so the snapshot has valid
+    /// `current_*` values (and context usage) immediately, but
+    /// enumeration fields like `available_modes` remain empty until
+    /// the CLI replies.
+    ///
+    /// Does not overwrite `config_options` (schema comes from the
+    /// CLI); instead it stores selections in `config_selections` and
+    /// lets the merge step align them with the CLI response.
+    pub fn preload_persisted(&mut self, state: PersistedSessionState) {
+        if let Some(mode_id) = state.current_mode_id {
+            self.modes = Some(SessionModeState::new(mode_id, Vec::new()));
+        }
+        if let Some(model_id) = state.current_model_id {
+            self.model_info = Some(SessionModelState::new(model_id, Vec::new()));
+        }
+        if !state.config_selections.is_empty() {
+            self.config_selections = state.config_selections;
+        }
+        if let Some(usage) = state.context_usage {
+            self.context_usage = Some(usage);
+        }
+    }
 
     pub fn apply_event(&mut self, event: &AgentStreamEvent) {
         match event {
@@ -91,6 +151,18 @@ impl AcpRuntimeSnapshot {
         }
     }
 
+    pub fn apply_response(&mut self, response: LoadSessionResponse) {
+        if let Some(modes) = response.modes {
+            self.set_modes(modes);
+        }
+        if let Some(models) = response.models {
+            self.set_model_info(models);
+        }
+        if let Some(configs) = response.config_options {
+            self.set_config_options(configs);
+        }
+    }
+
     pub fn current_mode_id(&self) -> Option<String> {
         self.modes
             .as_ref()
@@ -107,6 +179,57 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn preload_persisted_seeds_current_fields_without_listings() {
+        let mut snapshot = AcpRuntimeSnapshot::default();
+        let mut selections = HashMap::new();
+        selections.insert("reasoning".into(), "high".into());
+
+        snapshot.preload_persisted(PersistedSessionState {
+            current_mode_id: Some("plan".into()),
+            current_model_id: Some("claude-sonnet-4".into()),
+            config_selections: selections,
+            context_usage: Some(UsageUpdate::new(512, 8192)),
+        });
+
+        // `current_*` populated, enumerations stay empty.
+        let modes = snapshot.modes().expect("modes preloaded");
+        assert_eq!(modes.current_mode_id.to_string(), "plan");
+        assert!(
+            modes.available_modes.is_empty(),
+            "available_modes must remain empty — filled by CLI load response"
+        );
+
+        let models = snapshot.model_info().expect("model info preloaded");
+        assert_eq!(models.current_model_id.to_string(), "claude-sonnet-4");
+        assert!(models.available_models.is_empty());
+
+        assert_eq!(
+            snapshot
+                .config_selections()
+                .get("reasoning")
+                .map(String::as_str),
+            Some("high")
+        );
+        assert!(
+            snapshot.config_options().is_none(),
+            "config_options stays None — schema comes from CLI reply"
+        );
+
+        assert_eq!(snapshot.context_usage().unwrap().used, 512);
+    }
+
+    #[test]
+    fn preload_persisted_skips_none_fields() {
+        let mut snapshot = AcpRuntimeSnapshot::default();
+        snapshot.preload_persisted(PersistedSessionState::default());
+
+        assert!(snapshot.modes().is_none());
+        assert!(snapshot.model_info().is_none());
+        assert!(snapshot.config_selections().is_empty());
+        assert!(snapshot.context_usage().is_none());
+    }
 
     #[test]
     fn stores_agent_capabilities() {

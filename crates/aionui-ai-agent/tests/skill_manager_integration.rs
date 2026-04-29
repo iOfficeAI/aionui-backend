@@ -9,43 +9,17 @@
 //! - First message preparation
 
 use std::fs;
-use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use aionui_ai_agent::skill_manager::{
     AcpSkillManager, build_skills_index_text, build_system_instructions, detect_skill_load_request,
     prepare_first_message, prepare_first_message_with_skills_index,
 };
-use aionui_extension::{BUILTIN_SKILLS_ENV_VAR, SkillPaths, resolve_skill_paths};
+use aionui_extension::{BUILTIN_SKILLS_ENV_VAR, resolve_skill_paths};
 use tempfile::TempDir;
-
-/// Build SkillPaths rooted at `base` for test use.
-fn test_paths(base: &Path) -> Arc<SkillPaths> {
-    Arc::new(resolve_skill_paths(base, base))
-}
-
 /// Serialize env var mutations across tests — `BUILTIN_SKILLS_ENV_VAR` is
 /// process-global so concurrent tests that set it must not interleave.
 static ENV_MUTEX: Mutex<()> = Mutex::new(());
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/// Create a skill directory with a SKILL.md file.
-fn create_skill(base: &Path, category: &str, dir_name: &str, name: &str, desc: &str, body: &str) {
-    let dir = base.join(category).join(dir_name);
-    fs::create_dir_all(&dir).unwrap();
-    let content = format!("---\nname: {name}\ndescription: {desc}\n---\n{body}");
-    fs::write(dir.join("SKILL.md"), content).unwrap();
-}
-
-/// Create a directory that looks like a skill but has no SKILL.md.
-fn create_non_skill_dir(base: &Path, category: &str, dir_name: &str) {
-    let dir = base.join(category).join(dir_name);
-    fs::create_dir_all(&dir).unwrap();
-    fs::write(dir.join("README.md"), "not a skill").unwrap();
-}
 
 // ---------------------------------------------------------------------------
 // 4.0 New API: discover via extension service

@@ -13,6 +13,7 @@ use aionui_auth::CurrentUser;
 use aionui_common::AppError;
 
 use crate::acp_service;
+use crate::agent_registry::AgentRegistry;
 use crate::task_manager::IWorkerTaskManager;
 use crate::types::AcpModelInfo;
 
@@ -20,6 +21,7 @@ use crate::types::AcpModelInfo;
 #[derive(Clone)]
 pub struct AcpRouterState {
     pub worker_task_manager: Arc<dyn IWorkerTaskManager>,
+    pub agent_registry: Arc<AgentRegistry>,
 }
 
 /// Build the ACP management router.
@@ -39,22 +41,22 @@ pub fn acp_routes(state: AcpRouterState) -> Router {
 // ── Global ACP routes ────────────────────────────────────────────
 
 async fn detect_cli(
-    State(_state): State<AcpRouterState>,
+    State(state): State<AcpRouterState>,
     Extension(_user): Extension<CurrentUser>,
     body: Result<Json<DetectCliRequest>, JsonRejection>,
 ) -> Result<Json<ApiResponse<DetectCliResponse>>, AppError> {
     let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
-    let result = acp_service::detect_cli(req.backend);
+    let result = acp_service::detect_cli(&state.agent_registry, &req.backend).await;
     Ok(Json(ApiResponse::ok(result)))
 }
 
 async fn health_check(
-    State(_state): State<AcpRouterState>,
+    State(state): State<AcpRouterState>,
     Extension(_user): Extension<CurrentUser>,
     body: Result<Json<AcpHealthCheckRequest>, JsonRejection>,
 ) -> Result<Json<ApiResponse<AcpHealthCheckResponse>>, AppError> {
     let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
-    let result = acp_service::health_check(req.backend);
+    let result = acp_service::health_check(&state.agent_registry, &req.backend).await;
     Ok(Json(ApiResponse::ok(result)))
 }
 
@@ -67,16 +69,16 @@ async fn get_env(
 }
 
 async fn probe_model(
-    State(_state): State<AcpRouterState>,
+    State(state): State<AcpRouterState>,
     Extension(_user): Extension<CurrentUser>,
     body: Result<Json<ProbeModelRequest>, JsonRejection>,
 ) -> Result<Json<ApiResponse<Option<AcpModelInfo>>>, AppError> {
     let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
     // Probe model requires a running ACP session; for now verify CLI availability
-    let detection = acp_service::detect_cli(req.backend);
+    let detection = acp_service::detect_cli(&state.agent_registry, &req.backend).await;
     if detection.path.is_none() {
         return Err(AppError::BadRequest(format!(
-            "Backend {:?} CLI not found, cannot probe model",
+            "Backend '{}' CLI not found, cannot probe model",
             req.backend
         )));
     }

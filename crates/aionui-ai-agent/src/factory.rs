@@ -1,10 +1,11 @@
 use aion_agent::session::SessionManager;
-use aionui_common::{AcpBackend, AgentType, AppError, CommandSpec};
+use aionui_common::{AgentType, AppError, CommandSpec};
 use aionui_db::{IProviderRepository, IRemoteAgentRepository};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
+use crate::acp_agent_service::AcpAgentService;
 use crate::agent_manager::AgentManagerHandle;
 use crate::agent_registry::AgentRegistry;
 use crate::remote_agent::RemoteAgentConfig;
@@ -26,6 +27,7 @@ pub struct AgentFactoryDeps {
     pub provider_repo: Arc<dyn IProviderRepository>,
     pub encryption_key: [u8; 32],
     pub agent_registry: Arc<AgentRegistry>,
+    pub acp_agent_service: Arc<AcpAgentService>,
     pub data_dir: PathBuf,
     /// Absolute path to the backend binary, reused as the `command` of the
     /// stdio MCP bridge injected into ACP `session/new` for team sessions.
@@ -93,69 +95,81 @@ async fn build_agent(
             let mut config: AcpBuildExtra = serde_json::from_value(options.extra)
                 .map_err(|e| AppError::BadRequest(format!("Invalid ACP build options: {e}")))?;
 
-            // Resolve agent from registry — try agent_id first, then backend
-            let detected = if let Some(ref agent_id) = config.agent_id {
-                deps.agent_registry.get_by_id(agent_id).await
-            } else if let Some(backend) = config.backend {
-                deps.agent_registry.get_by_id(&backend.id()).await
+            // Resolve the catalog row — prefer explicit agent_id, fall
+            // back to a vendor-label match for legacy payloads.
+            let meta = if let Some(ref agent_id) = config.agent_id {
+                deps.agent_registry.get(agent_id).await
+            } else if let Some(ref vendor) = config.backend {
+                deps.agent_registry.find_builtin_by_backend(vendor).await
             } else {
                 None
-            };
+            }
+            .ok_or_else(|| {
+                AppError::BadRequest(
+                    "ACP agent requires either agent_id or backend in extra".into(),
+                )
+            })?;
 
-            // Fill in missing fields from detected agent
-            if let Some(ref detected) = detected
-                && config.backend.is_none()
-            {
-                config.backend = detected.backend;
+            if config.backend.is_none() {
+                config.backend.clone_from(&meta.backend);
             }
 
-            let (spawn_command, spawn_args, spawn_env) = match detected {
-                Some(ref d) if d.command.is_some() => {
-                    (d.command.clone().unwrap(), d.args.clone(), d.env.clone())
-                }
-                _ => {
-                    // Last resort fallback: direct CLI with default ACP args
-                    let backend = config
-                        .backend
-                        .ok_or_else(|| AppError::BadRequest("ACP backend is required".into()))?;
-
-                    let binary = backend.binary_name().ok_or_else(|| {
-                        AppError::BadRequest(format!("Backend {backend:?} has no CLI binary"))
-                    })?;
-                    let path = which::which(binary)
-                        .map(|p| p.to_string_lossy().into_owned())
-                        .map_err(|_| {
-                            AppError::BadRequest(format!("CLI '{binary}' not found in PATH"))
-                        })?;
-                    let args = backend
-                        .args()
-                        .unwrap_or(&["--experimental-acp"])
+            // Registry resolved the spawn command via `which()` at
+            // hydrate time. A missing `resolved_command` means either the
+            // CLI was uninstalled between hydrate and now, or the row
+            // never had a command (e.g. remote-only). Either way the
+            // caller needs to see a BadRequest, not a confusing
+            // spawn-time error.
+            let (command, args, env) = {
+                (
+                    meta.resolved_command.clone().ok_or_else(|| {
+                        AppError::BadRequest(format!("Agent '{}' CLI not found in PATH", meta.name))
+                    })?,
+                    meta.args.clone(),
+                    meta.env
                         .iter()
-                        .map(|s| (*s).to_owned())
-                        .collect();
-                    (path, args, vec![])
-                }
+                        .map(|e| aionui_common::EnvVar {
+                            name: e.name.clone(),
+                            value: e.value.clone(),
+                        })
+                        .collect(),
+                )
             };
+            let skill_mgr = deps.skill_manager.clone();
+            let catalog_tx = deps.agent_registry.catalog_sender();
 
             let agent = AcpAgentManager::new(
-                conversation_id,
+                conversation_id.clone(),
+                meta,
                 workspace.clone(),
                 is_custom_workspace,
                 CommandSpec {
-                    command: PathBuf::from(spawn_command),
-                    args: spawn_args,
-                    env: spawn_env,
+                    command,
+                    args,
+                    env,
                     cwd: Some(workspace),
                 },
                 config,
-                deps.skill_manager.clone(),
+                skill_mgr,
                 deps.backend_binary_path.clone(),
+                catalog_tx,
             )
             .await?;
+
             let arc = Arc::new(agent);
             arc.start_permission_handler();
             arc.start_runtime_snapshot_tracker();
-            Ok(arc as AgentManagerHandle)
+            arc.start_catalog_sync();
+            let handle: AgentManagerHandle = arc.clone();
+
+            // Hand the service a subscription to the manager's event
+            // bus so it can persist per-session runtime state. Ownership
+            // of the DB flows through the service, not the manager.
+            deps.acp_agent_service
+                .attach(conversation_id, handle.clone())
+                .await;
+
+            Ok(handle)
         }
         AgentType::OpenclawGateway => {
             let mut config: OpenClawBuildExtra =
@@ -163,13 +177,18 @@ async fn build_agent(
                     AppError::BadRequest(format!("Invalid OpenClaw build options: {e}"))
                 })?;
 
+            // OpenClaw lives in the catalog as an internal row; reuse
+            // the registry-resolved path instead of re-running `which()`.
             if config.gateway.cli_path.is_none()
-                && let Some(detected) = deps
+                && let Some(cli) = deps
                     .agent_registry
-                    .get_by_id(&AgentType::OpenclawGateway.id())
+                    .list_by_agent_type(AgentType::OpenclawGateway)
                     .await
+                    .into_iter()
+                    .find_map(|m| m.resolved_command)
+                    .map(|p| p.to_string_lossy().into_owned())
             {
-                config.gateway.cli_path = detected.command;
+                config.gateway.cli_path = Some(cli);
             }
 
             let resume_session_key = config.session_key.clone();
@@ -181,14 +200,15 @@ async fn build_agent(
             Ok(arc as AgentManagerHandle)
         }
         AgentType::Nanobot => {
+            // Nanobot lives in the catalog as an internal row; reuse the
+            // registry-resolved path instead of re-running `which()`.
             let cli_path = deps
                 .agent_registry
-                .get_by_id(&AgentType::Nanobot.id())
+                .list_by_agent_type(AgentType::Nanobot)
                 .await
-                .and_then(|d| d.command)
-                .ok_or_else(|| {
-                    AppError::BadRequest("Nanobot CLI not found in agent registry".into())
-                })?;
+                .into_iter()
+                .find_map(|m| m.resolved_command)
+                .ok_or_else(|| AppError::BadRequest("Nanobot CLI not found in PATH".into()))?;
             let agent = NanobotAgentManager::new(conversation_id, workspace, cli_path).await?;
             Ok(Arc::new(agent) as AgentManagerHandle)
         }
@@ -332,17 +352,16 @@ fn map_aionrs_provider(platform: &str, model_id: &str, model_protocols: Option<&
 
 /// Label used in auto-provisioned temp workspace directory names.
 ///
-/// For ACP conversations the label is the sub-backend id
-/// (e.g. `"claude"`, `"gemini"`); otherwise the agent type's serde name
-/// (e.g. `"aionrs"`). Must stay in sync with
+/// For ACP conversations the label is the vendor string from
+/// `extra.backend` (e.g. `"claude"`); otherwise the agent type's serde
+/// name (e.g. `"aionrs"`). Must stay in sync with
 /// `ConversationService::create`'s `conversation_label`.
 fn workspace_label(agent_type: &AgentType, backend: Option<&serde_json::Value>) -> String {
     if *agent_type == AgentType::Acp
-        && let Some(v) = backend
-        && let Ok(be) = serde_json::from_value::<AcpBackend>(v.clone())
-        && let Ok(serde_json::Value::String(s)) = serde_json::to_value(be)
+        && let Some(serde_json::Value::String(s)) = backend
+        && !s.is_empty()
     {
-        return s;
+        return s.clone();
     }
     agent_type.serde_name().to_owned()
 }
