@@ -108,14 +108,12 @@ fn build_new_session_request(
 /// Translate a `TeamMcpStdioConfig` into the ACP SDK wire type expected by
 /// `NewSessionRequest::mcp_servers`.
 ///
-/// This mirrors `aionui_team::mcp::bridge::TeamMcpStdioServerSpec::into_sdk`,
-/// inlined here because `aionui-team` already depends on this crate; a
-/// reverse dep would cycle. The field shapes are fixed by phase1
-/// interface-contracts §3 and kept byte-for-byte identical.
+/// Field shapes must stay byte-for-byte identical to
+/// `aionui_team::mcp::bridge::TeamMcpStdioServerSpec::into_sdk` — the
+/// logic is inlined here rather than reused because `aionui-team` already
+/// depends on this crate, so importing the spec would cycle. Both sides
+/// derive `name` from `cfg.team_id` (phase1 interface-contracts §3).
 fn team_mcp_server(cfg: &TeamMcpStdioConfig, backend_binary_path: &std::path::Path) -> McpServer {
-    // `team_id` is not carried by `TeamMcpStdioConfig`; phase1 uses the
-    // fixed `"aionui-team"` name for server disambiguation (see
-    // interface-contracts §7 note).
     let env = vec![
         EnvVariable::new(
             TeamMcpStdioConfig::ENV_PORT.to_owned(),
@@ -127,9 +125,12 @@ fn team_mcp_server(cfg: &TeamMcpStdioConfig, backend_binary_path: &std::path::Pa
             cfg.slot_id.clone(),
         ),
     ];
-    let stdio = McpServerStdio::new("aionui-team".to_owned(), backend_binary_path.to_path_buf())
-        .args(vec!["mcp-bridge".to_owned()])
-        .env(env);
+    let stdio = McpServerStdio::new(
+        format!("aionui-team-{}", cfg.team_id),
+        backend_binary_path.to_path_buf(),
+    )
+    .args(vec!["mcp-bridge".to_owned()])
+    .env(env);
     McpServer::Stdio(stdio)
 }
 
@@ -989,6 +990,7 @@ mod tests {
         serde_json::from_value(json!({
             "backend": "claude",
             "team_mcp_stdio_config": {
+                "team_id": "team-42",
                 "port": 54321,
                 "token": "tok-abc",
                 "slot_id": "slot-lead",
@@ -1028,7 +1030,7 @@ mod tests {
             other => panic!("expected Stdio variant, got {other:?}"),
         };
 
-        assert_eq!(stdio.name, "aionui-team");
+        assert_eq!(stdio.name, "aionui-team-team-42");
         assert_eq!(stdio.command, PathBuf::from("/usr/bin/aionui-backend"));
         assert_eq!(stdio.args, vec!["mcp-bridge".to_owned()]);
 
