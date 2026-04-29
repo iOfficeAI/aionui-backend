@@ -166,6 +166,96 @@ impl IConversationRepository for StubConvRepo {
                 created_at: 1000,
                 updated_at: 1000,
             }
+        } else if id == "conv_mode_default" {
+            aionui_db::models::ConversationRow {
+                id: id.into(),
+                user_id: "u1".into(),
+                name: "Gemini Default Chat".into(),
+                r#type: "acp".into(),
+                model: Some(
+                    serde_json::json!({
+                        "provider_id": "gemini",
+                        "model": "gemini-2.5-pro",
+                        "use_model": "gemini-2.5-pro"
+                    })
+                    .to_string(),
+                ),
+                status: Some("active".into()),
+                source: None,
+                channel_chat_id: None,
+                extra: serde_json::json!({
+                    "backend": "gemini",
+                    "agent_name": "Gemini",
+                    "workspace": "/tmp/gemini-default-workspace",
+                    "session_mode": "default",
+                    "current_model_id": "gemini-2.5-pro"
+                })
+                .to_string(),
+                pinned: false,
+                pinned_at: None,
+                created_at: 1000,
+                updated_at: 1000,
+            }
+        } else if id == "conv_mode_codex" {
+            aionui_db::models::ConversationRow {
+                id: id.into(),
+                user_id: "u1".into(),
+                name: "Codex Chat".into(),
+                r#type: "acp".into(),
+                model: Some(
+                    serde_json::json!({
+                        "provider_id": "codex",
+                        "model": "gpt-5-codex",
+                        "use_model": "gpt-5-codex"
+                    })
+                    .to_string(),
+                ),
+                status: Some("active".into()),
+                source: None,
+                channel_chat_id: None,
+                extra: serde_json::json!({
+                    "backend": "codex",
+                    "agent_name": "Codex",
+                    "workspace": "/tmp/codex-workspace",
+                    "session_mode": "default",
+                    "current_model_id": "gpt-5-codex"
+                })
+                .to_string(),
+                pinned: false,
+                pinned_at: None,
+                created_at: 1000,
+                updated_at: 1000,
+            }
+        } else if id == "conv_mode_claude" {
+            aionui_db::models::ConversationRow {
+                id: id.into(),
+                user_id: "u1".into(),
+                name: "Claude Chat".into(),
+                r#type: "acp".into(),
+                model: Some(
+                    serde_json::json!({
+                        "provider_id": "claude",
+                        "model": "claude-sonnet-4-20250514",
+                        "use_model": "claude-sonnet-4-20250514"
+                    })
+                    .to_string(),
+                ),
+                status: Some("active".into()),
+                source: None,
+                channel_chat_id: None,
+                extra: serde_json::json!({
+                    "backend": "claude",
+                    "agent_name": "Claude",
+                    "workspace": "/tmp/claude-workspace",
+                    "session_mode": "default",
+                    "current_model_id": "claude-sonnet-4-20250514"
+                })
+                .to_string(),
+                pinned: false,
+                pinned_at: None,
+                created_at: 1000,
+                updated_at: 1000,
+            }
         } else {
             aionui_db::models::ConversationRow {
                 id: id.into(),
@@ -1170,6 +1260,71 @@ async fn icron_service_create_job_inherits_conversation_mode_and_backend() {
     assert_eq!(config.mode.as_deref(), Some("yolo"));
     assert_eq!(config.model_id.as_deref(), Some("gemini-2.5-pro"));
     assert_eq!(config.workspace.as_deref(), Some("/tmp/gemini-workspace"));
+}
+
+#[tokio::test]
+async fn icron_service_create_job_forces_full_auto_mode_for_generated_crons() {
+    let (svc, _, _) = setup().await;
+
+    use aionui_ai_agent::middleware::ICronService;
+
+    let params = CronCreateParams {
+        name: "Generated Agent Job".into(),
+        schedule: "0 */10 * * * *".into(),
+        schedule_description: "every 10 min".into(),
+        message: "do agent work".into(),
+    };
+
+    let gemini = ICronService::create_job(&svc, "user_1", "conv_mode_default", &params).await;
+    assert!(gemini.success);
+
+    let codex = ICronService::create_job(&svc, "user_1", "conv_mode_codex", &params).await;
+    assert!(codex.success);
+
+    let claude = ICronService::create_job(&svc, "user_1", "conv_mode_claude", &params).await;
+    assert!(claude.success);
+
+    let gemini_jobs = svc
+        .list_jobs(&ListCronJobsQuery {
+            conversation_id: Some("conv_mode_default".into()),
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        gemini_jobs[0]
+            .agent_config
+            .as_ref()
+            .and_then(|config| config.mode.as_deref()),
+        Some("yolo")
+    );
+
+    let codex_jobs = svc
+        .list_jobs(&ListCronJobsQuery {
+            conversation_id: Some("conv_mode_codex".into()),
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        codex_jobs[0]
+            .agent_config
+            .as_ref()
+            .and_then(|config| config.mode.as_deref()),
+        Some("full-access")
+    );
+
+    let claude_jobs = svc
+        .list_jobs(&ListCronJobsQuery {
+            conversation_id: Some("conv_mode_claude".into()),
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        claude_jobs[0]
+            .agent_config
+            .as_ref()
+            .and_then(|config| config.mode.as_deref()),
+        Some("bypassPermissions")
+    );
 }
 
 // ── ICronService trait: list ───────────────────────────────────────

@@ -1032,6 +1032,7 @@ fn build_agent_config_from_conversation(
         None
     };
 
+    let full_auto_mode = cron_full_auto_mode_for_backend(&backend);
     let agent_config = aionui_api_types::CronAgentConfigDto {
         backend,
         name: get_string(&extra, &["agent_name", "agentName"]).unwrap_or_else(|| row.name.clone()),
@@ -1045,7 +1046,7 @@ fn build_agent_config_from_conversation(
         is_preset,
         custom_agent_id,
         preset_agent_type,
-        mode: get_string(&extra, &["session_mode", "sessionMode"]),
+        mode: Some(full_auto_mode),
         model_id: get_string(&extra, &["current_model_id", "currentModelId"]).or_else(|| {
             model.as_ref().and_then(|value| {
                 value
@@ -1059,6 +1060,16 @@ fn build_agent_config_from_conversation(
     };
 
     (row.r#type.clone(), Some(agent_config))
+}
+
+fn cron_full_auto_mode_for_backend(backend: &str) -> String {
+    match backend.trim() {
+        "claude" => "bypassPermissions".to_owned(),
+        "codex" => "full-access".to_owned(),
+        "opencode" => "build".to_owned(),
+        "cursor" => "agent".to_owned(),
+        _ => "yolo".to_owned(),
+    }
 }
 
 fn get_string(extra: &serde_json::Value, keys: &[&str]) -> Option<String> {
