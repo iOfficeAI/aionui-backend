@@ -243,7 +243,25 @@ impl TeamSession {
     /// Compute the wake payload and forward it to the task manager. All
     /// error paths downgrade to `warn!` — the mailbox write has already
     /// succeeded and is the source of truth.
+    ///
+    /// Guarded by `TeammateManager::acquire_wake_lock` (W4-D18a) to prevent
+    /// the same slot from being woken concurrently. The lock is released as
+    /// soon as this function returns (success or skip), per W4-D18c contract
+    /// ("release immediately after send, do not wait for finish").
     async fn try_wake(&self, slot_id: &str, files: Option<Vec<String>>) {
+        if !self.scheduler.acquire_wake_lock(slot_id) {
+            warn!(
+                team_id = %self.team.id,
+                slot_id,
+                "wake already in flight for this slot; skipping duplicate wake"
+            );
+            return;
+        }
+        self.try_wake_inner(slot_id, files).await;
+        self.scheduler.release_wake_lock(slot_id);
+    }
+
+    async fn try_wake_inner(&self, slot_id: &str, files: Option<Vec<String>>) {
         let input = match self.compute_wake_input(slot_id).await {
             Ok(Some(input)) => input,
             Ok(None) => {
@@ -882,6 +900,172 @@ mod tests {
         session.send_message("", None).await.unwrap();
 
         assert_eq!(sent.lock().unwrap().len(), 1);
+        session.stop();
+    }
+
+    // -- W4-D18c wake-lock integration tests --------------------------------
+
+    /// Agent whose `send_message` blocks until the released `Notify` fires.
+    /// Used to keep a wake in-flight long enough for a concurrent wake to
+    /// observe the acquired lock.
+    struct GatedAgent {
+        conversation_id: String,
+        sent: Arc<Mutex<Vec<SendMessageData>>>,
+        gate: Arc<tokio::sync::Notify>,
+        event_tx: broadcast::Sender<AgentStreamEvent>,
+    }
+
+    impl GatedAgent {
+        fn new(conversation_id: &str, sent: Arc<Mutex<Vec<SendMessageData>>>, gate: Arc<tokio::sync::Notify>) -> Self {
+            let (event_tx, _) = broadcast::channel(4);
+            Self {
+                conversation_id: conversation_id.into(),
+                sent,
+                gate,
+                event_tx,
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl IAgentManager for GatedAgent {
+        fn agent_type(&self) -> AgentType {
+            AgentType::Acp
+        }
+        fn status(&self) -> Option<ConversationStatus> {
+            None
+        }
+        fn workspace(&self) -> &str {
+            "/tmp/ws"
+        }
+        fn conversation_id(&self) -> &str {
+            &self.conversation_id
+        }
+        fn last_activity_at(&self) -> TimestampMs {
+            now_ms()
+        }
+        fn subscribe(&self) -> broadcast::Receiver<AgentStreamEvent> {
+            self.event_tx.subscribe()
+        }
+        async fn send_message(&self, data: SendMessageData) -> Result<(), AppError> {
+            self.sent.lock().unwrap().push(data);
+            self.gate.notified().await;
+            Ok(())
+        }
+        async fn stop(&self) -> Result<(), AppError> {
+            Ok(())
+        }
+        fn confirm(
+            &self,
+            _msg_id: &str,
+            _call_id: &str,
+            _data: serde_json::Value,
+            _always_allow: bool,
+        ) -> Result<(), AppError> {
+            Ok(())
+        }
+        fn get_confirmations(&self) -> Vec<Confirmation> {
+            Vec::new()
+        }
+        fn check_approval(&self, _action: &str, _command_type: Option<&str>) -> bool {
+            false
+        }
+        fn kill(&self, _reason: Option<AgentKillReason>) -> Result<(), AppError> {
+            Ok(())
+        }
+        async fn get_mode(&self) -> Result<AgentModeResponse, AppError> {
+            Ok(AgentModeResponse {
+                mode: "default".into(),
+                initialized: false,
+            })
+        }
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+    }
+
+    #[tokio::test]
+    async fn wake_lock_dedups_concurrent_wakes_for_same_slot() {
+        // Two concurrent send_message calls for the same lead must coalesce:
+        // the first acquires the wake lock and reaches the agent; the second
+        // sees the lock held and skips (no double-send to the agent).
+        let sent: Arc<Mutex<Vec<SendMessageData>>> = Arc::new(Mutex::new(Vec::new()));
+        let gate = Arc::new(tokio::sync::Notify::new());
+        let stub = StubTaskManager::new();
+        let agent: AgentManagerHandle = Arc::new(GatedAgent::new("c1", sent.clone(), gate.clone()));
+        stub.insert("c1", agent);
+        let task_manager: Arc<dyn IWorkerTaskManager> = Arc::new(stub);
+
+        let (session, _repo) = start_session_with(task_manager).await;
+        let session = Arc::new(session);
+
+        // Kick off the first wake — blocks inside GatedAgent::send_message.
+        let s1 = session.clone();
+        let h1 = tokio::spawn(async move {
+            s1.send_message("first", None).await.unwrap();
+        });
+
+        // Wait until the first wake is confirmed in-flight (agent received data).
+        for _ in 0..200 {
+            if !sent.lock().unwrap().is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        assert_eq!(
+            sent.lock().unwrap().len(),
+            1,
+            "first wake must reach the agent before we race the second"
+        );
+
+        // Concurrent second wake must be rejected by the wake lock.
+        session.send_message("second", None).await.unwrap();
+        assert_eq!(
+            sent.lock().unwrap().len(),
+            1,
+            "second concurrent wake must be deduped — only one send_message"
+        );
+
+        // Unblock the first wake and let it drain.
+        gate.notify_one();
+        h1.await.unwrap();
+
+        session.stop();
+    }
+
+    #[tokio::test]
+    async fn wake_lock_is_released_after_successful_send() {
+        // After a wake completes, the slot must be unlocked so the next wake
+        // can acquire it. Probed via scheduler.acquire_wake_lock().
+        let (task_manager, _sent) = task_manager_with_agents(&["c1"], None);
+        let (session, _repo) = start_session_with(task_manager).await;
+
+        session.send_message("one", None).await.unwrap();
+
+        // Lock must be free now — acquire must succeed.
+        assert!(
+            session.scheduler.acquire_wake_lock("lead-1"),
+            "wake lock must be released after a successful send"
+        );
+        session.scheduler.release_wake_lock("lead-1");
+        session.stop();
+    }
+
+    #[tokio::test]
+    async fn wake_lock_is_released_after_send_failure() {
+        // Even when handle.send_message errors, the lock must still be
+        // released — otherwise a transient failure would permanently starve
+        // the slot.
+        let (task_manager, _sent) = task_manager_with_agents(&["c1"], Some("boom".into()));
+        let (session, _repo) = start_session_with(task_manager).await;
+
+        session.send_message("one", None).await.unwrap();
+
+        assert!(
+            session.scheduler.acquire_wake_lock("lead-1"),
+            "wake lock must be released even on agent send failure"
+        );
+        session.scheduler.release_wake_lock("lead-1");
         session.stop();
     }
 }
