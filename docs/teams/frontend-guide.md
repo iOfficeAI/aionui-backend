@@ -8,7 +8,52 @@
 
 客户端不需要保留任何 team 专属的本地 session、状态复制、wake 逻辑。Team 的调度、状态机、mailbox、任务板全部在后端。全部走 REST + WebSocket 即可。
 
-> **关于 MCP**：agent 之间的通信（发消息、任务板、spawn teammate）走的是 MCP，这是**后端进程 ↔ agent 子进程**之间的事，浏览器前端不接触。详情看 [mcp.md](./mcp.md)。前端只需要记一条：**"单聊→自动建团"在 AionUi 参考设计里是通过 `aion_create_team` MCP 工具触发的，但后端尚未实现**，所以前端要建团只能显式调 `POST /api/teams`。
+> **关于 MCP**：agent 之间的通信（发消息、任务板、spawn teammate）走的是 MCP，这是**后端进程 ↔ agent 子进程**之间的事，浏览器前端不接触。详情看 [mcp.md](./mcp.md)。
+
+## 开发进度（实时更新）
+
+| 能力 | 状态 | 说明 |
+|------|:---:|------|
+| Team CRUD（建/删/改名/加减 agent） | ✅ 已完成 | Wave 1+2 已 merge main |
+| 用户→agent 发消息（走单聊 API） | ✅ 已完成 | `POST /api/conversations/{conv_id}/messages` |
+| Agent 间 MCP 通信（team_send_message 等 10 工具） | ✅ 已完成 | mcp-bridge + TCP server |
+| Agent wake 机制（发消息后 agent 自动响应） | ✅ 已完成 | send → mailbox → wake → agent turn |
+| ensure_session MCP 注入 | ✅ 已完成 | session 启动时自动 kill+rebuild agent 进程 |
+| WS 事件推送（team.agent.status 等） | ✅ 已完成 | |
+| **user_id 权限隔离**（list/get/remove 按用户过滤） | 🔄 Wave 3 进行中 | 完成后不同用户看不到彼此的 team |
+| **单聊→建团（conversation 复用）** | 🔄 Wave 3 进行中 | `POST /api/teams` 时 agents 里传 `conversation_id` 可复用已有单聊 |
+| **rename 规范化** | 🔄 Wave 3 进行中 | |
+| **MCP 协议加固**（64MB 帧 + 300s 超时） | 🔄 Wave 3 进行中 | |
+| Team Guide MCP（agent 自动建团） | ⏳ Wave 5 | `aion_create_team` 工具 |
+| team_spawn_agent 真实落地 | ⏳ Wave 5 | leader 动态拉人 |
+| crash recovery / 429 识别 | ⏳ Wave 4 | |
+
+### 单聊→建团接入方式（Wave 3 完成后可用）
+
+```json
+POST /api/teams
+{
+  "name": "My Team",
+  "agents": [
+    {
+      "name": "Leader",
+      "role": "lead",
+      "backend": "claude",
+      "model": "claude-sonnet-4",
+      "conversation_id": "existing-conv-id"  // ← 传已有单聊的 conv_id，历史消息保留
+    },
+    {
+      "name": "Developer",
+      "role": "teammate",
+      "backend": "claude",
+      "model": "claude-sonnet-4"
+      // 不传 conversation_id → 新建
+    }
+  ]
+}
+```
+
+传 `conversation_id` 时后端复用该 conversation（extra 打 teamId 标记），不新建。消息历史完整保留。不传则正常新建。
 
 ## 必须走 REST 的操作
 
