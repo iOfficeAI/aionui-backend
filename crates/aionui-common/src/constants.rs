@@ -36,3 +36,9 @@ pub const SUPPORTED_IMAGE_EXTENSIONS: &[&str] = &[
 /// Remote image download size limit (5 MB).
 pub const REMOTE_IMAGE_MAX_SIZE: usize = 5 * 1024 * 1024;
 pub const REMOTE_IMAGE_MAX_REDIRECTS: u32 = 5;
+
+// --- Team MCP ---
+
+/// Per-request tool call timeout for the team MCP server.
+/// Aligned with AionUi frontend `tcpHelpers.ts` (`timeoutMs = 300_000`).
+pub const TEAM_MCP_REQUEST_TIMEOUT_SECS: u64 = 300;

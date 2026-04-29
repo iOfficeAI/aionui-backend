@@ -1,9 +1,12 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
+use aionui_common::constants::TEAM_MCP_REQUEST_TIMEOUT_SECS;
 use serde_json::{Value, json};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::watch;
+use tokio::time::timeout;
 use tracing::{debug, error, warn};
 
 use crate::error::TeamError;
@@ -11,8 +14,8 @@ use crate::scheduler::TeammateManager;
 use crate::types::TeammateRole;
 
 use super::protocol::{
-    INVALID_PARAMS, INVALID_REQUEST, JsonRpcResponse, METHOD_NOT_FOUND, PROTOCOL_VERSION,
-    SERVER_NAME, SERVER_VERSION, read_request, write_response,
+    INTERNAL_ERROR, INVALID_PARAMS, INVALID_REQUEST, JsonRpcResponse, METHOD_NOT_FOUND,
+    PROTOCOL_VERSION, SERVER_NAME, SERVER_VERSION, read_request, write_response,
 };
 use super::tools::{
     RenameAgentInput, SendMessageInput, ShutdownAgentInput, SpawnAgentInput, TaskCreateInput,
@@ -281,29 +284,55 @@ async fn handle_tools_call(
         Err(_) => TeammateRole::Teammate,
     };
 
-    let result = dispatch_tool(
+    let fut = dispatch_tool(
         tool_name,
         &arguments,
         scheduler,
         caller_slot_id,
         caller_role,
-    )
-    .await;
+    );
+    let timeout_dur = Duration::from_secs(TEAM_MCP_REQUEST_TIMEOUT_SECS);
+    build_tools_call_response(request.id, tool_name, timeout_dur, fut).await
+}
 
-    match result {
-        Ok(content) => JsonRpcResponse::success(
-            request.id,
+/// Wrap a tool-dispatch future with a per-request timeout and build the
+/// matching JSON-RPC response. Extracted from [`handle_tools_call`] so the
+/// timeout branch is unit-testable without waiting the full 300s in a test.
+async fn build_tools_call_response<F>(
+    id: Option<u64>,
+    tool_name: &str,
+    timeout_dur: Duration,
+    fut: F,
+) -> JsonRpcResponse
+where
+    F: std::future::Future<Output = Result<String, String>>,
+{
+    match timeout(timeout_dur, fut).await {
+        Ok(Ok(content)) => JsonRpcResponse::success(
+            id,
             json!({
                 "content": [{ "type": "text", "text": content }]
             }),
         ),
-        Err(err_msg) => JsonRpcResponse::success(
-            request.id,
+        Ok(Err(err_msg)) => JsonRpcResponse::success(
+            id,
             json!({
                 "content": [{ "type": "text", "text": err_msg }],
                 "isError": true
             }),
         ),
+        Err(_) => {
+            warn!(
+                tool = tool_name,
+                timeout_secs = timeout_dur.as_secs(),
+                "tools/call timed out"
+            );
+            JsonRpcResponse::error(
+                id,
+                INTERNAL_ERROR,
+                format!("Request timeout after {}s", timeout_dur.as_secs()),
+            )
+        }
     }
 }
 
@@ -513,4 +542,38 @@ async fn exec_shutdown_agent(
         "Shutdown request sent to agent '{}'",
         input.slot_id
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn build_tools_call_response_times_out() {
+        // Handler that would sleep past the configured request timeout.
+        // Paused time lets us advance beyond 300s without actually blocking.
+        let timeout_dur = Duration::from_secs(TEAM_MCP_REQUEST_TIMEOUT_SECS);
+        let handler = async {
+            tokio::time::sleep(timeout_dur + Duration::from_secs(1)).await;
+            Ok::<String, String>("never arrives".into())
+        };
+
+        let response = build_tools_call_response(Some(7), "slow_tool", timeout_dur, handler).await;
+
+        assert_eq!(response.id, Some(7));
+        assert!(response.result.is_none());
+        let err = response.error.expect("timeout must produce JSON-RPC error");
+        assert_eq!(err.code, INTERNAL_ERROR);
+        assert!(
+            err.message.contains("timeout"),
+            "message should mention timeout, got: {}",
+            err.message
+        );
+        assert!(
+            err.message
+                .contains(&TEAM_MCP_REQUEST_TIMEOUT_SECS.to_string()),
+            "message should include configured timeout secs, got: {}",
+            err.message
+        );
+    }
 }
