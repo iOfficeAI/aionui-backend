@@ -14,7 +14,7 @@ pub mod task_board;
 pub(crate) mod test_utils;
 pub mod types;
 
-pub use crash_detection::is_rate_limited;
+pub use crash_detection::{is_rate_limited, detect_crash, CrashReason};
 pub use error::TeamError;
 pub use events::TeamEventEmitter;
 pub use mailbox::Mailbox;

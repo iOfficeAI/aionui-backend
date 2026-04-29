@@ -61,3 +61,72 @@ mod tests {
         )));
     }
 }
+
+// ---------------------------------------------------------------------------
+// Crash detection (W4-D20a)
+// ---------------------------------------------------------------------------
+
+/// Reason an agent was classified as crashed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CrashReason {
+    ProcessExited,
+    SessionNotFound,
+    Unknown(String),
+}
+
+/// Detect crash from an agent stream event.
+/// Returns Some(reason) if the event indicates a crash, None otherwise.
+pub fn detect_crash(event: &AgentStreamEvent) -> Option<CrashReason> {
+    match event {
+        AgentStreamEvent::Error(data) => {
+            let msg = &data.message;
+            if msg.contains("process exited unexpectedly") || msg.contains("process exited") {
+                Some(CrashReason::ProcessExited)
+            } else if msg.contains("Session not found") || msg.contains("session not found") {
+                Some(CrashReason::SessionNotFound)
+            } else {
+                Some(CrashReason::Unknown(msg.clone()))
+            }
+        }
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod crash_tests {
+    use super::*;
+    use aionui_ai_agent::stream_event::ErrorEventData;
+
+    #[test]
+    fn detect_crash_process_exited() {
+        let event = AgentStreamEvent::Error(ErrorEventData {
+            message: "process exited unexpectedly".into(),
+            code: None,
+        });
+        assert_eq!(detect_crash(&event), Some(CrashReason::ProcessExited));
+    }
+
+    #[test]
+    fn detect_crash_session_not_found() {
+        let event = AgentStreamEvent::Error(ErrorEventData {
+            message: "Session not found".into(),
+            code: None,
+        });
+        assert_eq!(detect_crash(&event), Some(CrashReason::SessionNotFound));
+    }
+
+    #[test]
+    fn detect_crash_other_error() {
+        let event = AgentStreamEvent::Error(ErrorEventData {
+            message: "something else broke".into(),
+            code: None,
+        });
+        assert_eq!(detect_crash(&event), Some(CrashReason::Unknown("something else broke".into())));
+    }
+
+    #[test]
+    fn detect_crash_non_error_returns_none() {
+        let event = AgentStreamEvent::Start(aionui_ai_agent::stream_event::StartEventData { session_id: None });
+        assert_eq!(detect_crash(&event), None);
+    }
+}
