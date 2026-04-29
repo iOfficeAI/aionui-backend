@@ -370,6 +370,36 @@ mod tests {
         assert!(out.contains("Role: general-purpose AI assistant"));
     }
 
+    #[test]
+    fn teammate_prompt_lists_multiple_renamed_agents_with_formerly_note() {
+        // When several teammates carry former names, each entry must receive
+        // its own `[formerly: X]` suffix in the comma-joined list.
+        let lead = make_agent("lead-1", "Captain", TeammateRole::Lead, "claude");
+        let agent = make_agent("w1", "Worker1", TeammateRole::Teammate, "claude");
+        let mate_a = make_agent("w2", "Alice", TeammateRole::Teammate, "claude");
+        let mate_b = make_agent("w3", "Bob", TeammateRole::Teammate, "codex");
+        let mate_c = make_agent("w4", "Carol", TeammateRole::Teammate, "gemini");
+        let mut renamed = HashMap::new();
+        renamed.insert("w2".into(), "OldAlice".into());
+        renamed.insert("w4".into(), "OldCarol".into());
+        let params = TeammatePromptParams {
+            agent: &agent,
+            team_name: "Alpha",
+            leader: &lead,
+            teammates: &[mate_a, mate_b, mate_c],
+            renamed_agents: &renamed,
+            team_workspace: None,
+        };
+        let out = build_teammate_prompt(&params);
+
+        assert!(
+            out.contains(
+                "Teammates: Alice [formerly: OldAlice], Bob, Carol [formerly: OldCarol]"
+            ),
+            "teammate list must annotate both renamed agents and leave Bob untouched:\n{out}"
+        );
+    }
+
     // Test 3: wake payload with empty mailbox and no tasks
     #[test]
     fn wake_payload_empty_mailbox_no_tasks() {

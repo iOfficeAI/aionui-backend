@@ -320,6 +320,37 @@ mod tests {
     }
 
     #[test]
+    fn build_lead_prompt_renders_formerly_note_in_full_output() {
+        // End-to-end: the `[formerly: X]` annotation must survive template
+        // substitution and appear verbatim in the final lead prompt text.
+        let mut renamed = HashMap::new();
+        renamed.insert("w2".to_owned(), "OldAlice".to_owned());
+        let mut a = make_teammate("w1", "Bob", "claude");
+        a.status = Some(TeammateStatus::Idle);
+        let mut b = make_teammate("w2", "Alice", "codex");
+        b.status = Some(TeammateStatus::Working);
+        let teammates = vec![a, b];
+        let params = LeadPromptParams {
+            team_name: "Alpha",
+            teammates: &teammates,
+            available_agent_types: &[],
+            available_assistants: &[],
+            renamed_agents: &renamed,
+            team_workspace: None,
+        };
+        let out = build_lead_prompt(&params);
+        assert!(
+            out.contains("- Alice (codex, status: working) [formerly: OldAlice]"),
+            "renamed teammate bullet missing in final prompt:\n{out}"
+        );
+        assert!(
+            out.contains("- Bob (claude, status: idle)")
+                && !out.contains("Bob (claude, status: idle) [formerly:"),
+            "non-renamed teammate must not carry [formerly: ...] suffix:\n{out}"
+        );
+    }
+
+    #[test]
     fn available_types_section_omitted_when_empty() {
         assert_eq!(render_available_types_section(&[]), "");
     }
