@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -1156,7 +1156,7 @@ fn schedule_description(schedule: &CronSchedule) -> Option<&str> {
 }
 
 async fn persist_skill_file(
-    data_dir: &PathBuf,
+    data_dir: &Path,
     job: &CronJob,
     raw_content: &str,
 ) -> Result<(), CronError> {

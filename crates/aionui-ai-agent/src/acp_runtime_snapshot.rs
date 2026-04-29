@@ -123,8 +123,21 @@ impl AcpRuntimeSnapshot {
     pub fn apply_event(&mut self, event: &AgentStreamEvent) {
         match event {
             AgentStreamEvent::AcpModeInfo(value) => {
+                // Full-state payloads (carry `availableModes`) replace
+                // the cache outright. Partial updates (`currentModeId`
+                // only, which Gemini/Codex send when the user switches
+                // modes) must not clobber the enumeration — mutate
+                // `current_mode_id` in place and keep the known modes.
                 if let Ok(update) = serde_json::from_value::<SessionModeState>(value.clone()) {
                     self.modes = Some(update);
+                } else if let Some(current_id) = value.get("currentModeId").and_then(|v| v.as_str())
+                {
+                    if let Some(existing) = self.modes.as_ref() {
+                        let available = existing.available_modes.clone();
+                        self.modes = Some(SessionModeState::new(current_id.to_owned(), available));
+                    } else {
+                        self.modes = Some(SessionModeState::new(current_id.to_owned(), Vec::new()));
+                    }
                 }
             }
             AgentStreamEvent::AcpModelInfo(value) => {

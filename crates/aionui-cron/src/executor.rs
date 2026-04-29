@@ -1,10 +1,10 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use aionui_ai_agent::task_manager::IWorkerTaskManager;
 use aionui_ai_agent::types::{BuildTaskOptions, SendMessageData};
-use aionui_ai_agent::{AgentStreamEvent, IAgentManager};
+use aionui_ai_agent::{AgentRegistry, AgentStreamEvent, IAgentManager};
 use aionui_api_types::{CreateConversationRequest, SendMessageRequest};
 use aionui_common::{AgentType, ProviderWithModel, generate_id, now_ms};
 use aionui_conversation::ConversationService;
@@ -47,6 +47,20 @@ pub(crate) struct PreparedExecution {
     saved_skill: Option<SavedSkillContext>,
 }
 
+/// Inputs captured for the post-turn skill-suggest detection pipeline.
+/// Grouped into a struct so the spawning function stays under the
+/// clippy `too_many_arguments` threshold and so the agent/receiver
+/// (which the spawner clones) remain distinct from these metadata
+/// fields.
+struct SkillSuggestContext {
+    conversation_id: String,
+    job_id: String,
+    job_name: String,
+    workspace: String,
+    needs_follow_up: bool,
+    skill_names: Vec<String>,
+}
+
 pub struct JobExecutor {
     task_manager: Arc<dyn IWorkerTaskManager>,
     conversation_repo: Arc<dyn IConversationRepository>,
@@ -54,6 +68,7 @@ pub struct JobExecutor {
     busy_guard: Arc<CronBusyGuard>,
     data_dir: PathBuf,
     broadcaster: Arc<dyn EventBroadcaster>,
+    agent_registry: Arc<AgentRegistry>,
     skill_suggest_detector: SkillSuggestDetector,
 }
 
@@ -65,6 +80,7 @@ impl JobExecutor {
         busy_guard: Arc<CronBusyGuard>,
         data_dir: PathBuf,
         broadcaster: Arc<dyn EventBroadcaster>,
+        agent_registry: Arc<AgentRegistry>,
     ) -> Self {
         let skill_suggest_detector = SkillSuggestDetector::new(
             Arc::clone(&broadcaster),
@@ -78,6 +94,7 @@ impl JobExecutor {
             busy_guard,
             data_dir,
             broadcaster,
+            agent_registry,
             skill_suggest_detector,
         }
     }
@@ -396,11 +413,11 @@ impl JobExecutor {
         job: &CronJob,
         saved_skill: Option<&SavedSkillContext>,
     ) -> Result<String, CronError> {
-        let agent_type = parse_agent_type(&job.agent_type);
+        let agent_type = parse_agent_type(&self.agent_registry, &job.agent_type).await;
         let model = resolve_model(job);
         let user_id = self.resolve_conversation_owner_user_id(job).await?;
 
-        let extra = build_conversation_extra(job, saved_skill);
+        let extra = build_conversation_extra(&self.agent_registry, job, saved_skill).await;
 
         let req = CreateConversationRequest {
             r#type: agent_type,
@@ -463,7 +480,7 @@ impl JobExecutor {
         conversation_id: &str,
         saved_skill: Option<&SavedSkillContext>,
     ) -> ExecutionResult {
-        let agent_type = parse_agent_type(&job.agent_type);
+        let agent_type = parse_agent_type(&self.agent_registry, &job.agent_type).await;
         let model = resolve_model(job);
         let workspace = match self.resolve_execution_workspace(job, conversation_id).await {
             Ok(workspace) => workspace,
@@ -492,7 +509,7 @@ impl JobExecutor {
                 };
             }
         };
-        let build_extra = build_task_extra(job, &skill_names);
+        let build_extra = build_task_extra(&self.agent_registry, job, &skill_names).await;
         let requested_workspace_missing = workspace.trim().is_empty();
 
         let options = BuildTaskOptions {
@@ -599,12 +616,14 @@ impl JobExecutor {
                     self.spawn_skill_suggest_flow(
                         Arc::clone(&agent),
                         terminal_rx,
-                        conversation_id.to_owned(),
-                        job.id.clone(),
-                        job.name.clone(),
-                        agent.workspace().to_owned(),
-                        false,
-                        skill_names.clone(),
+                        SkillSuggestContext {
+                            conversation_id: conversation_id.to_owned(),
+                            job_id: job.id.clone(),
+                            job_name: job.name.clone(),
+                            workspace: agent.workspace().to_owned(),
+                            needs_follow_up: false,
+                            skill_names: skill_names.clone(),
+                        },
                     );
                 }
                 info!(
@@ -711,14 +730,17 @@ impl JobExecutor {
         &self,
         agent: Arc<dyn aionui_ai_agent::IAgentManager>,
         main_rx: broadcast::Receiver<AgentStreamEvent>,
-        conversation_id: String,
-        job_id: String,
-        job_name: String,
-        workspace: String,
-        needs_follow_up: bool,
-        skill_names: Vec<String>,
+        ctx: SkillSuggestContext,
     ) {
         let detector = self.skill_suggest_detector.clone();
+        let SkillSuggestContext {
+            conversation_id,
+            job_id,
+            job_name,
+            workspace,
+            needs_follow_up,
+            skill_names,
+        } = ctx;
 
         tokio::spawn(async move {
             if !wait_for_terminal_event(main_rx).await {
@@ -903,12 +925,28 @@ async fn wait_for_terminal_event(mut rx: broadcast::Receiver<AgentStreamEvent>) 
         .unwrap_or(false)
 }
 
-fn parse_agent_type(agent_type_str: &str) -> AgentType {
-    if is_known_acp_backend(agent_type_str) {
+/// Resolve a cron job's stored `agent_type` string into an [`AgentType`].
+///
+/// Cron persists this field as a free-form string because legacy rows
+/// carry a vendor label (e.g. `"claude"`, `"gemini"`) instead of the
+/// canonical `"acp"`. Resolution order:
+/// 1. ACP vendor lookup via the registry — any builtin ACP row's
+///    `backend` aliases to [`AgentType::Acp`]. Checked first so vendor
+///    labels that also happen to match a legacy [`AgentType`] variant
+///    (e.g. `"gemini"`) are routed to the modern ACP runtime rather
+///    than the deprecated standalone adapter.
+/// 2. Exact [`AgentType`] serde match.
+/// 3. Fallback to [`AgentType::Acp`] to preserve the prior default.
+async fn parse_agent_type(registry: &AgentRegistry, agent_type_str: &str) -> AgentType {
+    if registry
+        .find_builtin_by_backend(agent_type_str)
+        .await
+        .is_some()
+    {
         return AgentType::Acp;
     }
 
-    serde_json::from_value(serde_json::Value::String(agent_type_str.to_owned()))
+    serde_json::from_value::<AgentType>(serde_json::Value::String(agent_type_str.to_owned()))
         .unwrap_or(AgentType::Acp)
 }
 
@@ -931,51 +969,58 @@ fn resolve_model(job: &CronJob) -> ProviderWithModel {
     }
 }
 
-fn infer_acp_backend(job: &CronJob) -> Option<String> {
-    if let Some(config) = &job.agent_config
-        && !config.backend.trim().is_empty()
-    {
-        return Some(config.backend.clone());
+/// Fill `extra` with the agent identity the factory should use.
+///
+/// Preferred path: resolve a builtin ACP catalog row via the
+/// registry and emit `agent_id` (exact factory lookup) alongside
+/// `backend` (convenience for other consumers). Legacy path: when
+/// `agent_config.backend` names something that isn't a builtin ACP
+/// vendor (e.g. the bare string `"acp"` that old rows still carry),
+/// pass it through unchanged so the factory's agent-type branch can
+/// handle it. Same treatment for `agent_type` when there is no
+/// `agent_config` but the stored type matches a vendor label.
+async fn inject_agent_identity(
+    extra: &mut serde_json::Map<String, serde_json::Value>,
+    registry: &AgentRegistry,
+    job: &CronJob,
+) {
+    let config_backend = job
+        .agent_config
+        .as_ref()
+        .map(|c| c.backend.trim())
+        .filter(|s| !s.is_empty());
+
+    let lookup_label = config_backend.unwrap_or_else(|| job.agent_type.trim());
+    if lookup_label.is_empty() {
+        return;
     }
 
-    let agent_type = job.agent_type.trim();
-    if is_known_acp_backend(agent_type) {
-        return Some(agent_type.to_owned());
+    if let Some(meta) = registry.find_builtin_by_backend(lookup_label).await {
+        extra.insert(
+            "agent_id".to_owned(),
+            serde_json::Value::String(meta.id.clone()),
+        );
+        if let Some(backend) = meta.backend {
+            extra.insert("backend".to_owned(), serde_json::Value::String(backend));
+        }
+        return;
     }
 
-    None
+    // No catalog hit — fall through to the legacy raw-label emission
+    // so existing rows keep working.
+    if let Some(backend) = config_backend {
+        extra.insert(
+            "backend".to_owned(),
+            serde_json::Value::String(backend.to_owned()),
+        );
+    }
 }
 
-/// Builtin ACP vendor identifiers seeded in `004_agent_metadata.sql`.
-/// Cron uses this as a sync heuristic to decide whether a stored
-/// `agent_type` string should be treated as ACP. Non-builtin catalog
-/// rows are not covered here — callers that need full accuracy should
-/// consult the `AgentRegistry` instead.
-const KNOWN_ACP_BACKENDS: &[&str] = &[
-    "claude",
-    "gemini",
-    "qwen",
-    "codex",
-    "codebuddy",
-    "droid",
-    "goose",
-    "auggie",
-    "kimi",
-    "opencode",
-    "copilot",
-    "qoder",
-    "vibe",
-    "cursor",
-    "kiro",
-    "hermes",
-    "snow",
-];
-
-fn is_known_acp_backend(name: &str) -> bool {
-    KNOWN_ACP_BACKENDS.iter().any(|b| *b == name)
-}
-
-fn build_task_extra(job: &CronJob, skills: &[String]) -> serde_json::Value {
+async fn build_task_extra(
+    registry: &AgentRegistry,
+    job: &CronJob,
+    skills: &[String],
+) -> serde_json::Value {
     let mut extra = serde_json::Map::new();
     extra.insert(
         "cron_job_id".to_owned(),
@@ -998,9 +1043,7 @@ fn build_task_extra(job: &CronJob, skills: &[String]) -> serde_json::Value {
         );
     }
 
-    if let Some(backend) = infer_acp_backend(job) {
-        extra.insert("backend".to_owned(), serde_json::Value::String(backend));
-    }
+    inject_agent_identity(&mut extra, registry, job).await;
 
     if let Some(config) = &job.agent_config {
         if let Some(cli_path) = &config.cli_path {
@@ -1065,7 +1108,8 @@ struct SavedSkillContext {
     raw_content: String,
 }
 
-fn build_conversation_extra(
+async fn build_conversation_extra(
+    registry: &AgentRegistry,
     job: &CronJob,
     saved_skill: Option<&SavedSkillContext>,
 ) -> serde_json::Value {
@@ -1090,9 +1134,7 @@ fn build_conversation_extra(
         );
     }
 
-    if let Some(backend) = infer_acp_backend(job) {
-        extra.insert("backend".to_owned(), serde_json::Value::String(backend));
-    }
+    inject_agent_identity(&mut extra, registry, job).await;
 
     if let Some(config) = &job.agent_config {
         if let Some(cli_path) = &config.cli_path {
@@ -1191,7 +1233,7 @@ fn schedule_description_ref(schedule: &crate::types::CronSchedule) -> Option<&st
 }
 
 async fn persist_legacy_skill_file(
-    data_dir: &PathBuf,
+    data_dir: &Path,
     job: &CronJob,
     raw_content: &str,
 ) -> Result<(), CronError> {
@@ -1291,8 +1333,8 @@ mod tests {
 
     // -- handle_busy tests ---------------------------------------------------
 
-    #[test]
-    fn handle_busy_returns_retrying_when_under_limit() {
+    #[tokio::test]
+    async fn handle_busy_returns_retrying_when_under_limit() {
         let guard = CronBusyGuard::new();
         let executor = make_executor_for_busy_tests(Arc::new(guard));
 
@@ -1305,8 +1347,8 @@ mod tests {
         assert_eq!(result, ExecutionResult::Retrying { attempt: 2 });
     }
 
-    #[test]
-    fn handle_busy_returns_skipped_when_at_limit() {
+    #[tokio::test]
+    async fn handle_busy_returns_skipped_when_at_limit() {
         let guard = CronBusyGuard::new();
         let executor = make_executor_for_busy_tests(Arc::new(guard));
 
@@ -1319,8 +1361,8 @@ mod tests {
         assert_eq!(result, ExecutionResult::Skipped);
     }
 
-    #[test]
-    fn handle_busy_returns_skipped_when_over_limit() {
+    #[tokio::test]
+    async fn handle_busy_returns_skipped_when_over_limit() {
         let guard = CronBusyGuard::new();
         let executor = make_executor_for_busy_tests(Arc::new(guard));
 
@@ -1333,8 +1375,8 @@ mod tests {
         assert_eq!(result, ExecutionResult::Skipped);
     }
 
-    #[test]
-    fn handle_busy_first_retry_returns_attempt_1() {
+    #[tokio::test]
+    async fn handle_busy_first_retry_returns_attempt_1() {
         let guard = CronBusyGuard::new();
         let executor = make_executor_for_busy_tests(Arc::new(guard));
 
@@ -1409,25 +1451,49 @@ mod tests {
         assert!(prompt.contains("SKILL_SUGGEST.md"));
     }
 
+    // -- registry helper ------------------------------------------------------
+
+    /// Build a registry backed by an in-memory DB seeded from the
+    /// production migrations, so backend-lookup tests exercise the
+    /// same catalog rows the server would see at runtime.
+    async fn hydrated_registry() -> Arc<AgentRegistry> {
+        let db = aionui_db::init_database_memory().await.unwrap();
+        let repo = Arc::new(aionui_db::SqliteAgentMetadataRepository::new(
+            db.pool().clone(),
+        ));
+        let registry = AgentRegistry::new(repo);
+        registry.hydrate().await.unwrap();
+        registry
+    }
+
     // -- parse_agent_type tests -----------------------------------------------
 
-    #[test]
-    fn parse_agent_type_known_types() {
-        assert_eq!(parse_agent_type("acp"), AgentType::Acp);
-        assert_eq!(parse_agent_type("nanobot"), AgentType::Nanobot);
+    #[tokio::test]
+    async fn parse_agent_type_known_types() {
+        let registry = hydrated_registry().await;
+        assert_eq!(parse_agent_type(&registry, "acp").await, AgentType::Acp);
+        assert_eq!(
+            parse_agent_type(&registry, "nanobot").await,
+            AgentType::Nanobot
+        );
     }
 
-    #[test]
-    fn parse_agent_type_acp_backend_aliases_to_acp() {
-        assert_eq!(parse_agent_type("claude"), AgentType::Acp);
-        assert_eq!(parse_agent_type("gemini"), AgentType::Acp);
-        assert_eq!(parse_agent_type("qwen"), AgentType::Acp);
-        assert_eq!(parse_agent_type("codex"), AgentType::Acp);
+    #[tokio::test]
+    async fn parse_agent_type_acp_backend_aliases_to_acp() {
+        let registry = hydrated_registry().await;
+        assert_eq!(parse_agent_type(&registry, "claude").await, AgentType::Acp);
+        assert_eq!(parse_agent_type(&registry, "gemini").await, AgentType::Acp);
+        assert_eq!(parse_agent_type(&registry, "qwen").await, AgentType::Acp);
+        assert_eq!(parse_agent_type(&registry, "codex").await, AgentType::Acp);
     }
 
-    #[test]
-    fn parse_agent_type_unknown_defaults_to_acp() {
-        assert_eq!(parse_agent_type("unknown_type"), AgentType::Acp);
+    #[tokio::test]
+    async fn parse_agent_type_unknown_defaults_to_acp() {
+        let registry = hydrated_registry().await;
+        assert_eq!(
+            parse_agent_type(&registry, "unknown_type").await,
+            AgentType::Acp
+        );
     }
 
     // -- resolve_model tests -------------------------------------------------
@@ -1475,53 +1541,61 @@ mod tests {
 
     // -- build_task_extra tests -----------------------------------------------
 
-    #[test]
-    fn build_task_extra_includes_cron_job_id() {
+    #[tokio::test]
+    async fn build_task_extra_includes_cron_job_id() {
+        let registry = hydrated_registry().await;
         let job = sample_job();
-        let extra = build_task_extra(&job, &[]);
+        let extra = build_task_extra(&registry, &job, &[]).await;
         assert_eq!(extra["cron_job_id"], "cron_test1");
     }
 
-    #[test]
-    fn build_task_extra_with_config_fields() {
+    #[tokio::test]
+    async fn build_task_extra_with_config_fields() {
+        let registry = hydrated_registry().await;
         let job = sample_job();
-        let extra = build_task_extra(&job, &["cron-cron_test1".into()]);
+        let extra = build_task_extra(&registry, &job, &["cron-cron_test1".into()]).await;
         assert_eq!(extra["backend"], "acp");
         assert_eq!(extra["cli_path"], "/usr/bin/claude");
         assert_eq!(extra["agent_name"], "Claude");
         assert_eq!(extra["skills"], serde_json::json!(["cron-cron_test1"]));
     }
 
-    #[test]
-    fn build_task_extra_without_config() {
+    #[tokio::test]
+    async fn build_task_extra_without_config() {
+        let registry = hydrated_registry().await;
         let job = CronJob {
             agent_config: None,
             ..sample_job()
         };
-        let extra = build_task_extra(&job, &[]);
+        let extra = build_task_extra(&registry, &job, &[]).await;
         assert_eq!(extra["cron_job_id"], "cron_test1");
         assert!(extra.get("backend").is_none());
     }
 
-    #[test]
-    fn build_task_extra_falls_back_to_agent_type_for_acp_backend() {
+    #[tokio::test]
+    async fn build_task_extra_falls_back_to_agent_type_for_acp_backend() {
+        let registry = hydrated_registry().await;
         let job = CronJob {
             agent_type: "claude".into(),
             agent_config: None,
             ..sample_job()
         };
-        let extra = build_task_extra(&job, &[]);
+        let extra = build_task_extra(&registry, &job, &[]).await;
         assert_eq!(extra["backend"], "claude");
+        // Vendor label must resolve to a catalog row so the factory can
+        // skip the `find_builtin_by_backend` fallback.
+        assert!(extra.get("agent_id").and_then(|v| v.as_str()).is_some());
     }
 
-    #[test]
-    fn build_conversation_extra_without_saved_skill_excludes_cron_auto_inject_only() {
+    #[tokio::test]
+    async fn build_conversation_extra_without_saved_skill_excludes_cron_auto_inject_only() {
+        let registry = hydrated_registry().await;
         let job = CronJob {
             execution_mode: ExecutionMode::NewConversation,
             ..sample_job()
         };
 
-        let extra = build_conversation_extra(&job, None);
+        let extra = build_conversation_extra(&registry, &job, None).await;
 
         assert_eq!(extra["cron_job_id"], "cron_test1");
         assert_eq!(
@@ -1531,8 +1605,9 @@ mod tests {
         assert!(extra.get("preset_enabled_skills").is_none());
     }
 
-    #[test]
-    fn build_conversation_extra_with_saved_skill_enables_preset_skill() {
+    #[tokio::test]
+    async fn build_conversation_extra_with_saved_skill_enables_preset_skill() {
+        let registry = hydrated_registry().await;
         let job = CronJob {
             execution_mode: ExecutionMode::NewConversation,
             ..sample_job()
@@ -1542,7 +1617,7 @@ mod tests {
             raw_content: "---\nname: test\ndescription: desc\n---\nDo X".into(),
         };
 
-        let extra = build_conversation_extra(&job, Some(&saved_skill));
+        let extra = build_conversation_extra(&registry, &job, Some(&saved_skill)).await;
 
         assert_eq!(
             extra["exclude_auto_inject_skills"],
@@ -1554,20 +1629,22 @@ mod tests {
         );
     }
 
-    #[test]
-    fn build_conversation_extra_preserves_agent_workspace() {
+    #[tokio::test]
+    async fn build_conversation_extra_preserves_agent_workspace() {
+        let registry = hydrated_registry().await;
         let job = CronJob {
             execution_mode: ExecutionMode::NewConversation,
             ..sample_job()
         };
 
-        let extra = build_conversation_extra(&job, None);
+        let extra = build_conversation_extra(&registry, &job, None).await;
 
         assert_eq!(extra["workspace"], "/home/user/project");
     }
 
-    #[test]
-    fn build_conversation_extra_falls_back_to_agent_type_for_acp_backend() {
+    #[tokio::test]
+    async fn build_conversation_extra_falls_back_to_agent_type_for_acp_backend() {
+        let registry = hydrated_registry().await;
         let job = CronJob {
             execution_mode: ExecutionMode::NewConversation,
             agent_type: "claude".into(),
@@ -1575,7 +1652,7 @@ mod tests {
             ..sample_job()
         };
 
-        let extra = build_conversation_extra(&job, None);
+        let extra = build_conversation_extra(&registry, &job, None).await;
 
         assert_eq!(extra["backend"], "claude");
     }
@@ -2184,9 +2261,11 @@ mod tests {
             stub_broadcaster,
             std::env::temp_dir(),
             Arc::new(StubSkillResolver),
-            agent_metadata_repo,
+            Arc::clone(&agent_metadata_repo),
             acp_session_repo,
         ));
+
+        let agent_registry = AgentRegistry::new(agent_metadata_repo);
 
         JobExecutor::new(
             Arc::new(StubTaskManager),
@@ -2195,6 +2274,7 @@ mod tests {
             guard,
             std::env::temp_dir(),
             Arc::new(StubBroadcaster),
+            agent_registry,
         )
     }
 
@@ -2841,9 +2921,11 @@ mod tests {
             Arc::clone(&broadcaster),
             std::env::temp_dir(),
             Arc::new(StubSkillResolver),
-            agent_metadata_repo,
+            Arc::clone(&agent_metadata_repo),
             acp_session_repo,
         ));
+
+        let agent_registry = AgentRegistry::new(agent_metadata_repo);
 
         JobExecutor::new(
             task_manager,
@@ -2852,6 +2934,7 @@ mod tests {
             Arc::new(CronBusyGuard::new()),
             std::env::temp_dir(),
             broadcaster,
+            agent_registry,
         )
     }
 

@@ -462,6 +462,7 @@ pub fn build_cron_state(services: &AppServices) -> CronRouterState {
         busy_guard,
         std::path::PathBuf::from(&services.data_dir),
         services.event_bus.clone(),
+        services.agent_registry.clone(),
     ));
 
     let tick_service_ref: Arc<CronServiceTickRef> = Arc::new(CronServiceTickRef::default());

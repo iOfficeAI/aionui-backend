@@ -10,6 +10,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use aionui_ai_agent::AgentRegistry;
 use aionui_ai_agent::agent_manager::AgentManagerHandle;
 use aionui_ai_agent::middleware::{CronCreateParams, CronUpdateParams};
 use aionui_ai_agent::types::BuildTaskOptions;
@@ -578,9 +579,11 @@ async fn setup_with_conv_repo() -> (
         bc.clone() as Arc<dyn EventBroadcaster>,
         std::env::temp_dir(),
         Arc::new(StubSkillResolver),
-        agent_metadata_repo,
+        Arc::clone(&agent_metadata_repo),
         acp_session_repo,
     ));
+    let agent_registry = AgentRegistry::new(agent_metadata_repo);
+    agent_registry.hydrate().await.unwrap();
     let busy_guard = Arc::new(CronBusyGuard::new());
     let executor = Arc::new(JobExecutor::new(
         Arc::new(StubTaskManager),
@@ -589,6 +592,7 @@ async fn setup_with_conv_repo() -> (
         busy_guard,
         data_dir.clone(),
         bc.clone() as Arc<dyn EventBroadcaster>,
+        agent_registry,
     ));
 
     let scheduler = Arc::new(CronScheduler::new(Arc::new(|_| {})));
