@@ -13,12 +13,15 @@ use aionui_api_types::{
 };
 use aionui_common::AppError;
 use aionui_db::IChannelRepository;
+use aionui_extension::{ExtensionRegistry, ResolvedChannelPlugin};
+use serde::Serialize;
 
 use crate::channel_settings::ChannelSettingsService;
+use crate::error::ChannelError;
 use crate::manager::{ChannelManager, PluginFactory};
 use crate::pairing::PairingService;
 use crate::session::SessionManager;
-use crate::types::{PluginConfig, PluginCredentials, PluginType};
+use crate::types::{PluginConfig, PluginConfigOptions, PluginCredentials, PluginType};
 
 use std::collections::HashMap;
 
@@ -35,6 +38,7 @@ pub struct ChannelRouterState {
     pub repo: Arc<dyn IChannelRepository>,
     pub plugin_factory: Arc<PluginFactory>,
     pub settings_service: Arc<ChannelSettingsService>,
+    pub extension_registry: ExtensionRegistry,
 }
 
 // ---------------------------------------------------------------------------
@@ -82,9 +86,176 @@ pub fn weixin_login_route(state: ChannelRouterState) -> Router {
 /// `GET /api/channel/plugins` — get status of all registered plugins.
 async fn get_plugin_status(
     State(state): State<ChannelRouterState>,
-) -> Result<Json<ApiResponse<Vec<PluginStatusResponse>>>, AppError> {
+) -> Result<Json<ApiResponse<Vec<ChannelPluginStatusView>>>, AppError> {
     let statuses = state.manager.get_plugin_status().await?;
-    Ok(Json(ApiResponse::ok(statuses)))
+    let extension_plugins = state.extension_registry.get_channel_plugins().await;
+
+    let extension_map: HashMap<String, ResolvedChannelPlugin> = extension_plugins
+        .into_iter()
+        .map(|plugin| (plugin.id.clone(), plugin))
+        .collect();
+
+    let builtin_names: [(&str, &str); 7] = [
+        ("telegram", "Telegram"),
+        ("lark", "Lark"),
+        ("dingtalk", "DingTalk"),
+        ("slack", "Slack"),
+        ("discord", "Discord"),
+        ("weixin", "WeChat"),
+        ("wecom", "WeCom"),
+    ];
+    let builtin_types: std::collections::HashSet<&str> = builtin_names.iter().map(|(id, _)| *id).collect();
+
+    let mut status_map: HashMap<String, ChannelPluginStatusView> = HashMap::new();
+
+    for status in statuses {
+        let plugin_type = status.plugin_type.clone();
+        let is_extension = !builtin_types.contains(plugin_type.as_str());
+
+        if is_extension && !extension_map.contains_key(&plugin_type) {
+            continue;
+        }
+
+        status_map.insert(
+            plugin_type.clone(),
+            ChannelPluginStatusView::from_manager_status(
+                status,
+                is_extension
+                    .then(|| extension_map.get(&plugin_type).map(ChannelExtensionMetaView::from))
+                    .flatten(),
+            ),
+        );
+    }
+
+    for plugin in extension_map.values() {
+        status_map
+            .entry(plugin.id.clone())
+            .or_insert_with(|| ChannelPluginStatusView::extension_placeholder(plugin));
+    }
+
+    for (plugin_type, display_name) in builtin_names {
+        status_map
+            .entry(plugin_type.to_string())
+            .or_insert_with(|| ChannelPluginStatusView::builtin_placeholder(plugin_type, display_name));
+    }
+
+    let mut merged: Vec<ChannelPluginStatusView> = status_map.into_values().collect();
+    merged.sort_by(|left, right| left.plugin_type.cmp(&right.plugin_type));
+
+    Ok(Json(ApiResponse::ok(merged)))
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ChannelPluginStatusView {
+    plugin_id: String,
+    #[serde(rename = "type")]
+    plugin_type: String,
+    name: String,
+    enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_connected: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    created_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    updated_at: Option<i64>,
+    connected: bool,
+    has_token: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    bot_username: Option<String>,
+    active_users: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    is_extension: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    extension_meta: Option<ChannelExtensionMetaView>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ChannelExtensionMetaView {
+    #[serde(rename = "credentialFields")]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    credential_fields: Vec<serde_json::Value>,
+    #[serde(rename = "configFields")]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    config_fields: Vec<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
+    #[serde(rename = "extensionName")]
+    extension_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    icon: Option<String>,
+}
+
+impl ChannelPluginStatusView {
+    fn from_manager_status(status: PluginStatusResponse, extension_meta: Option<ChannelExtensionMetaView>) -> Self {
+        Self {
+            plugin_id: status.plugin_id,
+            plugin_type: status.plugin_type,
+            name: status.name,
+            enabled: status.enabled,
+            status: status.status,
+            last_connected: status.last_connected,
+            created_at: Some(status.created_at),
+            updated_at: Some(status.updated_at),
+            connected: status.connected,
+            has_token: status.has_token,
+            bot_username: status.bot_username,
+            active_users: status.active_users,
+            is_extension: extension_meta.as_ref().map(|_| true),
+            extension_meta,
+        }
+    }
+
+    fn extension_placeholder(plugin: &ResolvedChannelPlugin) -> Self {
+        Self {
+            plugin_id: plugin.id.clone(),
+            plugin_type: plugin.id.clone(),
+            name: plugin.name.clone(),
+            enabled: false,
+            status: Some("stopped".to_string()),
+            last_connected: None,
+            created_at: None,
+            updated_at: None,
+            connected: false,
+            has_token: false,
+            bot_username: None,
+            active_users: 0,
+            is_extension: Some(true),
+            extension_meta: Some(ChannelExtensionMetaView::from(plugin)),
+        }
+    }
+
+    fn builtin_placeholder(plugin_type: &str, display_name: &str) -> Self {
+        Self {
+            plugin_id: plugin_type.to_string(),
+            plugin_type: plugin_type.to_string(),
+            name: display_name.to_string(),
+            enabled: false,
+            status: Some("stopped".to_string()),
+            last_connected: None,
+            created_at: None,
+            updated_at: None,
+            connected: false,
+            has_token: false,
+            bot_username: None,
+            active_users: 0,
+            is_extension: Some(false),
+            extension_meta: None,
+        }
+    }
+}
+
+impl From<&ResolvedChannelPlugin> for ChannelExtensionMetaView {
+    fn from(plugin: &ResolvedChannelPlugin) -> Self {
+        Self {
+            credential_fields: plugin.credential_fields.clone(),
+            config_fields: plugin.config_fields.clone(),
+            description: plugin.description.clone(),
+            extension_name: plugin.extension_name.clone(),
+            icon: plugin.icon.clone(),
+        }
+    }
 }
 
 /// `POST /api/channel/plugins/enable` — enable a plugin with config.
@@ -93,6 +264,31 @@ async fn enable_plugin(
     body: Result<Json<EnablePluginRequest>, JsonRejection>,
 ) -> Result<Json<ApiResponse<BridgeResponse>>, AppError> {
     let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
+
+    if let Some(extension_plugin) = resolve_extension_channel_plugin(&state, &req.plugin_id).await {
+        let config = build_extension_config(&extension_plugin, &req.config)?;
+        match state
+            .manager
+            .enable_extension_plugin(&req.plugin_id, &extension_plugin.name, &config)
+            .await
+        {
+            Ok(()) => {
+                return Ok(Json(ApiResponse::ok(BridgeResponse {
+                    success: true,
+                    message: Some("Plugin enabled".into()),
+                    error: None,
+                })));
+            }
+            Err(e) => {
+                warn!(plugin_id = %req.plugin_id, error = %e, "enable extension plugin failed");
+                return Ok(Json(ApiResponse::ok(BridgeResponse {
+                    success: false,
+                    message: None,
+                    error: Some(e.to_string()),
+                })));
+            }
+        }
+    }
 
     match state
         .manager
@@ -122,6 +318,16 @@ async fn disable_plugin(
 ) -> Result<Json<ApiResponse<BridgeResponse>>, AppError> {
     let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
 
+    if resolve_extension_channel_plugin(&state, &req.plugin_id).await.is_some()
+        && state.repo.get_plugin(&req.plugin_id).await?.is_none()
+    {
+        return Ok(Json(ApiResponse::ok(BridgeResponse {
+            success: true,
+            message: Some("Plugin disabled".into()),
+            error: None,
+        })));
+    }
+
     match state.manager.disable_plugin(&req.plugin_id).await {
         Ok(()) => Ok(Json(ApiResponse::ok(BridgeResponse {
             success: true,
@@ -145,6 +351,15 @@ async fn test_plugin(
     body: Result<Json<TestPluginRequest>, JsonRejection>,
 ) -> Result<Json<ApiResponse<TestPluginResponse>>, AppError> {
     let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
+
+    if let Some(extension_plugin) = resolve_extension_channel_plugin(&state, &req.plugin_id).await {
+        let _config = build_extension_test_config(&extension_plugin, &req)?;
+        return Ok(Json(ApiResponse::ok(TestPluginResponse {
+            success: true,
+            bot_username: None,
+            error: None,
+        })));
+    }
 
     let config = build_test_config(&req);
 
@@ -401,6 +616,114 @@ fn build_test_config(req: &TestPluginRequest) -> PluginConfig {
         credentials,
         config: None,
     }
+}
+
+async fn resolve_extension_channel_plugin(
+    state: &ChannelRouterState,
+    plugin_id: &str,
+) -> Option<ResolvedChannelPlugin> {
+    state
+        .extension_registry
+        .get_channel_plugins()
+        .await
+        .into_iter()
+        .find(|plugin| plugin.id == plugin_id)
+}
+
+fn build_extension_test_config(
+    plugin: &ResolvedChannelPlugin,
+    req: &TestPluginRequest,
+) -> Result<PluginConfig, ChannelError> {
+    let mut map = serde_json::Map::new();
+    if !req.token.is_empty() {
+        map.insert("token".to_string(), serde_json::Value::String(req.token.clone()));
+    }
+    if let Some(extra) = &req.extra_config {
+        if let Some(app_id) = &extra.app_id {
+            map.insert("appId".to_string(), serde_json::Value::String(app_id.clone()));
+        }
+        if let Some(app_secret) = &extra.app_secret {
+            map.insert("appSecret".to_string(), serde_json::Value::String(app_secret.clone()));
+        }
+    }
+    build_extension_config(plugin, &serde_json::Value::Object(map))
+}
+
+fn build_extension_config(
+    plugin: &ResolvedChannelPlugin,
+    raw: &serde_json::Value,
+) -> Result<PluginConfig, ChannelError> {
+    let object = raw
+        .as_object()
+        .ok_or_else(|| ChannelError::InvalidConfig("Extension plugin config must be an object".into()))?;
+
+    let mut credentials = PluginCredentials {
+        token: None,
+        app_id: None,
+        app_secret: None,
+        encrypt_key: None,
+        verification_token: None,
+        client_id: None,
+        client_secret: None,
+        account_id: None,
+        bot_token: None,
+        extra: HashMap::new(),
+    };
+    let mut config_extra = HashMap::new();
+
+    let credential_keys: std::collections::HashSet<String> = plugin
+        .credential_fields
+        .iter()
+        .filter_map(field_key)
+        .map(ToOwned::to_owned)
+        .collect();
+    let config_keys: std::collections::HashSet<String> = plugin
+        .config_fields
+        .iter()
+        .filter_map(field_key)
+        .map(ToOwned::to_owned)
+        .collect();
+
+    for field in &plugin.config_fields {
+        if let Some((key, value)) = field_default_entry(field) {
+            config_extra.entry(key.to_string()).or_insert(value);
+        }
+    }
+
+    for (key, value) in object {
+        if credential_keys.contains(key) {
+            credentials.extra.insert(key.clone(), value.clone());
+        } else if config_keys.contains(key) {
+            config_extra.insert(key.clone(), value.clone());
+        } else {
+            config_extra.insert(key.clone(), value.clone());
+        }
+    }
+
+    Ok(PluginConfig {
+        credentials,
+        config: if config_extra.is_empty() {
+            None
+        } else {
+            Some(PluginConfigOptions {
+                mode: None,
+                webhook_url: None,
+                rate_limit: None,
+                require_mention: None,
+                extra: config_extra,
+            })
+        },
+    })
+}
+
+fn field_key(value: &serde_json::Value) -> Option<&str> {
+    value.get("key").and_then(serde_json::Value::as_str)
+}
+
+fn field_default_entry(value: &serde_json::Value) -> Option<(&str, serde_json::Value)> {
+    let key = field_key(value)?;
+    let default = value.get("default")?;
+    Some((key, default.clone()))
 }
 
 // ---------------------------------------------------------------------------

@@ -39,8 +39,9 @@ impl Database {
 /// configures pragmas (foreign_keys, busy_timeout, journal_mode=WAL),
 /// runs migrations, and ensures the system default user exists.
 ///
-/// If initialization fails on an existing file, attempts corruption recovery
-/// by backing up the corrupted file and creating a fresh database.
+/// If initialization fails on an existing file, only explicit corruption-like
+/// failures attempt recovery by backing up the corrupted file and creating a
+/// fresh database. Migration mismatches and lock contention fail fast.
 pub async fn init_database(path: &Path) -> Result<Database, DbError> {
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
@@ -51,7 +52,7 @@ pub async fn init_database(path: &Path) -> Result<Database, DbError> {
 
     match try_init_file(path).await {
         Ok(db) => Ok(db),
-        Err(e) if path.exists() => {
+        Err(e) if path.exists() && should_attempt_recovery(&e) => {
             warn!("Database initialization failed, attempting recovery: {e}");
             recover_and_retry(path, e).await
         }
@@ -178,5 +179,62 @@ async fn recover_and_retry(path: &Path, original_error: DbError) -> Result<Datab
         Err(retry_err) => Err(DbError::Init(format!(
             "Recovery failed after backup: {retry_err}. Original error: {original_error}"
         ))),
+    }
+}
+
+fn should_attempt_recovery(err: &DbError) -> bool {
+    match err {
+        DbError::Migration(_) => false,
+        DbError::NotFound(_) | DbError::Conflict(_) => false,
+        DbError::Query(_) | DbError::Init(_) => is_corruption_like_error(err),
+    }
+}
+
+fn is_corruption_like_error(err: &DbError) -> bool {
+    let message = err.to_string().to_ascii_lowercase();
+
+    [
+        "sqlite_corrupt",
+        "database disk image is malformed",
+        "file is not a database",
+        "sqlite_notadb",
+        "malformed database schema",
+    ]
+    .iter()
+    .any(|needle| message.contains(needle))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recovery_skips_migration_version_mismatch() {
+        let err = DbError::Migration(sqlx::migrate::MigrateError::VersionMismatch(6));
+
+        assert!(
+            !should_attempt_recovery(&err),
+            "migration checksum mismatch must not trigger recovery"
+        );
+    }
+
+    #[test]
+    fn recovery_skips_lock_contention_errors() {
+        let err = DbError::Init("database is locked".into());
+
+        assert!(
+            !should_attempt_recovery(&err),
+            "lock contention must not trigger recovery"
+        );
+    }
+
+    #[test]
+    fn recovery_allows_corruption_like_errors() {
+        let err = DbError::Init("database disk image is malformed".into());
+
+        assert!(
+            should_attempt_recovery(&err),
+            "corruption-like failures should trigger recovery"
+        );
     }
 }

@@ -21,6 +21,10 @@ use aionui_db::{IUserRepository, SqliteUserRepository, init_database_memory};
 
 /// Create a test app with an in-memory database.
 async fn test_app() -> (Router, TestContext) {
+    test_app_with_local(false).await
+}
+
+async fn test_app_with_local(local: bool) -> (Router, TestContext) {
     let db = init_database_memory().await.unwrap();
     let user_repo = Arc::new(SqliteUserRepository::new(db.pool().clone())) as Arc<dyn IUserRepository>;
     let jwt_service = Arc::new(JwtService::new("test_secret_for_routes".into()));
@@ -35,6 +39,7 @@ async fn test_app() -> (Router, TestContext) {
         user_repo: user_repo.clone(),
         cookie_config,
         qr_token_store: qr_token_store.clone(),
+        local,
     };
 
     let app = auth_routes(state);
@@ -115,6 +120,10 @@ async fn login(app: &mut Router, username: &str, password: &str) -> (String, Str
     let token = json["token"].as_str().unwrap().to_owned();
     let user_id = json["user"]["id"].as_str().unwrap().to_owned();
     (token, user_id)
+}
+
+fn json_post_anonymous(uri: &str, body: &str) -> Request<Body> {
+    json_post(uri, body)
 }
 
 // ===========================================================================
@@ -652,4 +661,63 @@ async fn qr_login_page_returns_html() {
     assert_eq!(resp.status(), StatusCode::OK);
     let content_type = resp.headers().get("content-type").unwrap().to_str().unwrap();
     assert!(content_type.contains("text/html"));
+}
+
+// ===========================================================================
+// T12. Local-only internal user routes
+// ===========================================================================
+
+#[tokio::test]
+async fn t12_1_internal_user_routes_forbidden_outside_local_mode() {
+    let (app, _ctx) = test_app().await;
+
+    let resp = app
+        .oneshot(get_anonymous("/api/auth/internal/users/system"))
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn t12_2_internal_user_routes_work_in_local_mode() {
+    let (app, ctx) = test_app_with_local(true).await;
+    create_test_user(&ctx, "admin", "StrongP@ss1").await;
+
+    let system_resp = app
+        .clone()
+        .oneshot(get_anonymous("/api/auth/internal/users/system"))
+        .await
+        .unwrap();
+    assert_eq!(system_resp.status(), StatusCode::OK);
+    let system_json = body_json(system_resp).await;
+    assert_eq!(system_json["data"]["id"], "system_default_user");
+
+    let user_resp = app
+        .clone()
+        .oneshot(get_anonymous("/api/auth/internal/users/by-username/admin"))
+        .await
+        .unwrap();
+    assert_eq!(user_resp.status(), StatusCode::OK);
+    let user_json = body_json(user_resp).await;
+    let user_id = user_json["data"]["id"].as_str().unwrap().to_owned();
+
+    let update_resp = app
+        .clone()
+        .oneshot(json_post_anonymous(
+            &format!("/api/auth/internal/users/{user_id}/username"),
+            r#"{"username":"renamed-admin"}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(update_resp.status(), StatusCode::OK);
+
+    let renamed_resp = app
+        .oneshot(get_anonymous("/api/auth/internal/users/by-username/renamed-admin"))
+        .await
+        .unwrap();
+    assert_eq!(renamed_resp.status(), StatusCode::OK);
+    let renamed_json = body_json(renamed_resp).await;
+    assert_eq!(renamed_json["data"]["id"], user_id);
+    assert_eq!(renamed_json["data"]["username"], "renamed-admin");
 }

@@ -447,6 +447,7 @@ dependencies = [
  "aionui-common",
  "aionui-conversation",
  "aionui-db",
+ "aionui-extension",
  "aionui-realtime",
  "async-trait",
  "axum",

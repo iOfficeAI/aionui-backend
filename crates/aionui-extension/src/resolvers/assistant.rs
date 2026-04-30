@@ -2,6 +2,7 @@ use std::path::Path;
 
 use tracing::warn;
 
+use crate::asset_paths::resolve_extension_asset_url;
 use crate::error::ExtensionError;
 use crate::template::resolve_file_reference;
 use crate::types::{ExtAssistant, ResolvedAssistant};
@@ -27,14 +28,23 @@ pub fn resolve_assistant(
         .map(|v| resolve_file_reference(v, ext_dir))
         .transpose()?;
 
+    let icon = assistant
+        .icon
+        .as_deref()
+        .and_then(|value| resolve_extension_asset_url(extension_name, value));
+
     Ok(ResolvedAssistant {
         extension_name: extension_name.to_owned(),
         id: assistant.id.clone(),
         name: assistant.name.clone(),
         description: assistant.description.clone(),
         system_prompt,
-        icon: assistant.icon.clone(),
+        icon,
         context,
+        preset_agent_type: assistant.preset_agent_type.clone(),
+        enabled_skills: assistant.enabled_skills.clone(),
+        prompts: assistant.prompts.clone(),
+        models: assistant.models.clone(),
     })
 }
 
@@ -70,6 +80,10 @@ mod tests {
             system_prompt: Some("You are helpful.".into()),
             icon: None,
             context: None,
+            preset_agent_type: None,
+            enabled_skills: vec![],
+            prompts: vec![],
+            models: vec![],
         };
 
         let result = resolve_assistant(&assistant, "my-ext", Path::new("/ext/my-ext")).unwrap();
@@ -93,6 +107,10 @@ mod tests {
             system_prompt: Some("@file:prompts/system.md".into()),
             icon: None,
             context: None,
+            preset_agent_type: None,
+            enabled_skills: vec![],
+            prompts: vec![],
+            models: vec![],
         };
 
         let result = resolve_assistant(&assistant, "my-ext", &dir).unwrap();
@@ -110,6 +128,10 @@ mod tests {
             system_prompt: Some("@file:missing.md".into()),
             icon: None,
             context: None,
+            preset_agent_type: None,
+            enabled_skills: vec![],
+            prompts: vec![],
+            models: vec![],
         };
 
         let err = resolve_assistant(&assistant, "my-ext", Path::new("/tmp/no_such_ext_dir")).unwrap_err();
@@ -129,6 +151,10 @@ mod tests {
             system_prompt: None,
             icon: None,
             context: Some("@file:context.md".into()),
+            preset_agent_type: None,
+            enabled_skills: vec![],
+            prompts: vec![],
+            models: vec![],
         };
 
         let result = resolve_assistant(&assistant, "my-ext", &dir).unwrap();
@@ -147,6 +173,10 @@ mod tests {
                 system_prompt: Some("plain text".into()),
                 icon: None,
                 context: None,
+                preset_agent_type: None,
+                enabled_skills: vec![],
+                prompts: vec![],
+                models: vec![],
             },
             ExtAssistant {
                 id: "bad".into(),
@@ -155,6 +185,10 @@ mod tests {
                 system_prompt: Some("@file:missing.md".into()),
                 icon: None,
                 context: None,
+                preset_agent_type: None,
+                enabled_skills: vec![],
+                prompts: vec![],
+                models: vec![],
             },
         ];
 

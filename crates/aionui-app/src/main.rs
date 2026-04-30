@@ -25,6 +25,10 @@ struct Cli {
     #[arg(long, default_value = "data")]
     data_dir: String,
 
+    /// Host application version used for extension engine compatibility.
+    #[arg(long, default_value_t = env!("CARGO_PKG_VERSION").to_string())]
+    app_version: String,
+
     /// Run in local embedded mode (skip authentication, use system_default_user).
     #[arg(long)]
     local: bool,
@@ -93,6 +97,7 @@ async fn main() -> Result<ExitCode> {
         host: cli.host,
         port: cli.port,
         data_dir: cli.data_dir,
+        app_version: cli.app_version,
         local: cli.local,
     };
 
@@ -144,7 +149,13 @@ async fn main() -> Result<ExitCode> {
         "startup: builtin skills materialized"
     );
 
-    let services = AppServices::from_database_with_data_dir(database, config.data_dir.clone(), config.local).await?;
+    let services = AppServices::from_database_with_data_dir_and_app_version(
+        database,
+        config.data_dir.clone(),
+        config.local,
+        config.app_version.clone(),
+    )
+    .await?;
     info!(elapsed_ms = boot.elapsed().as_millis(), "startup: services constructed");
 
     if config.local {

@@ -1,7 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, Notify};
 use tracing::{debug, error, warn};
 
@@ -35,6 +36,25 @@ struct Inner {
     writer_spawned: Mutex<bool>,
 }
 
+const EXTENSION_STATES_FILE_ENV: &str = "AIONUI_EXTENSION_STATES_FILE";
+const DEFAULT_STATES_FILE: &str = "extension-states.json";
+
+#[derive(Debug, Deserialize, Serialize)]
+struct PersistedStates {
+    version: u32,
+    #[serde(default)]
+    extensions: BTreeMap<String, PersistedExtensionState>,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+struct PersistedExtensionState {
+    enabled: bool,
+    #[serde(default)]
+    installed: Option<bool>,
+    #[serde(default, alias = "lastVersion", rename = "lastVersion")]
+    last_version: Option<String>,
+}
+
 impl ExtensionStateStore {
     /// Create a new store backed by the given file path.
     pub fn new(file_path: PathBuf) -> Self {
@@ -46,13 +66,6 @@ impl ExtensionStateStore {
                 writer_spawned: Mutex::new(false),
             }),
         }
-    }
-
-    /// Create a store with the default path: `~/.aionui/extension-states.json`.
-    pub fn with_default_path() -> Option<Self> {
-        let home = dirs::home_dir()?;
-        let path = home.join(".aionui").join("extension-states.json");
-        Some(Self::new(path))
     }
 
     /// Return the file path backing this store.
@@ -188,10 +201,7 @@ impl ExtensionStateStore {
 /// Returns an empty map if the file does not exist.
 pub fn load_states_from_file(path: &Path) -> Result<HashMap<String, ExtensionState>, ExtensionError> {
     match std::fs::read(path) {
-        Ok(bytes) => {
-            let states: Vec<ExtensionState> = serde_json::from_slice(&bytes)?;
-            Ok(states.into_iter().map(|s| (s.name.clone(), s)).collect())
-        }
+        Ok(bytes) => parse_states_from_bytes(path, &bytes),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             debug!(path = %path.display(), "no state file found — starting fresh");
             Ok(HashMap::new())
@@ -201,6 +211,36 @@ pub fn load_states_from_file(path: &Path) -> Result<HashMap<String, ExtensionSta
             Err(ExtensionError::Io(e))
         }
     }
+}
+
+fn parse_states_from_bytes(path: &Path, bytes: &[u8]) -> Result<HashMap<String, ExtensionState>, ExtensionError> {
+    let persisted: PersistedStates = serde_json::from_slice(bytes)?;
+    if persisted.version != 1 {
+        return Err(ExtensionError::StatePersistence(format!(
+            "unsupported extension state file version {} at {}",
+            persisted.version,
+            path.display()
+        )));
+    }
+
+    Ok(persisted
+        .extensions
+        .into_iter()
+        .map(|(name, state)| {
+            let version = state.last_version.unwrap_or_default();
+
+            (
+                name.clone(),
+                ExtensionState {
+                    name,
+                    version,
+                    enabled: state.enabled,
+                    installed_at: None,
+                    last_activated_at: None,
+                },
+            )
+        })
+        .collect())
 }
 
 /// Write extension states to a JSON file atomically.
@@ -214,11 +254,25 @@ pub fn save_states_to_file(path: &Path, states: &HashMap<String, ExtensionState>
         std::fs::create_dir_all(parent)?;
     }
 
-    // Collect into a sorted Vec for deterministic output.
-    let mut entries: Vec<&ExtensionState> = states.values().collect();
-    entries.sort_by(|a, b| a.name.cmp(&b.name));
+    // Collect into a stable map keyed by extension name to match the
+    // historical Electron format consumed by existing users.
+    let mut names: Vec<&String> = states.keys().collect();
+    names.sort();
 
-    let json = serde_json::to_string_pretty(&entries)?;
+    let mut extensions = BTreeMap::new();
+    for name in names {
+        let state = &states[name];
+        extensions.insert(
+            name.clone(),
+            PersistedExtensionState {
+                enabled: state.enabled,
+                installed: state.installed_at.map(|_| true),
+                last_version: (!state.version.is_empty()).then(|| state.version.clone()),
+            },
+        );
+    }
+
+    let json = serde_json::to_string_pretty(&PersistedStates { version: 1, extensions })?;
 
     // Write to a temp file then rename for atomicity.
     let tmp_path = path.with_extension("json.tmp");
@@ -226,6 +280,26 @@ pub fn save_states_to_file(path: &Path, states: &HashMap<String, ExtensionState>
     std::fs::rename(&tmp_path, path)?;
 
     Ok(())
+}
+
+/// Resolve the extension state file path using the historical AionUi rules.
+///
+/// Priority:
+/// 1. `AIONUI_EXTENSION_STATES_FILE`
+/// 2. `<data_dir>/extension-states.json`
+pub fn resolve_state_file_path(data_dir: &Path) -> PathBuf {
+    resolve_state_file_path_inner(std::env::var_os(EXTENSION_STATES_FILE_ENV).as_ref(), data_dir)
+}
+
+fn resolve_state_file_path_inner(override_path: Option<&std::ffi::OsString>, data_dir: &Path) -> PathBuf {
+    if let Some(override_path) = override_path {
+        let trimmed = override_path.to_string_lossy().trim().to_owned();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed);
+        }
+    }
+
+    data_dir.join(DEFAULT_STATES_FILE)
 }
 
 // ---------------------------------------------------------------------------
@@ -297,9 +371,9 @@ mod tests {
         save_states_to_file(&path, &states).unwrap();
 
         let raw = std::fs::read_to_string(&path).unwrap();
-        let parsed: Vec<ExtensionState> = serde_json::from_str(&raw).unwrap();
-        assert_eq!(parsed[0].name, "a-ext");
-        assert_eq!(parsed[1].name, "z-ext");
+        let parsed: PersistedStates = serde_json::from_str(&raw).unwrap();
+        let ordered: Vec<&str> = parsed.extensions.keys().map(|k| k.as_str()).collect();
+        assert_eq!(ordered, vec!["a-ext", "z-ext"]);
     }
 
     #[test]
@@ -310,6 +384,84 @@ mod tests {
 
         let result = load_states_from_file(&path);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn load_object_format_returns_states() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("states.json");
+        std::fs::write(
+            &path,
+            r#"{
+              "version": 1,
+              "extensions": {
+                "ext-a": {
+                  "enabled": true,
+                  "installed": true,
+                  "lastVersion": "1.2.3"
+                },
+                "ext-b": {
+                  "enabled": false
+                }
+              }
+            }"#,
+        )
+        .unwrap();
+
+        let loaded = load_states_from_file(&path).unwrap();
+
+        assert_eq!(loaded.len(), 2);
+        assert!(loaded["ext-a"].enabled);
+        assert_eq!(loaded["ext-a"].version, "1.2.3");
+        assert!(!loaded["ext-b"].enabled);
+        assert_eq!(loaded["ext-b"].version, "");
+        assert!(loaded["ext-a"].installed_at.is_none());
+        assert!(loaded["ext-a"].last_activated_at.is_none());
+    }
+
+    #[test]
+    fn save_preserves_object_format() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("states.json");
+        std::fs::write(
+            &path,
+            r#"{
+              "version": 1,
+              "extensions": {
+                "ext-a": {
+                  "enabled": true,
+                  "lastVersion": "1.2.3"
+                }
+              }
+            }"#,
+        )
+        .unwrap();
+
+        let loaded = load_states_from_file(&path).unwrap();
+        save_states_to_file(&path, &loaded).unwrap();
+
+        let raw = std::fs::read_to_string(&path).unwrap();
+        let parsed: PersistedStates = serde_json::from_str(&raw).unwrap();
+        assert_eq!(parsed.version, 1);
+        assert_eq!(parsed.extensions.len(), 1);
+        assert_eq!(parsed.extensions["ext-a"].last_version.as_deref(), Some("1.2.3"));
+        assert!(parsed.extensions["ext-a"].enabled);
+    }
+
+    #[test]
+    fn resolve_state_file_path_prefers_data_dir() {
+        let dir = TempDir::new().unwrap();
+        let path = resolve_state_file_path_inner(None, dir.path());
+        assert_eq!(path, dir.path().join("extension-states.json"));
+    }
+
+    #[test]
+    fn resolve_state_file_path_honors_env_override() {
+        let dir = TempDir::new().unwrap();
+        let override_path = dir.path().join("custom-states.json");
+        let override_os = override_path.as_os_str().to_os_string();
+        let path = resolve_state_file_path_inner(Some(&override_os), Path::new("/ignored"));
+        assert_eq!(path, override_path);
     }
 
     #[test]

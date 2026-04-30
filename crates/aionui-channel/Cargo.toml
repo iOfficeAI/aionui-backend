@@ -17,6 +17,7 @@ aionui-api-types.workspace = true
 aionui-realtime.workspace = true
 aionui-conversation.workspace = true
 aionui-ai-agent.workspace = true
+aionui-extension.workspace = true
 axum.workspace = true
 tokio.workspace = true
 serde.workspace = true

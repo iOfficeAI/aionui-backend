@@ -186,6 +186,10 @@ mod tests {
 
     #[test]
     fn test_resolve_all_skips_disabled() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join("skills")).unwrap();
+        std::fs::write(dir.path().join("skills/my-skill.md"), "# skill").unwrap();
+
         let enabled = make_extension(
             "enabled-ext",
             true,
@@ -193,11 +197,15 @@ mod tests {
                 skills: vec![ExtSkill {
                     name: "my-skill".into(),
                     description: None,
-                    path: None,
+                    path: Some("skills/my-skill.md".into()),
                 }],
                 ..Default::default()
             }),
         );
+        let enabled = LoadedExtension {
+            directory: dir.path().to_string_lossy().into_owned(),
+            ..enabled
+        };
         let disabled = make_extension(
             "disabled-ext",
             false,
@@ -205,11 +213,15 @@ mod tests {
                 skills: vec![ExtSkill {
                     name: "hidden-skill".into(),
                     description: None,
-                    path: None,
+                    path: Some("skills/hidden-skill.md".into()),
                 }],
                 ..Default::default()
             }),
         );
+        let disabled = LoadedExtension {
+            directory: dir.path().to_string_lossy().into_owned(),
+            ..disabled
+        };
 
         let result = resolve_all_contributions(&[enabled, disabled]);
         assert_eq!(result.skills.len(), 1);

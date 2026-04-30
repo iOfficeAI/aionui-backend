@@ -53,6 +53,7 @@ pub struct AppConfig {
     pub host: String,
     pub port: u16,
     pub data_dir: String,
+    pub app_version: String,
     /// Run in local embedded mode (skip authentication, use system_default_user).
     pub local: bool,
 }
@@ -75,6 +76,7 @@ impl Default for AppConfig {
             host: aionui_common::constants::DEFAULT_HOST.to_string(),
             port: aionui_common::constants::DEFAULT_PORT,
             data_dir: "data".to_string(),
+            app_version: env!("CARGO_PKG_VERSION").to_string(),
             local: false,
         }
     }
@@ -96,6 +98,7 @@ pub struct AppServices {
     pub data_dir: String,
     /// When `true`, skip JWT authentication and use a fixed default user.
     pub local: bool,
+    pub app_version: String,
     /// Resolved skill paths. Shared with the `ConversationService` for
     /// snapshot resolution at create time.
     pub skill_paths: Arc<aionui_extension::SkillPaths>,
@@ -115,13 +118,34 @@ impl AppServices {
     /// Resolves JWT secret (env → db → generate), constructs all shared
     /// services, and persists a newly generated secret to the database.
     pub async fn from_database(database: Database) -> anyhow::Result<Self> {
-        Self::from_database_with_data_dir(database, "data".to_string(), false).await
+        Self::from_database_with_data_dir_and_app_version(
+            database,
+            "data".to_string(),
+            false,
+            env!("CARGO_PKG_VERSION").to_string(),
+        )
+        .await
     }
 
     pub async fn from_database_with_data_dir(
         database: Database,
         data_dir: String,
         local: bool,
+    ) -> anyhow::Result<Self> {
+        Self::from_database_with_data_dir_and_app_version(
+            database,
+            data_dir,
+            local,
+            env!("CARGO_PKG_VERSION").to_string(),
+        )
+        .await
+    }
+
+    pub async fn from_database_with_data_dir_and_app_version(
+        database: Database,
+        data_dir: String,
+        local: bool,
+        app_version: String,
     ) -> anyhow::Result<Self> {
         let user_repo: Arc<dyn IUserRepository> = Arc::new(SqliteUserRepository::new(database.pool().clone()));
 
@@ -213,6 +237,7 @@ impl AppServices {
             jwt_secret_raw: secret,
             data_dir,
             local,
+            app_version,
             skill_paths,
         })
     }
@@ -360,6 +385,7 @@ pub fn create_router_with_all_state(services: &AppServices, states: ModuleStates
         user_repo: services.user_repo.clone(),
         cookie_config: services.cookie_config.clone(),
         qr_token_store: services.qr_token_store.clone(),
+        local: services.local,
     };
 
     let auth_mw_state = AuthState {
@@ -519,6 +545,7 @@ mod tests {
         assert_eq!(config.host, "127.0.0.1");
         assert_eq!(config.port, 25808);
         assert_eq!(config.data_dir, "data");
+        assert_eq!(config.app_version, env!("CARGO_PKG_VERSION"));
     }
 
     #[test]
@@ -527,6 +554,7 @@ mod tests {
             host: "0.0.0.0".to_string(),
             port: 3000,
             data_dir: "data".to_string(),
+            app_version: "1.2.3".to_string(),
             local: false,
         };
         assert_eq!(config.socket_addr(), "0.0.0.0:3000");
@@ -538,6 +566,7 @@ mod tests {
             host: "127.0.0.1".to_string(),
             port: 25808,
             data_dir: "/tmp/aionui".to_string(),
+            app_version: "1.2.3".to_string(),
             local: false,
         };
         assert_eq!(
@@ -573,6 +602,23 @@ mod tests {
         let jwt_secret = system_user.unwrap().jwt_secret;
         assert!(jwt_secret.is_some());
         assert!(!jwt_secret.unwrap().is_empty());
+
+        services.database.close().await;
+    }
+
+    #[tokio::test]
+    async fn test_app_services_uses_supplied_app_version() {
+        let db = aionui_db::init_database_memory().await.unwrap();
+        let services = AppServices::from_database_with_data_dir_and_app_version(
+            db,
+            "data".to_string(),
+            false,
+            "9.9.9".to_string(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(services.app_version, "9.9.9");
 
         services.database.close().await;
     }

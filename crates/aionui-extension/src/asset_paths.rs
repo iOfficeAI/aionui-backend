@@ -43,6 +43,16 @@ pub(crate) fn normalized_asset_url_path(path: &str) -> Option<String> {
     )
 }
 
+/// Resolve an extension-scoped asset reference into a backend-served URL.
+pub(crate) fn resolve_extension_asset_url(extension_name: &str, raw: &str) -> Option<String> {
+    if is_remote_asset_url(raw) {
+        return Some(raw.to_owned());
+    }
+
+    let relative = normalized_asset_url_path(raw)?;
+    Some(format!("/api/extensions/{extension_name}/assets/{relative}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

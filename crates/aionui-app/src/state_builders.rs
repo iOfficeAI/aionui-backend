@@ -17,7 +17,8 @@ use aionui_db::{
 };
 use aionui_extension::{
     AssistantRuleDispatcher, ExtensionRegistry, ExtensionRouterState, ExtensionStateStore, ExternalPathsManager,
-    HubIndexManager, HubInstaller, HubRouterState, SkillRouterState,
+    HubIndexManager, HubInstaller, HubRouterState, SkillRouterState, resolve_install_target_dir_for_data_dir,
+    resolve_scan_paths_for_data_dir, resolve_state_file_path,
 };
 use aionui_file::{FileRouterState, FileService, FileWatchService, SnapshotService};
 use aionui_mcp::{
@@ -60,7 +61,8 @@ pub struct ChannelOrchestratorComponents {
 pub async fn build_module_states(services: &AppServices) -> (ModuleStates, ChannelOrchestratorComponents) {
     let (ext_state, hub_state, mut skill_state) = build_extension_states(services).await;
 
-    if let Err(error) = ext_state.registry.initialize().await {
+    let scan_paths = resolve_scan_paths_for_data_dir(std::path::Path::new(&services.data_dir));
+    if let Err(error) = ext_state.registry.initialize_with_scan_paths(scan_paths).await {
         tracing::warn!(error = %error, "extension registry initialize failed");
     }
 
@@ -75,7 +77,7 @@ pub async fn build_module_states(services: &AppServices) -> (ModuleStates, Chann
     let dispatcher: Arc<dyn AssistantRuleDispatcher> = assistant.service.clone();
     skill_state.assistant_dispatcher = Some(dispatcher);
 
-    let (channel_state, channel_components) = build_channel_state(services).await;
+    let (channel_state, channel_components) = build_channel_state(services, ext_state.registry.clone()).await;
 
     let backend_binary_path = Arc::new(
         std::env::current_exe()
@@ -247,7 +249,10 @@ pub fn build_mcp_state(services: &AppServices) -> McpRouterState {
 }
 
 /// Build the default `ChannelRouterState` and orchestrator components.
-pub async fn build_channel_state(services: &AppServices) -> (ChannelRouterState, ChannelOrchestratorComponents) {
+pub async fn build_channel_state(
+    services: &AppServices,
+    extension_registry: ExtensionRegistry,
+) -> (ChannelRouterState, ChannelOrchestratorComponents) {
     let pool = services.database.pool().clone();
     let repo: Arc<dyn aionui_db::IChannelRepository> = Arc::new(aionui_db::SqliteChannelRepository::new(pool));
     let encryption_key = derive_encryption_key(&services.jwt_secret_raw);
@@ -338,6 +343,7 @@ pub async fn build_channel_state(services: &AppServices) -> (ChannelRouterState,
         repo,
         plugin_factory: Arc::clone(&plugin_factory),
         settings_service: channel_settings,
+        extension_registry,
     };
 
     let components = ChannelOrchestratorComponents {
@@ -503,18 +509,12 @@ struct CronServiceTickRef(std::sync::Mutex<Option<Arc<aionui_cron::service::Cron
 pub async fn build_extension_states(
     services: &AppServices,
 ) -> (ExtensionRouterState, HubRouterState, SkillRouterState) {
-    let legacy_home_dir = dirs::home_dir().unwrap_or_else(std::env::temp_dir).join(".aionui");
-
     let skill_data_dir = std::path::PathBuf::from(&services.data_dir);
 
-    let state_store = ExtensionStateStore::new(legacy_home_dir.join("extension-states.json"));
-    let registry = ExtensionRegistry::new(
-        state_store,
-        services.event_bus.clone(),
-        env!("CARGO_PKG_VERSION").to_string(),
-    );
+    let state_store = ExtensionStateStore::new(resolve_state_file_path(&skill_data_dir));
+    let registry = ExtensionRegistry::new(state_store, services.event_bus.clone(), services.app_version.clone());
 
-    let hub_dir = legacy_home_dir.join("extensions");
+    let hub_dir = resolve_install_target_dir_for_data_dir(&skill_data_dir);
     let index_manager = HubIndexManager::new(hub_dir, registry.clone());
     let installer = HubInstaller::new(index_manager.clone(), registry.clone());
 
@@ -525,7 +525,7 @@ pub async fn build_extension_states(
         .unwrap_or_else(|| std::path::PathBuf::from("."));
     let skill_paths = aionui_extension::resolve_skill_paths(&app_resource_dir, &skill_data_dir);
 
-    let ext_paths_mgr = Arc::new(ExternalPathsManager::new(&legacy_home_dir).await);
+    let ext_paths_mgr = Arc::new(ExternalPathsManager::new(&skill_data_dir).await);
 
     let ext_state = ExtensionRouterState {
         registry: registry.clone(),
@@ -566,5 +566,60 @@ pub fn build_ws_state(services: &AppServices) -> WsHandlerState {
         router: Arc::new(NoopMessageRouter),
         token_validator,
         token_extractor,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use aionui_extension::{ExtensionSource, ScanPath};
+
+    #[tokio::test]
+    async fn build_extension_states_uses_host_app_version_for_engine_filtering() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let data_dir = tmp.path().join("data");
+        let ext_root = tmp.path().join("extensions");
+        let ext_dir = ext_root.join("demo-ext");
+
+        std::fs::create_dir_all(&ext_dir).unwrap();
+        std::fs::write(
+            ext_dir.join("aion-extension.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "name": "demo-ext",
+                "version": "1.0.0",
+                "engine": {
+                    "aionui": "^2.0.0"
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let db = aionui_db::init_database_memory().await.unwrap();
+        let services = AppServices::from_database_with_data_dir_and_app_version(
+            db,
+            data_dir.to_string_lossy().into_owned(),
+            false,
+            "2.1.0".to_string(),
+        )
+        .await
+        .unwrap();
+
+        let (ext_state, _hub_state, _skill_state) = build_extension_states(&services).await;
+        ext_state
+            .registry
+            .initialize_with_scan_paths(vec![ScanPath {
+                path: ext_root,
+                source: ExtensionSource::Local,
+            }])
+            .await
+            .unwrap();
+
+        let loaded = ext_state.registry.get_loaded_extensions().await;
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].name, "demo-ext");
+
+        services.database.close().await;
     }
 }
