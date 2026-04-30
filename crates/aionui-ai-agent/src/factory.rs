@@ -141,7 +141,6 @@ async fn build_agent(deps: Arc<AgentFactoryDeps>, options: BuildTaskOptions) -> 
                 },
                 config,
                 skill_mgr,
-                deps.backend_binary_path.clone(),
                 catalog_tx,
             )
             .await?;
