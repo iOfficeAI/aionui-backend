@@ -1043,6 +1043,14 @@ impl AcpAgentManager {
         self.state.read().await.session_id.clone()
     }
 
+    /// Restore a previously persisted session_id (e.g. from DB on task rebuild).
+    /// Enables resume path on next send_message instead of creating a fresh session.
+    pub async fn restore_session_id(&self, sid: String) {
+        let mut state = self.state.write().await;
+        state.session_id = Some(sid);
+        state.has_messages = true;
+    }
+
     /// Vendor label this session was spawned as (e.g. "claude"), if any.
     pub fn backend(&self) -> Option<&str> {
         self.metadata.backend.as_deref()
