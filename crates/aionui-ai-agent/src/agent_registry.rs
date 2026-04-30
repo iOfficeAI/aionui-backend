@@ -172,7 +172,8 @@ impl AgentRegistry {
     }
 
     /// Every enabled, installed row whose `agent_type` matches,
-    /// sorted by id. See [`Self::list_all`] for the filter semantics.
+    /// sorted by `sort_order`. See [`Self::list_all`] for the filter
+    /// semantics.
     pub async fn list_by_agent_type(&self, agent_type: AgentType) -> Vec<AgentMetadata> {
         let guard = self.by_id.read().await;
         let mut rows: Vec<AgentMetadata> = guard
@@ -180,7 +181,7 @@ impl AgentRegistry {
             .filter(|m| m.agent_type == agent_type && is_visible(m))
             .cloned()
             .collect();
-        rows.sort_by(|a, b| a.id.cmp(&b.id));
+        rows.sort_by(|a, b| a.sort_order.cmp(&b.sort_order).then_with(|| a.name.cmp(&b.name)));
         rows
     }
 
@@ -191,13 +192,16 @@ impl AgentRegistry {
     /// would otherwise render unusable vendor chips that fail the
     /// moment the user tries to spawn them.
     pub async fn list_all(&self) -> Vec<AgentMetadata> {
-        self.by_id
+        let mut rows: Vec<AgentMetadata> = self
+            .by_id
             .read()
             .await
             .values()
             .filter(|m| is_visible(m))
             .cloned()
-            .collect()
+            .collect();
+        rows.sort_by(|a, b| a.sort_order.cmp(&b.sort_order).then_with(|| a.name.cmp(&b.name)));
+        rows
     }
 
     /// Unfiltered snapshot — used by internal paths that legitimately
@@ -205,7 +209,9 @@ impl AgentRegistry {
     /// "manage agents" surface). Keep external API handlers on
     /// [`Self::list_all`].
     pub async fn list_all_including_hidden(&self) -> Vec<AgentMetadata> {
-        self.by_id.read().await.values().cloned().collect()
+        let mut rows: Vec<AgentMetadata> = self.by_id.read().await.values().cloned().collect();
+        rows.sort_by(|a, b| a.sort_order.cmp(&b.sort_order).then_with(|| a.name.cmp(&b.name)));
+        rows
     }
 }
 
@@ -259,6 +265,7 @@ fn decode_row(row: AgentMetadataRow) -> Option<AgentMetadata> {
         native_skills_dirs,
         behavior_policy,
         yolo_id: row.yolo_id,
+        sort_order: row.sort_order,
         handshake,
     };
 
@@ -456,6 +463,7 @@ mod tests {
         let count = |t: AgentType| all.iter().filter(|m| m.agent_type == t).count();
         assert_eq!(count(AgentType::Acp), 17);
         assert_eq!(count(AgentType::Nanobot), 1);
+        assert_eq!(count(AgentType::OpenclawGateway), 1);
         assert_eq!(count(AgentType::Aionrs), 1);
     }
 

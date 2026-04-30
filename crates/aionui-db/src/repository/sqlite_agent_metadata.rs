@@ -22,7 +22,7 @@ impl SqliteAgentMetadataRepository {
 impl IAgentMetadataRepository for SqliteAgentMetadataRepository {
     async fn list_all(&self) -> Result<Vec<AgentMetadataRow>, DbError> {
         let rows =
-            sqlx::query_as::<_, AgentMetadataRow>("SELECT * FROM agent_metadata ORDER BY created_at ASC, id ASC")
+            sqlx::query_as::<_, AgentMetadataRow>("SELECT * FROM agent_metadata ORDER BY sort_order ASC, name ASC")
                 .fetch_all(&self.pool)
                 .await?;
         Ok(rows)
@@ -54,7 +54,7 @@ impl IAgentMetadataRepository for SqliteAgentMetadataRepository {
         let row = sqlx::query_as::<_, AgentMetadataRow>(
             "SELECT * FROM agent_metadata \
              WHERE agent_source = 'builtin' AND backend = ? \
-             ORDER BY created_at ASC, id ASC LIMIT 1",
+             ORDER BY sort_order ASC, name ASC LIMIT 1",
         )
         .bind(backend)
         .fetch_optional(&self.pool)
@@ -73,8 +73,8 @@ impl IAgentMetadataRepository for SqliteAgentMetadataRepository {
                  behavior_policy, yolo_id, \
                  agent_capabilities, auth_methods, config_options, \
                  available_modes, available_models, available_commands, \
-                 created_at, updated_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
+                 sort_order, created_at, updated_at) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
              ON CONFLICT(id) DO UPDATE SET \
                 icon = excluded.icon, \
                 name = excluded.name, \
@@ -98,6 +98,7 @@ impl IAgentMetadataRepository for SqliteAgentMetadataRepository {
                 available_modes = excluded.available_modes, \
                 available_models = excluded.available_models, \
                 available_commands = excluded.available_commands, \
+                sort_order = excluded.sort_order, \
                 updated_at = excluded.updated_at",
         )
         .bind(params.id)
@@ -123,6 +124,7 @@ impl IAgentMetadataRepository for SqliteAgentMetadataRepository {
         .bind(params.available_modes)
         .bind(params.available_models)
         .bind(params.available_commands)
+        .bind(params.sort_order)
         .bind(now)
         .bind(now)
         .execute(&self.pool)
@@ -245,6 +247,7 @@ mod tests {
             available_modes: None,
             available_models: None,
             available_commands: None,
+            sort_order: 1100,
         }
     }
 
@@ -252,12 +255,18 @@ mod tests {
     async fn seed_rows_populated_after_migrations() {
         let (repo, _db) = setup().await;
         let rows = repo.list_all().await.unwrap();
-        // 17 ACP vendors + 3 internal agents = 20.
+        // 17 ACP vendors + 2 non-ACP builtins + 1 internal = 20.
         assert_eq!(rows.len(), 20);
         assert!(rows.iter().any(|r| r.name == "Claude" && r.agent_source == "builtin"));
         assert!(
             rows.iter()
                 .any(|r| r.name == "Aion CLI" && r.agent_source == "internal")
+        );
+        // Nanobot and OpenClaw are builtin (not internal).
+        assert!(rows.iter().any(|r| r.name == "Nanobot" && r.agent_source == "builtin"));
+        assert!(
+            rows.iter()
+                .any(|r| r.name == "OpenClaw Gateway" && r.agent_source == "builtin")
         );
     }
 

@@ -44,6 +44,10 @@ pub struct AgentMetadataRow {
     pub available_models: Option<String>,
     pub available_commands: Option<String>,
 
+    /// Display ordering key — smaller values appear first. See the
+    /// `007_agent_metadata_sort_order` migration for the range scheme.
+    pub sort_order: i64,
+
     pub created_at: TimestampMs,
     pub updated_at: TimestampMs,
 }
@@ -77,6 +81,7 @@ pub struct UpsertAgentMetadataParams<'a> {
     pub available_modes: Option<&'a str>,
     pub available_models: Option<&'a str>,
     pub available_commands: Option<&'a str>,
+    pub sort_order: i64,
 }
 
 /// Partial update applied after an ACP initialize/authenticate handshake.

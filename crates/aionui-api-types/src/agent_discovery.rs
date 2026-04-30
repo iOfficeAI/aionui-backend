@@ -147,6 +147,10 @@ pub struct AgentMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub yolo_id: Option<String>,
 
+    /// Display ordering key — smaller values appear first. The range
+    /// scheme is documented in `007_agent_metadata_sort_order.sql`.
+    pub sort_order: i64,
+
     #[serde(default)]
     pub handshake: AgentHandshake,
 }
@@ -193,6 +197,7 @@ mod tests {
             native_skills_dirs: None,
             behavior_policy: BehaviorPolicy::default(),
             yolo_id: None,
+            sort_order: 3100,
             handshake: AgentHandshake::default(),
         };
         let v = serde_json::to_value(&meta).unwrap();
@@ -214,6 +219,7 @@ mod tests {
             "agent_source": "custom",
             "enabled": true,
             "available": false,
+            "sort_order": 1100,
         });
         let meta: AgentMetadata = serde_json::from_value(payload).unwrap();
         assert_eq!(meta.agent_type, AgentType::Acp);

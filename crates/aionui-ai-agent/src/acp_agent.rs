@@ -1139,6 +1139,7 @@ mod tests {
             native_skills_dirs: None,
             behavior_policy: BehaviorPolicy::default(),
             yolo_id: yolo_id.map(ToOwned::to_owned),
+            sort_order: 3130,
             handshake: AgentHandshake::default(),
         }
     }

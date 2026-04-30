@@ -1,8 +1,8 @@
 -- Agent metadata catalog.
 --
 -- Replaces the static `AcpBackend` enum and becomes the single source of
--- truth for how each agent is spawned. Seeds the 17 ACP vendors plus the
--- three non-ACP built-ins (nanobot, openclaw-gateway, aionrs).
+-- truth for how each agent is spawned. Seeds the 17 ACP vendors, two
+-- non-ACP builtins (nanobot, openclaw-gateway), and one internal (aionrs).
 --
 -- Row semantics:
 --   command             Program-name form that the adapter resolves via `which()`
@@ -260,7 +260,7 @@ VALUES
      NULL, NULL, NULL, NULL, NULL, NULL,
      unixepoch('now','subsec')*1000, unixepoch('now','subsec')*1000);
 
--- ── Seed: non-ACP internals (agent_source='internal') ────────────────
+-- ── Seed: non-ACP builtins + internal ─────────────────────────────────
 
 INSERT OR IGNORE INTO agent_metadata
     (id, icon, name, name_i18n, description, description_i18n,
@@ -271,7 +271,7 @@ INSERT OR IGNORE INTO agent_metadata
      created_at, updated_at)
 VALUES
     ('fb1083a5', NULL, 'Nanobot', NULL, NULL, NULL,
-     NULL, 'nanobot', 'internal',
+     NULL, 'nanobot', 'builtin',
      '{"binary_name":"nanobot"}',
      1, 'nanobot', '["--experimental-acp"]', '[]',
      NULL,
@@ -281,7 +281,7 @@ VALUES
      unixepoch('now','subsec')*1000, unixepoch('now','subsec')*1000),
 
     ('f9f61666', NULL, 'OpenClaw Gateway', NULL, NULL, NULL,
-     NULL, 'openclaw-gateway', 'internal',
+     NULL, 'openclaw-gateway', 'builtin',
      '{"binary_name":"openclaw"}',
      1, 'openclaw', '[]', '[]',
      NULL,
