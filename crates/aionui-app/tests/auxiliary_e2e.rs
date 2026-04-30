@@ -81,7 +81,7 @@ async fn workspace_browse_requires_auth() {
         .uri("/api/conversations/test-conv/workspace?path=/src")
         .body(axum::body::Body::empty())
         .unwrap();
-    let resp = app.oneshot(req).await.unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
 }
 
@@ -99,7 +99,7 @@ async fn workspace_browse_no_active_task() {
     let conv_id = create_conversation_with_workspace(&mut app, &token, &csrf, "Test Conv", "acp", &ws).await;
 
     let req = get_with_token(&format!("/api/conversations/{conv_id}/workspace?path=/src"), &token);
-    let resp = app.oneshot(req).await.unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
     // Workspace comes from DB; no active agent required.
     assert_eq!(resp.status(), StatusCode::OK);
     let json = body_json(resp).await;
@@ -128,6 +128,57 @@ async fn workspace_browse_empty_path() {
     let resp = app.oneshot(req).await.unwrap();
     // Empty path should return 400 (validated before agent lookup)
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn workspace_browse_treats_symlinked_skill_dir_as_directory() {
+    let (mut app, services) = build_app().await;
+    let (token, csrf) = setup_and_login(&mut app, &services, "user1", "pass123").await;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = tmp.path().join("workspace");
+    let builtin = tmp.path().join("builtin-skills/auto-inject/aionui-skills");
+    std::fs::create_dir_all(workspace.join(".claude/skills")).unwrap();
+    std::fs::create_dir_all(&builtin).unwrap();
+    std::fs::write(builtin.join("SKILL.md"), b"---\ndescription: test\n---\nbody").unwrap();
+    std::os::unix::fs::symlink(&builtin, workspace.join(".claude/skills/aionui-skills")).unwrap();
+
+    let ws = workspace.to_string_lossy().into_owned();
+    let conv_id = create_conversation_with_workspace(&mut app, &token, &csrf, "Test Conv", "acp", &ws).await;
+
+    let req = get_with_token(
+        &format!("/api/conversations/{conv_id}/workspace?path=/.claude/skills"),
+        &token,
+    );
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let json = body_json(resp).await;
+    let entries = json["data"].as_array().unwrap();
+    assert_eq!(entries.len(), 1);
+    assert!(
+        entries
+            .iter()
+            .any(|entry| entry["name"] == "aionui-skills" && entry["type"] == "directory"),
+        "symlinked skill dir should stay visible as directory: {entries:?}"
+    );
+
+    let req = get_with_token(
+        &format!("/api/conversations/{conv_id}/workspace?path=/.claude/skills/aionui-skills"),
+        &token,
+    );
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let json = body_json(resp).await;
+    let entries = json["data"].as_array().unwrap();
+    assert!(
+        entries
+            .iter()
+            .any(|entry| entry["name"] == "SKILL.md" && entry["type"] == "file"),
+        "symlinked skill dir should remain browsable: {entries:?}"
+    );
 }
 
 // ── 9.2 Side question ───────────────────────────────────────────

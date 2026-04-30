@@ -153,10 +153,7 @@ async fn read_file_rejects_outside_sandbox_without_workspace() {
     fs::write(&file, "secret").unwrap();
 
     let svc = make_service(sandbox.path());
-    let err = svc
-        .read_file(file.to_str().unwrap(), None)
-        .await
-        .unwrap_err();
+    let err = svc.read_file(file.to_str().unwrap(), None).await.unwrap_err();
 
     assert!(matches!(err, aionui_common::AppError::Forbidden(_)));
     assert_eq!(err.error_code(), "PATH_OUTSIDE_SANDBOX");
@@ -168,12 +165,22 @@ async fn read_file_returns_none_for_missing_file_in_sandbox() {
     let missing = sandbox.path().join("missing.txt");
 
     let svc = make_service(sandbox.path());
-    let result = svc
-        .read_file(missing.to_str().unwrap(), None)
-        .await
-        .unwrap();
+    let result = svc.read_file(missing.to_str().unwrap(), None).await.unwrap();
 
     assert!(result.is_none());
+}
+
+#[tokio::test]
+async fn read_file_rejects_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("aionui-skills");
+    fs::create_dir(&folder).unwrap();
+
+    let svc = make_service(dir.path());
+    let err = svc.read_file(folder.to_str().unwrap(), None).await.unwrap_err();
+
+    assert!(matches!(err, aionui_common::AppError::BadRequest(_)));
+    assert!(err.to_string().contains("is a directory"));
 }
 
 #[tokio::test]
@@ -220,10 +227,7 @@ async fn read_file_buffer_normal() {
     fs::write(&file, &data).unwrap();
 
     let svc = make_service(dir.path());
-    let result = svc
-        .read_file_buffer(file.to_str().unwrap(), None)
-        .await
-        .unwrap();
+    let result = svc.read_file_buffer(file.to_str().unwrap(), None).await.unwrap();
 
     assert_eq!(result.as_deref(), Some(data.as_slice()));
 }
@@ -234,10 +238,7 @@ async fn read_file_buffer_nonexistent_returns_none() {
     let fake = dir.path().join("missing.bin");
 
     let svc = make_service(dir.path());
-    let result = svc
-        .read_file_buffer(fake.to_str().unwrap(), None)
-        .await
-        .unwrap();
+    let result = svc.read_file_buffer(fake.to_str().unwrap(), None).await.unwrap();
 
     assert!(result.is_none());
 }
@@ -428,10 +429,7 @@ async fn read_buffer_after_write_roundtrip() {
 
     svc.write_file(file.to_str().unwrap(), &data, ws).await.unwrap();
 
-    let read_result = svc
-        .read_file_buffer(file.to_str().unwrap(), None)
-        .await
-        .unwrap();
+    let read_result = svc.read_file_buffer(file.to_str().unwrap(), None).await.unwrap();
     assert_eq!(read_result.as_deref(), Some(data.as_slice()));
 }
 

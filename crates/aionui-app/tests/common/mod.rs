@@ -73,14 +73,11 @@ pub async fn build_app_with_noop_opener() -> (axum::Router, AppServices) {
     (router, services)
 }
 
-pub async fn build_app_with_file_roots(
-    allowed_roots: Vec<std::path::PathBuf>,
-) -> (axum::Router, AppServices) {
+pub async fn build_app_with_file_roots(allowed_roots: Vec<std::path::PathBuf>) -> (axum::Router, AppServices) {
     let db = aionui_db::init_database_memory().await.unwrap();
     let services = AppServices::from_database(db).await.unwrap();
     let (mut states, _) = build_module_states(&services).await;
-    states.file.file_service =
-        std::sync::Arc::new(FileService::new(services.event_bus.clone(), allowed_roots));
+    states.file.file_service = std::sync::Arc::new(FileService::new(services.event_bus.clone(), allowed_roots));
     let router = create_router_with_states(&services, states);
     (router, services)
 }

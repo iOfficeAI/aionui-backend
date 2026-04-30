@@ -4,6 +4,7 @@ use axum::Router;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{Extension, Json, Path, Query, State};
 use axum::routing::{get, post};
+use std::path::Component;
 
 use crate::acp_agent::AcpAgentManager;
 use crate::agent_manager::AgentManagerHandle;
@@ -92,28 +93,42 @@ async fn browse_workspace(
         return Err(AppError::BadRequest("Conversation has no workspace assigned".into()));
     }
 
+    let relative_path = query.path.trim_start_matches('/');
+    let relative_path_obj = std::path::Path::new(relative_path);
+    if relative_path_obj
+        .components()
+        .any(|component| matches!(component, Component::ParentDir))
+    {
+        return Err(AppError::BadRequest(
+            "Path traversal outside workspace is not allowed".into(),
+        ));
+    }
+
     // Resolve the browsed path relative to the workspace root
     let base = std::path::Path::new(&workspace);
-    let browse_path = base.join(query.path.trim_start_matches('/'));
+    let browse_path = if relative_path.is_empty() {
+        base.to_path_buf()
+    } else {
+        base.join(relative_path_obj)
+    };
 
-    // Security: ensure the resolved path is within the workspace
+    // Security: reject direct traversal outside the workspace root, but allow
+    // symlinked directories mounted inside the workspace (e.g. native skill
+    // dirs that point at the builtin skills corpus under data-dir).
     let canonical_base = base
         .canonicalize()
         .map_err(|e| AppError::Internal(format!("Failed to resolve workspace path: {e}")))?;
     let canonical_browse = browse_path
         .canonicalize()
         .map_err(|_| AppError::NotFound("Directory not found".into()))?;
-    if !canonical_browse.starts_with(&canonical_base) {
+    if !browse_path.starts_with(base) && !canonical_browse.starts_with(&canonical_base) {
         return Err(AppError::BadRequest(
             "Path traversal outside workspace is not allowed".into(),
         ));
     }
 
     // Check depth limit
-    let relative = canonical_browse
-        .strip_prefix(&canonical_base)
-        .unwrap_or(&canonical_browse);
-    let depth = relative.components().count();
+    let depth = relative_path_obj.components().count();
     if depth > MAX_DIR_DEPTH {
         return Err(AppError::BadRequest(format!(
             "Directory depth exceeds maximum of {MAX_DIR_DEPTH}"
@@ -136,12 +151,12 @@ async fn browse_workspace(
             continue;
         }
 
-        let file_type = entry
-            .file_type()
+        let entry_path = entry.path();
+        let metadata = tokio::fs::metadata(&entry_path)
             .await
-            .map_err(|e| AppError::Internal(format!("Failed to read file type: {e}")))?;
+            .map_err(|e| AppError::Internal(format!("Failed to read entry metadata: {e}")))?;
 
-        let entry_type = if file_type.is_dir() { "directory" } else { "file" };
+        let entry_type = if metadata.is_dir() { "directory" } else { "file" };
 
         entries.push(WorkspaceEntry {
             name,

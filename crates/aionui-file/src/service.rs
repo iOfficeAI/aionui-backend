@@ -13,9 +13,7 @@ use aionui_api_types::WebSocketMessage;
 use aionui_common::AppError;
 use aionui_realtime::EventBroadcaster;
 
-use crate::path_safety::{
-    has_traversal, validate_path, validate_path_for_write, validate_path_with_extra_root,
-};
+use crate::path_safety::{has_traversal, validate_path, validate_path_for_write, validate_path_with_extra_root};
 use crate::types::{
     ContentUpdateEvent, ContentUpdateOperation, CopyResult, DirOrFile, FileMetadata, WorkspaceFlatFile, ZipEntry,
 };
@@ -230,12 +228,20 @@ fn list_workspace_files_sync(root: &Path) -> Result<Vec<WorkspaceFlatFile>, AppE
             }
         };
 
-        // Skip directories — only include files
-        if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(true) {
+        let path = entry.path();
+        let metadata = match std::fs::metadata(path) {
+            Ok(metadata) => metadata,
+            Err(e) => {
+                warn!(path = %path.display(), error = %e, "skipping unreadable workspace entry");
+                continue;
+            }
+        };
+
+        // Skip real directories and symlinks that resolve to directories.
+        if metadata.is_dir() {
             continue;
         }
 
-        let path = entry.path();
         let name = path
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
@@ -280,6 +286,13 @@ fn validate_file_for_read(path: &Path) -> Result<Option<()>, AppError> {
             "file '{}' exceeds 256 MB limit ({} bytes)",
             path.display(),
             metadata.len()
+        )));
+    }
+
+    if metadata.is_dir() {
+        return Err(AppError::BadRequest(format!(
+            "path '{}' is a directory; expected a file",
+            path.display()
         )));
     }
 
@@ -578,11 +591,7 @@ impl crate::traits::IFileService for FileService {
         Ok(files)
     }
 
-    async fn get_file_metadata(
-        &self,
-        path: &str,
-        extra_root: Option<&Path>,
-    ) -> Result<FileMetadata, AppError> {
+    async fn get_file_metadata(&self, path: &str, extra_root: Option<&Path>) -> Result<FileMetadata, AppError> {
         let roots = self.allowed_roots_refs();
         let canonical = validate_path_with_extra_root(path, &roots, extra_root)?;
 
@@ -595,11 +604,7 @@ impl crate::traits::IFileService for FileService {
 
     // -- File read/write (task 7.4) --
 
-    async fn read_file(
-        &self,
-        path: &str,
-        extra_root: Option<&Path>,
-    ) -> Result<Option<String>, AppError> {
+    async fn read_file(&self, path: &str, extra_root: Option<&Path>) -> Result<Option<String>, AppError> {
         if has_traversal(path) {
             return Err(AppError::BadRequest(format!(
                 "path '{}' contains invalid traversal patterns",
@@ -612,14 +617,11 @@ impl crate::traits::IFileService for FileService {
             Ok(c) => c,
             Err(err) => {
                 if matches!(err, AppError::BadRequest(_))
-                    && validate_path_for_write(path, &self.allowed_roots_with_extra(extra_root))
-                        .is_ok()
+                    && validate_path_for_write(path, &self.allowed_roots_with_extra(extra_root)).is_ok()
                 {
                     return Ok(None);
                 }
-                if matches!(err, AppError::BadRequest(_))
-                    && self.path_uses_allowed_root(Path::new(path), extra_root)
-                {
+                if matches!(err, AppError::BadRequest(_)) && self.path_uses_allowed_root(Path::new(path), extra_root) {
                     return Ok(None);
                 }
                 return Err(err);
@@ -631,11 +633,7 @@ impl crate::traits::IFileService for FileService {
             .map_err(|e| AppError::Internal(format!("read file task failed: {e}")))?
     }
 
-    async fn read_file_buffer(
-        &self,
-        path: &str,
-        extra_root: Option<&Path>,
-    ) -> Result<Option<Vec<u8>>, AppError> {
+    async fn read_file_buffer(&self, path: &str, extra_root: Option<&Path>) -> Result<Option<Vec<u8>>, AppError> {
         if has_traversal(path) {
             return Err(AppError::BadRequest(format!(
                 "path '{}' contains invalid traversal patterns",
@@ -648,14 +646,11 @@ impl crate::traits::IFileService for FileService {
             Ok(c) => c,
             Err(err) => {
                 if matches!(err, AppError::BadRequest(_))
-                    && validate_path_for_write(path, &self.allowed_roots_with_extra(extra_root))
-                        .is_ok()
+                    && validate_path_for_write(path, &self.allowed_roots_with_extra(extra_root)).is_ok()
                 {
                     return Ok(None);
                 }
-                if matches!(err, AppError::BadRequest(_))
-                    && self.path_uses_allowed_root(Path::new(path), extra_root)
-                {
+                if matches!(err, AppError::BadRequest(_)) && self.path_uses_allowed_root(Path::new(path), extra_root) {
                     return Ok(None);
                 }
                 return Err(err);
@@ -872,11 +867,7 @@ impl crate::traits::IFileService for FileService {
         .map_err(|e| AppError::Internal(format!("create temp file task failed: {e}")))?
     }
 
-    async fn get_image_base64(
-        &self,
-        path: &str,
-        extra_root: Option<&Path>,
-    ) -> Result<String, AppError> {
+    async fn get_image_base64(&self, path: &str, extra_root: Option<&Path>) -> Result<String, AppError> {
         if has_traversal(path) {
             return Err(AppError::BadRequest(format!(
                 "path '{}' contains invalid traversal patterns",
@@ -1123,6 +1114,26 @@ mod tests {
         assert_eq!(main_file.relative_path, "src/main.rs");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn list_workspace_files_sync_skips_directory_symlinks() {
+        let dir = tempfile::tempdir().unwrap();
+        let skill_dir = dir.path().join("builtin-skills/auto-inject/aionui-skills");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(skill_dir.join("SKILL.md"), "---\ndescription: test\n---\nbody").unwrap();
+
+        let workspace = dir.path().join("workspace/.claude/skills");
+        fs::create_dir_all(&workspace).unwrap();
+        std::os::unix::fs::symlink(&skill_dir, workspace.join("aionui-skills")).unwrap();
+
+        let files = list_workspace_files_sync(&dir.path().join("workspace")).unwrap();
+
+        assert!(
+            files.iter().all(|f| f.name != "aionui-skills"),
+            "directory symlink should not be surfaced as a file: {files:?}"
+        );
+    }
+
     #[test]
     fn get_file_metadata_sync_text_file() {
         let dir = tempfile::tempdir().unwrap();
@@ -1218,6 +1229,17 @@ mod tests {
 
         let result = read_file_sync(&fake).unwrap();
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn read_file_sync_rejects_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("subdir");
+        fs::create_dir(&folder).unwrap();
+
+        let err = read_file_sync(&folder).unwrap_err();
+        assert!(matches!(err, AppError::BadRequest(_)));
+        assert!(err.to_string().contains("is a directory"));
     }
 
     // -- validate_file_for_read tests --
