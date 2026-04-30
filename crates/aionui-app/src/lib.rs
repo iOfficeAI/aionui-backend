@@ -301,6 +301,12 @@ pub async fn create_router(services: &AppServices) -> Router {
         }
     });
 
+    // Restore team MCP sessions so agents have tools available immediately
+    let team_service = states.team.service.clone();
+    tokio::spawn(async move {
+        team_service.restore_all_sessions().await;
+    });
+
     create_router_with_states(services, states)
 }
 

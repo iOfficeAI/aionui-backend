@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tracing::debug;
 
+use crate::types::AgentStreamChunk;
+
 /// Events emitted by an Agent during a message processing turn.
 ///
 /// These are parsed from Agent stdout (line-delimited JSON) and forwarded
@@ -553,6 +555,57 @@ pub fn session_notification_to_events(notif: &SessionNotification) -> Vec<AgentS
     events
 }
 
+/// Convert an SDK [`SessionNotification`] into zero or more [`AgentStreamChunk`]s.
+///
+/// Parallel projection of [`session_notification_to_events`] onto the smaller
+/// [`AgentStreamChunk`] enum consumed by `subscribe_stream()`. Only message/
+/// thought/tool-call updates are projected — handshake-like updates
+/// (mode/model/config/session-info/usage/plan) are skipped since they are not
+/// useful for the wake-timeout watchdog or crash detector that subscribe to
+/// this stream.
+pub fn session_notification_to_chunks(notif: &SessionNotification) -> Vec<AgentStreamChunk> {
+    let mut chunks = Vec::new();
+
+    match &notif.update {
+        SessionUpdate::AgentMessageChunk(chunk) => {
+            if let ContentBlock::Text(text) = &chunk.content {
+                chunks.push(AgentStreamChunk::Text {
+                    text: text.text.clone(),
+                });
+            }
+        }
+        SessionUpdate::AgentThoughtChunk(chunk) => {
+            if let ContentBlock::Text(text) = &chunk.content {
+                chunks.push(AgentStreamChunk::Thought {
+                    content: text.text.clone(),
+                });
+            }
+        }
+        SessionUpdate::ToolCall(tc) => {
+            chunks.push(AgentStreamChunk::ToolUse {
+                tool_name: tc.title.clone(),
+                input: tc.raw_input.clone().unwrap_or(Value::Null),
+            });
+        }
+        SessionUpdate::ToolCallUpdate(tcu) => {
+            // Only emit ToolUse on updates that carry a fresh raw_input —
+            // status-only updates (e.g. Completed with no new input) would
+            // duplicate earlier emits without adding signal for the
+            // watchdog.
+            if let Some(raw_input) = tcu.fields.raw_input.clone() {
+                let tool_name = tcu.fields.title.clone().unwrap_or_default();
+                chunks.push(AgentStreamChunk::ToolUse {
+                    tool_name,
+                    input: raw_input,
+                });
+            }
+        }
+        _ => {}
+    }
+
+    chunks
+}
+
 fn map_sdk_tool_status(sdk: &SdkToolCallStatus) -> AcpToolCallStatus {
     match sdk {
         SdkToolCallStatus::Pending => AcpToolCallStatus::Pending,
@@ -667,9 +720,9 @@ fn map_tool_call_locations(locations: &[SdkToolCallLocation]) -> Option<Vec<AcpT
 mod tests {
     use super::*;
     use agent_client_protocol::schema::{
-        PermissionOption, PermissionOptionKind as SdkPermissionOptionKind, SessionNotification, SessionUpdate,
-        ToolCall as SdkToolCall, ToolCallStatus as SdkToolCallStatus, ToolCallUpdate as SdkToolCallUpdate,
-        ToolCallUpdateFields, ToolKind as SdkToolKind,
+        ContentBlock, ContentChunk, PermissionOption, PermissionOptionKind as SdkPermissionOptionKind,
+        SessionNotification, SessionUpdate, ToolCall as SdkToolCall, ToolCallStatus as SdkToolCallStatus,
+        ToolCallUpdate as SdkToolCallUpdate, ToolCallUpdateFields, ToolKind as SdkToolKind,
     };
     use serde_json::json;
 
@@ -905,5 +958,106 @@ mod tests {
         let json = serde_json::to_value(&event).unwrap();
         assert_eq!(json["type"], "thinking");
         assert_eq!(json["data"]["duration"], 1500);
+    }
+
+    // ── session_notification_to_chunks projection tests ──────────────────────
+
+    #[test]
+    fn agent_message_chunk_maps_to_text_chunk() {
+        let notif = SessionNotification::new(
+            "sess-1",
+            SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::from("hello world"))),
+        );
+        let chunks = session_notification_to_chunks(&notif);
+        assert_eq!(chunks.len(), 1);
+        match &chunks[0] {
+            AgentStreamChunk::Text { text } => assert_eq!(text, "hello world"),
+            other => panic!("expected Text, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn agent_thought_chunk_maps_to_thought_chunk() {
+        let notif = SessionNotification::new(
+            "sess-1",
+            SessionUpdate::AgentThoughtChunk(ContentChunk::new(ContentBlock::from("thinking..."))),
+        );
+        let chunks = session_notification_to_chunks(&notif);
+        assert_eq!(chunks.len(), 1);
+        match &chunks[0] {
+            AgentStreamChunk::Thought { content } => assert_eq!(content, "thinking..."),
+            other => panic!("expected Thought, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tool_call_maps_to_tool_use_chunk() {
+        let notif = SessionNotification::new(
+            "sess-1",
+            SessionUpdate::ToolCall(
+                SdkToolCall::new("tool-1", "read_file")
+                    .kind(SdkToolKind::Read)
+                    .status(SdkToolCallStatus::Pending)
+                    .raw_input(json!({ "path": "/tmp/a.txt" })),
+            ),
+        );
+        let chunks = session_notification_to_chunks(&notif);
+        assert_eq!(chunks.len(), 1);
+        match &chunks[0] {
+            AgentStreamChunk::ToolUse { tool_name, input } => {
+                assert_eq!(tool_name, "read_file");
+                assert_eq!(input["path"], "/tmp/a.txt");
+            }
+            other => panic!("expected ToolUse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tool_call_update_without_raw_input_is_skipped() {
+        // Status-only updates should not produce a ToolUse chunk — they'd
+        // duplicate earlier emits without adding signal for the watchdog.
+        let notif = SessionNotification::new(
+            "sess-1",
+            SessionUpdate::ToolCallUpdate(SdkToolCallUpdate::new(
+                "tool-1",
+                ToolCallUpdateFields::new().status(SdkToolCallStatus::Completed),
+            )),
+        );
+        let chunks = session_notification_to_chunks(&notif);
+        assert!(chunks.is_empty());
+    }
+
+    #[test]
+    fn tool_call_update_with_raw_input_emits_tool_use() {
+        let notif = SessionNotification::new(
+            "sess-1",
+            SessionUpdate::ToolCallUpdate(SdkToolCallUpdate::new(
+                "tool-1",
+                ToolCallUpdateFields::new()
+                    .title("search")
+                    .raw_input(json!({ "q": "foo" })),
+            )),
+        );
+        let chunks = session_notification_to_chunks(&notif);
+        assert_eq!(chunks.len(), 1);
+        match &chunks[0] {
+            AgentStreamChunk::ToolUse { tool_name, input } => {
+                assert_eq!(tool_name, "search");
+                assert_eq!(input["q"], "foo");
+            }
+            other => panic!("expected ToolUse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn plan_update_does_not_produce_chunks() {
+        // Handshake-like updates (plan/mode/model/config/session-info/usage)
+        // should not surface on the subscribe_stream channel.
+        let notif = SessionNotification::new(
+            "sess-1",
+            SessionUpdate::CurrentModeUpdate(agent_client_protocol::schema::CurrentModeUpdate::new("normal")),
+        );
+        let chunks = session_notification_to_chunks(&notif);
+        assert!(chunks.is_empty());
     }
 }

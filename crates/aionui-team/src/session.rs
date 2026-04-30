@@ -1,8 +1,8 @@
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use aionui_ai_agent::{IWorkerTaskManager, SendMessageData};
-use aionui_common::generate_id;
+use aionui_common::{AgentKillReason, generate_id};
 use aionui_db::ITeamRepository;
 use aionui_realtime::EventBroadcaster;
 use tracing::{info, warn};
@@ -11,7 +11,8 @@ use crate::error::TeamError;
 use crate::mailbox::Mailbox;
 use crate::mcp::{TeamMcpServer, TeamMcpStdioConfig, TeamMcpStdioServerSpec};
 use crate::prompts::{build_lead_prompt, build_teammate_prompt, build_wake_payload};
-use crate::scheduler::TeammateManager;
+use crate::scheduler::{TeammateManager, normalize_name};
+use crate::service::TeamSessionService;
 use crate::task_board::TaskBoard;
 use crate::types::{MailboxMessageType, Team, TeamAgent, TeammateRole, TeammateStatus};
 
@@ -25,6 +26,26 @@ pub struct WakeInput {
     /// `false` when the mailbox is empty — caller should skip wake and
     /// leave the agent idle.
     pub should_send: bool,
+    /// Unread mailbox rows consumed to build `first_message`. Returned so the
+    /// caller can mirror non-user senders into the target agent's conversation
+    /// as left bubbles (matches AionUi `TeammateManager.wake()`). Drained
+    /// already — no additional `read_unread` call is safe.
+    pub unread: Vec<crate::types::MailboxMessage>,
+    /// Role of the wake target. Leader wakes do **not** mirror mailbox rows
+    /// into the conversation — the content is already embedded in the role
+    /// prompt sent to the leader directly. Only teammate wakes get the left
+    /// bubble treatment.
+    pub agent_role: TeammateRole,
+}
+
+/// Input for [`TeamSession::spawn_agent`]. Populated by the lead agent when
+/// it calls the `spawn_agent` MCP tool.
+#[derive(Debug, Clone)]
+pub struct SpawnAgentRequest {
+    pub name: String,
+    pub agent_type: Option<String>,
+    pub custom_agent_id: Option<String>,
+    pub model: Option<String>,
 }
 
 pub struct TeamSession {
@@ -35,6 +56,18 @@ pub struct TeamSession {
     mcp_server: TeamMcpServer,
     backend_binary_path: Arc<PathBuf>,
     task_manager: Arc<dyn IWorkerTaskManager>,
+    /// Owner user_id for this team — needed when spawn_agent creates a
+    /// new conversation (conversations are scoped per user).
+    user_id: String,
+    /// Weak upward ref so `spawn_agent` can reach the DB-facing orchestration
+    /// in `TeamSessionService` (conversation creation, persisted agent list)
+    /// without creating a strong cycle with the session map that owns `self`.
+    /// `None` in unit tests that don't exercise the DB path.
+    service: Weak<TeamSessionService>,
+    /// Used by the wake path to mirror non-user mailbox rows into the target
+    /// agent's conversation as left bubbles (AionUi parity: see
+    /// `TeammateManager.wake()`'s `teammate_message` emission).
+    broadcaster: Arc<dyn EventBroadcaster>,
 }
 
 impl TeamSession {
@@ -44,6 +77,8 @@ impl TeamSession {
         broadcaster: Arc<dyn EventBroadcaster>,
         backend_binary_path: Arc<PathBuf>,
         task_manager: Arc<dyn IWorkerTaskManager>,
+        user_id: String,
+        service: Weak<TeamSessionService>,
     ) -> Result<Self, TeamError> {
         let mailbox = Arc::new(Mailbox::new(repo.clone()));
         let task_board = Arc::new(TaskBoard::new(repo));
@@ -53,11 +88,18 @@ impl TeamSession {
             &team.agents,
             mailbox.clone(),
             task_board.clone(),
-            broadcaster,
+            broadcaster.clone(),
         ));
 
         let auth_token = aionui_common::generate_id();
-        let mcp_server = TeamMcpServer::start(auth_token, scheduler.clone()).await?;
+        let mcp_server = TeamMcpServer::start(
+            auth_token,
+            scheduler.clone(),
+            team.id.clone(),
+            broadcaster.clone(),
+            service.clone(),
+        )
+        .await?;
 
         info!(
             team_id = %team.id,
@@ -73,6 +115,9 @@ impl TeamSession {
             mcp_server,
             backend_binary_path,
             task_manager,
+            user_id,
+            service,
+            broadcaster,
         })
     }
 
@@ -117,15 +162,25 @@ impl TeamSession {
 
         let wake_body = build_wake_payload(&agent, &tasks, &unread);
 
-        // TODO(D8): swap `needs_role_prompt` to match `{Pending, Error}` once
-        // `TeammateStatus::Pending` is reintroduced (it currently serde-aliases
-        // into `Idle`, so we use the `TeamAgent::status` sentinel — `None` means
-        // the scheduler never transitioned the slot, i.e. cold start).
-        let needs_role_prompt = matches!(agent.status, None | Some(TeammateStatus::Error));
+        let needs_role_prompt = self.scheduler.take_needs_role_prompt(slot_id).await;
 
         let first_message = if needs_role_prompt {
             let role_prompt = match agent.role {
-                TeammateRole::Lead => build_lead_prompt(&self.team.name, &self.scheduler.list_agents().await),
+                TeammateRole::Lead => {
+                    // TODO(W5+): source display names from the dynamic backend registry
+                    // once it exposes a public listing. For now, hard-code the
+                    // team-capable whitelist from `guide::capability::TEAM_CAPABLE_BACKENDS`.
+                    let available_agent_types: Vec<(String, String)> = vec![
+                        ("claude".into(), "Claude".into()),
+                        ("codex".into(), "Codex".into()),
+                        ("gemini".into(), "Gemini".into()),
+                    ];
+                    build_lead_prompt(
+                        &self.team.name,
+                        &self.scheduler.list_agents().await,
+                        &available_agent_types,
+                    )
+                }
                 TeammateRole::Teammate => build_teammate_prompt(&agent, &self.team.name),
             };
             format!("{role_prompt}\n\n{wake_body}")
@@ -139,6 +194,8 @@ impl TeamSession {
             conversation_id: agent.conversation_id,
             first_message,
             should_send,
+            unread,
+            agent_role: agent.role,
         }))
     }
 
@@ -243,7 +300,7 @@ impl TeamSession {
     /// Compute the wake payload and forward it to the task manager. All
     /// error paths downgrade to `warn!` — the mailbox write has already
     /// succeeded and is the source of truth.
-    async fn try_wake(&self, slot_id: &str, files: Option<Vec<String>>) {
+    pub(crate) async fn try_wake(&self, slot_id: &str, files: Option<Vec<String>>) {
         let input = match self.compute_wake_input(slot_id).await {
             Ok(Some(input)) => input,
             Ok(None) => {
@@ -268,6 +325,8 @@ impl TeamSession {
         if !input.should_send {
             return;
         }
+
+        self.mirror_unread_to_conversation(&input).await;
 
         let Some(handle) = self.task_manager.get_task(&input.conversation_id) else {
             warn!(
@@ -297,16 +356,263 @@ impl TeamSession {
         }
     }
 
+    /// Mirror each non-user mailbox row into the target agent's conversation
+    /// as a left bubble so the UI shows "who said what" when the user opens
+    /// a teammate's chat panel.
+    ///
+    /// Skipped for:
+    /// - Leader wakes: the mailbox content is embedded inside the role prompt
+    ///   sent to the leader directly; duplicating it as a bubble would clutter
+    ///   the leader's own thread (AionUi parity: `agent.role !== 'leader'`).
+    /// - `from_agent_id == "user"`: user-originated messages are already
+    ///   written to the conversation by the standard user-send path, and we
+    ///   must not double-write them.
+    /// - Test/unit contexts where `TeamSession::service` is a dangling
+    ///   `Weak` (no conversation service reachable).
+    ///
+    /// Failures per-message are logged and swallowed — the mailbox rows are
+    /// already marked read, and we never let a conversation-write failure
+    /// block the wake itself.
+    pub(crate) async fn mirror_unread_to_conversation(&self, input: &WakeInput) {
+        if matches!(input.agent_role, TeammateRole::Lead) {
+            return;
+        }
+        if input.unread.is_empty() {
+            return;
+        }
+        let Some(service) = self.service.upgrade() else {
+            return;
+        };
+        let conversation_service = service.conversation_service_ref();
+        let agents = self.scheduler.list_agents().await;
+        let total = input.unread.len();
+
+        for msg in &input.unread {
+            if msg.from_agent_id == "user" {
+                continue;
+            }
+            let sender = agents.iter().find(|a| a.slot_id == msg.from_agent_id);
+            let sender_name = sender.map(|a| a.name.clone()).unwrap_or_else(|| msg.from_agent_id.clone());
+            let sender_backend = sender.map(|a| a.backend.clone());
+            let sender_conv_id = sender.map(|a| a.conversation_id.clone());
+            let display_content = if total > 1 {
+                format!("[{sender_name}] {}", msg.content)
+            } else {
+                msg.content.clone()
+            };
+            let msg_id = generate_id();
+            let content_json = serde_json::json!({
+                "content": display_content,
+                "teammate_message": true,
+                "sender_name": sender_name,
+                "sender_backend": sender_backend,
+                "sender_conversation_id": sender_conv_id,
+            })
+            .to_string();
+            let row = aionui_db::models::MessageRow {
+                id: msg_id.clone(),
+                conversation_id: input.conversation_id.clone(),
+                msg_id: Some(msg_id.clone()),
+                r#type: "text".into(),
+                content: content_json,
+                position: Some("left".into()),
+                status: Some("finish".into()),
+                hidden: false,
+                created_at: aionui_common::now_ms(),
+            };
+            if let Err(err) = conversation_service.insert_raw_message(&row).await {
+                warn!(
+                    team_id = %self.team.id,
+                    conversation_id = %input.conversation_id,
+                    from = %msg.from_agent_id,
+                    error = %err,
+                    "mirror_unread_to_conversation: insert_raw_message failed (mailbox already read)"
+                );
+                continue;
+            }
+
+            let ws_payload = aionui_api_types::TeammateMessagePayload {
+                conversation_id: input.conversation_id.clone(),
+                content: display_content,
+                from_slot_id: msg.from_agent_id.clone(),
+                from_name: sender_name,
+            };
+            let event = aionui_api_types::WebSocketMessage::new(
+                "team.teammate.message",
+                serde_json::to_value(ws_payload).expect("serialize teammate message payload"),
+            );
+            self.broadcaster.broadcast(event);
+        }
+    }
+
     pub async fn add_agent(&self, agent: &TeamAgent) {
         self.scheduler.add_agent(agent).await;
     }
 
     pub async fn remove_agent(&self, slot_id: &str) -> Result<(), TeamError> {
-        self.scheduler.remove_agent(slot_id).await
+        let conversation_id = self.scheduler.remove_agent(slot_id).await?;
+        if let Some(conv_id) = conversation_id
+            && let Err(e) = self.task_manager.kill(&conv_id, Some(AgentKillReason::TeamDeleted))
+        {
+            warn!(
+                team_id = %self.team.id,
+                slot_id,
+                conversation_id = %conv_id,
+                error = %e,
+                "remove_agent: task_manager.kill failed (non-fatal)"
+            );
+        }
+        Ok(())
     }
 
     pub async fn rename_agent(&self, slot_id: &str, new_name: &str) -> Result<(), TeamError> {
         self.scheduler.rename_agent(slot_id, new_name).await
+    }
+
+    /// Spawn a new teammate at the Lead's request (backing of `team_spawn_agent`).
+    ///
+    /// Validation chain mirrors the phase1 interface contract:
+    /// 1. Caller must exist and carry `TeammateRole::Lead`.
+    /// 2. `name` is normalized and must not collide with any live agent.
+    /// 3. `agent_type` (falling back to the caller's backend when unset) must
+    ///    be in the spawn whitelist.
+    ///
+    /// On success, a new conversation is created, the agent slot is persisted
+    /// into the team row, the MCP stdio config is written into the conversation
+    /// extras, the agent task is launched, and a welcome message is dropped
+    /// into the new mailbox so the first wake reaches the spawned teammate
+    /// with its role prompt.
+    pub async fn spawn_agent(&self, caller_slot_id: &str, req: SpawnAgentRequest) -> Result<TeamAgent, TeamError> {
+        // Step 1: caller must be a Lead. MCP dispatch already gates by role,
+        // but this method is exposed on TeamSession so every entry point
+        // (including future direct service callers) re-checks.
+        let caller = self.scheduler.get_agent(caller_slot_id).await?;
+        if caller.role != TeammateRole::Lead {
+            return Err(TeamError::LeaderOnly("spawn_agent".into()));
+        }
+
+        // Step 2: normalize + uniqueness check against live scheduler state.
+        let requested_name = req.name.trim().to_owned();
+        if requested_name.is_empty() {
+            return Err(TeamError::InvalidRequest("spawn_agent.name must not be empty".into()));
+        }
+        let normalized = normalize_name(&requested_name);
+        if normalized.is_empty() {
+            return Err(TeamError::InvalidRequest(
+                "spawn_agent.name is empty after normalization".into(),
+            ));
+        }
+        let existing = self.scheduler.list_agents().await;
+        if existing.iter().any(|a| normalize_name(&a.name) == normalized) {
+            return Err(TeamError::DuplicateAgentName(requested_name));
+        }
+
+        // Step 3: backend whitelist. Empty/missing agent_type inherits from
+        // the caller. The whitelist is intentionally narrow to match the
+        // phase1 spawn scope — widen only via a contract change.
+        const SPAWN_BACKEND_WHITELIST: &[&str] = &["claude", "codex"];
+        let backend = req
+            .agent_type
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(caller.backend.as_str())
+            .to_owned();
+        if !SPAWN_BACKEND_WHITELIST.contains(&backend.as_str()) {
+            return Err(TeamError::BackendNotAllowed(backend));
+        }
+
+        // Step 4: DB side-effects (new conversation + persisted agent slot)
+        // happen inside TeamSessionService where the conversation service and
+        // the per-team add_agent lock live. Unit tests with no service wire
+        // cannot reach this path.
+        let service = self
+            .service
+            .upgrade()
+            .ok_or_else(|| TeamError::InvalidRequest("spawn_agent requires a live TeamSessionService".into()))?;
+
+        let model = req.model.as_deref().unwrap_or(&caller.model).to_owned();
+        let new_agent = service
+            .persist_spawned_agent(
+                &self.team.id,
+                &self.user_id,
+                requested_name,
+                backend,
+                model,
+                req.custom_agent_id.clone(),
+            )
+            .await?;
+
+        // Step 5: attach to the in-memory scheduler so wake-from-lead finds
+        // the new slot immediately.
+        self.scheduler.add_agent(&new_agent).await;
+
+        // Step 6: push the team MCP stdio config into the new conversation's
+        // extras, then kill + rebuild the agent task so the freshly spawned
+        // process boots with the MCP handshake pointing at our session.
+        if let Err(err) = self.attach_spawned_agent_process(&service, &new_agent).await {
+            warn!(
+                team_id = %self.team.id,
+                slot_id = %new_agent.slot_id,
+                error = %err,
+                "failed to attach spawned agent process; agent is persisted but not yet running"
+            );
+        }
+
+        // Step 7: welcome message. The mailbox write is the source of truth —
+        // if the wake never fires (e.g. warmup raced), the next caller-triggered
+        // wake will still drain this entry.
+        self.mailbox
+            .write(
+                &self.team.id,
+                &new_agent.slot_id,
+                caller_slot_id,
+                MailboxMessageType::Message,
+                "You have been spawned as a teammate. Read your mailbox and wait for instructions.",
+                None,
+            )
+            .await?;
+
+        Ok(new_agent)
+    }
+
+    /// Persist the team MCP stdio config into the spawned agent's conversation
+    /// row, then kill any pre-existing task and warm up the new one.
+    async fn attach_spawned_agent_process(
+        &self,
+        service: &TeamSessionService,
+        agent: &TeamAgent,
+    ) -> Result<(), TeamError> {
+        let cfg = self.mcp_stdio_config(&agent.slot_id);
+        let patch = serde_json::json!({ "team_mcp_stdio_config": cfg });
+
+        service
+            .conversation_service_ref()
+            .update_extra(&agent.conversation_id, patch)
+            .await
+            .map_err(|e| {
+                TeamError::InvalidRequest(format!(
+                    "failed to persist team_mcp_stdio_config for {}: {e}",
+                    agent.slot_id
+                ))
+            })?;
+
+        let _ = self
+            .task_manager
+            .kill(&agent.conversation_id, Some(AgentKillReason::TeamMcpRebuild));
+
+        service
+            .conversation_service_ref()
+            .warmup(&self.user_id, &agent.conversation_id, &self.task_manager)
+            .await
+            .map_err(|e| {
+                TeamError::InvalidRequest(format!(
+                    "failed to warm up spawned agent {}: {e}",
+                    agent.conversation_id
+                ))
+            })?;
+
+        Ok(())
     }
 
     pub fn stop(&self) {
@@ -340,6 +646,29 @@ mod tests {
     struct NullBroadcaster;
     impl EventBroadcaster for NullBroadcaster {
         fn broadcast(&self, _msg: WebSocketMessage<serde_json::Value>) {}
+    }
+
+    /// RecordingBroadcaster used by the D29d-1 ratification test below to
+    /// assert that `team.agent.spawned` is *not* emitted on failed spawns.
+    #[derive(Default)]
+    struct RecordingBroadcaster {
+        events: Mutex<Vec<WebSocketMessage<serde_json::Value>>>,
+    }
+
+    impl RecordingBroadcaster {
+        fn new() -> Self {
+            Self::default()
+        }
+
+        fn names(&self) -> Vec<String> {
+            self.events.lock().unwrap().iter().map(|e| e.name.clone()).collect()
+        }
+    }
+
+    impl EventBroadcaster for RecordingBroadcaster {
+        fn broadcast(&self, msg: WebSocketMessage<serde_json::Value>) {
+            self.events.lock().unwrap().push(msg);
+        }
     }
 
     fn backend_path() -> Arc<PathBuf> {
@@ -432,17 +761,35 @@ mod tests {
     /// and panic to surface drift early.
     struct StubTaskManager {
         tasks: Mutex<std::collections::HashMap<String, AgentManagerHandle>>,
+        kill_calls: Mutex<Vec<(String, Option<AgentKillReason>)>>,
+        kill_error: Option<String>,
     }
 
     impl StubTaskManager {
         fn new() -> Self {
             Self {
                 tasks: Mutex::new(std::collections::HashMap::new()),
+                kill_calls: Mutex::new(Vec::new()),
+                kill_error: None,
+            }
+        }
+
+        /// Build a stub whose `kill` always fails with `AppError::NotFound` so
+        /// tests can exercise the non-fatal kill branch in `remove_agent`.
+        fn with_kill_error(msg: &str) -> Self {
+            Self {
+                tasks: Mutex::new(std::collections::HashMap::new()),
+                kill_calls: Mutex::new(Vec::new()),
+                kill_error: Some(msg.to_owned()),
             }
         }
 
         fn insert(&self, conv_id: &str, handle: AgentManagerHandle) {
             self.tasks.lock().unwrap().insert(conv_id.into(), handle);
+        }
+
+        fn kill_calls(&self) -> Vec<(String, Option<AgentKillReason>)> {
+            self.kill_calls.lock().unwrap().clone()
         }
     }
 
@@ -457,7 +804,14 @@ mod tests {
         ) -> Result<AgentManagerHandle, AppError> {
             panic!("get_or_build_task should not be called in D7b tests")
         }
-        fn kill(&self, _conversation_id: &str, _reason: Option<AgentKillReason>) -> Result<(), AppError> {
+        fn kill(&self, conversation_id: &str, reason: Option<AgentKillReason>) -> Result<(), AppError> {
+            self.kill_calls
+                .lock()
+                .unwrap()
+                .push((conversation_id.to_owned(), reason));
+            if let Some(msg) = &self.kill_error {
+                return Err(AppError::NotFound(msg.clone()));
+            }
             Ok(())
         }
         fn clear(&self) {}
@@ -530,9 +884,17 @@ mod tests {
     async fn start_session() -> TeamSession {
         let repo: Arc<dyn ITeamRepository> = Arc::new(MockTeamRepo::new());
         let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(NullBroadcaster);
-        TeamSession::start(make_team(), repo, broadcaster, backend_path(), empty_task_manager())
-            .await
-            .unwrap()
+        TeamSession::start(
+            make_team(),
+            repo,
+            broadcaster,
+            backend_path(),
+            empty_task_manager(),
+            "user-test".into(),
+            Weak::<TeamSessionService>::new(),
+        )
+        .await
+        .unwrap()
     }
 
     #[tokio::test]
@@ -569,9 +931,17 @@ mod tests {
         let repo = Arc::new(MockTeamRepo::new());
         let repo_dyn: Arc<dyn ITeamRepository> = repo.clone();
         let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(NullBroadcaster);
-        let session = TeamSession::start(make_team(), repo_dyn, broadcaster, backend_path(), empty_task_manager())
-            .await
-            .unwrap();
+        let session = TeamSession::start(
+            make_team(),
+            repo_dyn,
+            broadcaster,
+            backend_path(),
+            empty_task_manager(),
+            "user-test".into(),
+            Weak::<TeamSessionService>::new(),
+        )
+        .await
+        .unwrap();
         session.send_message("Hello team", None).await.unwrap();
 
         let state = repo.state.lock().unwrap();
@@ -587,9 +957,17 @@ mod tests {
         let repo = Arc::new(MockTeamRepo::new());
         let repo_dyn: Arc<dyn ITeamRepository> = repo.clone();
         let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(NullBroadcaster);
-        let session = TeamSession::start(make_team(), repo_dyn, broadcaster, backend_path(), empty_task_manager())
-            .await
-            .unwrap();
+        let session = TeamSession::start(
+            make_team(),
+            repo_dyn,
+            broadcaster,
+            backend_path(),
+            empty_task_manager(),
+            "user-test".into(),
+            Weak::<TeamSessionService>::new(),
+        )
+        .await
+        .unwrap();
         session
             .send_message_to_agent("worker-1", "Do this task", None)
             .await
@@ -638,6 +1016,66 @@ mod tests {
         session.stop();
     }
 
+    // -- W5-D30d-1: remove_agent kills the agent process ---------------------
+
+    #[tokio::test]
+    async fn remove_agent_calls_task_manager_kill() {
+        let repo: Arc<dyn ITeamRepository> = Arc::new(MockTeamRepo::new());
+        let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(NullBroadcaster);
+        let stub = Arc::new(StubTaskManager::new());
+        let stub_dyn: Arc<dyn IWorkerTaskManager> = stub.clone();
+        let session = TeamSession::start(
+            make_team(),
+            repo,
+            broadcaster,
+            backend_path(),
+            stub_dyn,
+            "user-test".into(),
+            Weak::<TeamSessionService>::new(),
+        )
+        .await
+        .unwrap();
+
+        session.remove_agent("worker-1").await.unwrap();
+
+        let calls = stub.kill_calls();
+        assert_eq!(calls.len(), 1, "kill invoked exactly once");
+        assert_eq!(calls[0].0, "c2", "kill targets removed slot's conversation_id");
+        assert!(
+            matches!(calls[0].1, Some(AgentKillReason::TeamDeleted)),
+            "kill reason carries AgentKillReason"
+        );
+        session.stop();
+    }
+
+    #[tokio::test]
+    async fn remove_agent_is_non_fatal_when_kill_fails() {
+        let repo: Arc<dyn ITeamRepository> = Arc::new(MockTeamRepo::new());
+        let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(NullBroadcaster);
+        let stub = Arc::new(StubTaskManager::with_kill_error("task not found"));
+        let stub_dyn: Arc<dyn IWorkerTaskManager> = stub.clone();
+        let session = TeamSession::start(
+            make_team(),
+            repo,
+            broadcaster,
+            backend_path(),
+            stub_dyn,
+            "user-test".into(),
+            Weak::<TeamSessionService>::new(),
+        )
+        .await
+        .unwrap();
+
+        // kill returns Err(AppError::NotFound) but remove_agent must still
+        // succeed — NotFound means the worker already died, which is OK.
+        session.remove_agent("worker-1").await.unwrap();
+
+        let agents = session.scheduler.list_agents().await;
+        assert_eq!(agents.len(), 1, "slot still removed even after kill failure");
+        assert_eq!(stub.kill_calls().len(), 1);
+        session.stop();
+    }
+
     #[tokio::test]
     async fn rename_agent_in_session() {
         let session = start_session().await;
@@ -654,6 +1092,28 @@ mod tests {
         let session = start_session().await;
         let result = session.rename_agent("nonexistent", "X").await;
         assert!(result.is_err());
+        session.stop();
+    }
+
+    // -- spawn_agent helpers + guard tests -----------------------------------
+
+    fn sample_spawn_req() -> SpawnAgentRequest {
+        SpawnAgentRequest {
+            name: "Helper".into(),
+            agent_type: None,
+            custom_agent_id: None,
+            model: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn spawn_agent_rejects_unknown_caller() {
+        let session = start_session().await;
+        let result = session.spawn_agent("nonexistent", sample_spawn_req()).await;
+        assert!(
+            matches!(&result, Err(TeamError::AgentNotFound(_))),
+            "unknown caller must surface AgentNotFound, got {result:?}"
+        );
         session.stop();
     }
 
@@ -676,7 +1136,7 @@ mod tests {
         assert_eq!(input.conversation_id, "c1");
         assert!(input.should_send);
         assert!(
-            input.first_message.contains("Lead Agent of team"),
+            input.first_message.contains("You are the Team Leader"),
             "expected lead role prompt, got: {}",
             input.first_message
         );
@@ -747,6 +1207,88 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn compute_wake_input_returns_unread_rows_and_role_for_teammate() {
+        let session = start_session().await;
+        session
+            .mailbox
+            .write("t1", "worker-1", "lead-1", MailboxMessageType::Message, "from lead", None)
+            .await
+            .unwrap();
+        session
+            .mailbox
+            .write("t1", "worker-1", "user", MailboxMessageType::Message, "from user", None)
+            .await
+            .unwrap();
+
+        let input = session
+            .compute_wake_input("worker-1")
+            .await
+            .unwrap()
+            .expect("WakeInput");
+
+        assert_eq!(input.unread.len(), 2);
+        assert!(matches!(input.agent_role, TeammateRole::Teammate));
+        assert!(input.unread.iter().any(|m| m.from_agent_id == "lead-1"));
+        assert!(input.unread.iter().any(|m| m.from_agent_id == "user"));
+        session.stop();
+    }
+
+    #[tokio::test]
+    async fn compute_wake_input_returns_lead_role() {
+        let session = start_session().await;
+        session
+            .mailbox
+            .write("t1", "lead-1", "user", MailboxMessageType::Message, "hi lead", None)
+            .await
+            .unwrap();
+
+        let input = session.compute_wake_input("lead-1").await.unwrap().expect("WakeInput");
+
+        assert!(matches!(input.agent_role, TeammateRole::Lead));
+        assert_eq!(input.unread.len(), 1);
+        session.stop();
+    }
+
+    #[tokio::test]
+    async fn mirror_unread_to_conversation_is_noop_for_leader() {
+        let session = start_session().await;
+        session
+            .mailbox
+            .write("t1", "lead-1", "worker-1", MailboxMessageType::Message, "lead-gets-this", None)
+            .await
+            .unwrap();
+
+        let input = session.compute_wake_input("lead-1").await.unwrap().expect("WakeInput");
+
+        // The service `Weak` is dangling in unit tests, but the leader short-circuit
+        // must hit before any upgrade — this call must not panic.
+        session.mirror_unread_to_conversation(&input).await;
+        session.stop();
+    }
+
+    #[tokio::test]
+    async fn mirror_unread_to_conversation_skips_when_service_weak_is_dangling() {
+        let session = start_session().await;
+        session
+            .mailbox
+            .write("t1", "worker-1", "lead-1", MailboxMessageType::Message, "do it", None)
+            .await
+            .unwrap();
+
+        let input = session
+            .compute_wake_input("worker-1")
+            .await
+            .unwrap()
+            .expect("WakeInput");
+
+        // In unit tests, `service` is a dangling Weak — the mirror helper must
+        // skip gracefully (no panic, no broadcast), leaving the wake path to
+        // still forward `first_message` to the agent.
+        session.mirror_unread_to_conversation(&input).await;
+        session.stop();
+    }
+
+    #[tokio::test]
     async fn on_agent_finish_marks_idle_and_returns_lead_when_all_settled() {
         let session = start_session().await;
 
@@ -795,9 +1337,17 @@ mod tests {
         let repo = Arc::new(MockTeamRepo::new());
         let repo_dyn: Arc<dyn ITeamRepository> = repo.clone();
         let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(NullBroadcaster);
-        let session = TeamSession::start(make_team(), repo_dyn, broadcaster, backend_path(), task_manager)
-            .await
-            .unwrap();
+        let session = TeamSession::start(
+            make_team(),
+            repo_dyn,
+            broadcaster,
+            backend_path(),
+            task_manager,
+            "user-test".into(),
+            Weak::<TeamSessionService>::new(),
+        )
+        .await
+        .unwrap();
         (session, repo)
     }
 
@@ -882,6 +1432,220 @@ mod tests {
         session.send_message("", None).await.unwrap();
 
         assert_eq!(sent.lock().unwrap().len(), 1);
+        session.stop();
+    }
+
+    async fn start_session_with_lead_backend(backend: &str) -> TeamSession {
+        let mut team = make_team();
+        team.agents[0].backend = backend.to_string();
+        let repo: Arc<dyn ITeamRepository> = Arc::new(MockTeamRepo::new());
+        let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(NullBroadcaster);
+        TeamSession::start(
+            team,
+            repo,
+            broadcaster,
+            backend_path(),
+            empty_task_manager(),
+            "user-test".into(),
+            Weak::<TeamSessionService>::new(),
+        )
+        .await
+        .unwrap()
+    }
+
+    async fn start_session_with_recorder(backend: &str) -> (TeamSession, Arc<RecordingBroadcaster>) {
+        let mut team = make_team();
+        team.agents[0].backend = backend.to_string();
+        let repo: Arc<dyn ITeamRepository> = Arc::new(MockTeamRepo::new());
+        let recorder = Arc::new(RecordingBroadcaster::new());
+        let broadcaster: Arc<dyn EventBroadcaster> = recorder.clone();
+        let session = TeamSession::start(
+            team,
+            repo,
+            broadcaster,
+            backend_path(),
+            empty_task_manager(),
+            "user-test".into(),
+            Weak::<TeamSessionService>::new(),
+        )
+        .await
+        .unwrap();
+        (session, recorder)
+    }
+
+    fn spawn_req(agent_type: Option<&str>) -> SpawnAgentRequest {
+        SpawnAgentRequest {
+            name: "Helper".into(),
+            agent_type: agent_type.map(str::to_owned),
+            custom_agent_id: None,
+            model: None,
+        }
+    }
+
+    /// After all guards pass, the unit-test sessions have a null `service`
+    /// Weak — so the spawn path must bail with InvalidRequest instead of
+    /// panicking. This is the "validation passed, DB step not reachable"
+    /// shape exercised below.
+    fn assert_reached_db_step(err: TeamError) {
+        match err {
+            TeamError::InvalidRequest(msg) if msg.contains("live TeamSessionService") => {}
+            other => panic!("expected service-unavailable error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn spawn_agent_accepts_claude_backend() {
+        let session = start_session_with_lead_backend("claude").await;
+        let err = session
+            .spawn_agent("lead-1", spawn_req(Some("claude")))
+            .await
+            .expect_err("unit test has no service wire; spawn stops at DB step");
+        assert_reached_db_step(err);
+        session.stop();
+    }
+
+    #[tokio::test]
+    async fn spawn_agent_accepts_codex_backend() {
+        let session = start_session_with_lead_backend("claude").await;
+        let err = session
+            .spawn_agent("lead-1", spawn_req(Some("codex")))
+            .await
+            .expect_err("unit test has no service wire; spawn stops at DB step");
+        assert_reached_db_step(err);
+        session.stop();
+    }
+
+    #[tokio::test]
+    async fn spawn_agent_rejects_unknown_backend() {
+        let session = start_session_with_lead_backend("claude").await;
+        let err = session
+            .spawn_agent("lead-1", spawn_req(Some("unknown_backend")))
+            .await
+            .expect_err("unknown backend must be rejected");
+        assert!(
+            matches!(&err, TeamError::BackendNotAllowed(b) if b == "unknown_backend"),
+            "expected BackendNotAllowed(\"unknown_backend\"), got {err:?}"
+        );
+        session.stop();
+    }
+
+    #[tokio::test]
+    async fn spawn_agent_inherits_caller_backend_when_unspecified() {
+        // No agent_type on the request -> must fall back to the caller's
+        // backend ("claude"), which passes the whitelist.
+        let session = start_session_with_lead_backend("claude").await;
+        let err = session
+            .spawn_agent("lead-1", spawn_req(None))
+            .await
+            .expect_err("unit test has no service wire; spawn stops at DB step");
+        assert_reached_db_step(err);
+        session.stop();
+    }
+
+    #[tokio::test]
+    async fn spawn_agent_rejects_when_inherited_backend_not_whitelisted() {
+        // Caller's backend is "acp" (not whitelisted). With no explicit
+        // agent_type, the inherited backend must be rejected.
+        let session = start_session_with_lead_backend("acp").await;
+        let err = session
+            .spawn_agent("lead-1", spawn_req(None))
+            .await
+            .expect_err("non-whitelisted inherited backend must be rejected");
+        assert!(
+            matches!(&err, TeamError::BackendNotAllowed(b) if b == "acp"),
+            "expected BackendNotAllowed(\"acp\"), got {err:?}"
+        );
+        session.stop();
+    }
+
+    #[tokio::test]
+    async fn spawn_agent_rejects_non_lead_caller() {
+        let session = start_session_with_lead_backend("claude").await;
+        let err = session
+            .spawn_agent("worker-1", spawn_req(Some("claude")))
+            .await
+            .expect_err("non-lead caller must be rejected");
+        assert!(
+            matches!(&err, TeamError::LeaderOnly(what) if what == "spawn_agent"),
+            "expected LeaderOnly(\"spawn_agent\"), got {err:?}"
+        );
+        session.stop();
+    }
+
+    #[tokio::test]
+    async fn spawn_agent_rejects_duplicate_name() {
+        let session = start_session_with_lead_backend("claude").await;
+        // The seeded team already has an agent named "Worker". Case + trim
+        // normalization means "  worker " collides.
+        let mut req = spawn_req(Some("claude"));
+        req.name = "  worker ".into();
+        let err = session
+            .spawn_agent("lead-1", req)
+            .await
+            .expect_err("duplicate name must be rejected");
+        assert!(
+            matches!(&err, TeamError::DuplicateAgentName(_)),
+            "expected DuplicateAgentName, got {err:?}"
+        );
+        session.stop();
+    }
+
+    #[tokio::test]
+    async fn spawn_agent_rejects_empty_name() {
+        let session = start_session_with_lead_backend("claude").await;
+        let mut req = spawn_req(Some("claude"));
+        req.name = "   ".into();
+        let err = session
+            .spawn_agent("lead-1", req)
+            .await
+            .expect_err("empty name must be rejected");
+        assert!(
+            matches!(&err, TeamError::InvalidRequest(msg) if msg.contains("empty")),
+            "expected InvalidRequest about empty name, got {err:?}"
+        );
+        session.stop();
+    }
+
+    // -- W5-D29d-1 ratification: spawn emit-order contract ------------------
+    //
+    // The success-path emission of `team.agent.spawned` is exercised by
+    // `scheduler::tests::add_agent_broadcasts_spawned_event` — `spawn_agent`
+    // reaches that emission via `scheduler.add_agent(&new_agent)` after
+    // `persist_spawned_agent` returns. This ratification test locks the
+    // *ordering* half of the contract: the event must NOT be published
+    // before the DB step succeeds. If a future refactor hoists broadcast
+    // above the persist/add_agent boundary (so the frontend sees a spawned
+    // agent that never persisted), this test regresses.
+
+    #[tokio::test]
+    async fn spawn_agent_does_not_emit_before_db_step() {
+        let (session, recorder) = start_session_with_recorder("claude").await;
+        let err = session
+            .spawn_agent("lead-1", spawn_req(Some("claude")))
+            .await
+            .expect_err("unit test has no service wire; spawn stops at DB step");
+        assert_reached_db_step(err);
+        assert!(
+            !recorder.names().iter().any(|n| n == "team.agent.spawned"),
+            "team.agent.spawned must not be emitted when spawn fails before add_agent; saw {:?}",
+            recorder.names()
+        );
+        session.stop();
+    }
+
+    #[tokio::test]
+    async fn spawn_agent_does_not_emit_on_guard_rejection() {
+        let (session, recorder) = start_session_with_recorder("claude").await;
+        let err = session
+            .spawn_agent("worker-1", spawn_req(Some("claude")))
+            .await
+            .expect_err("non-lead caller must be rejected");
+        assert!(matches!(&err, TeamError::LeaderOnly(what) if what == "spawn_agent"));
+        assert!(
+            !recorder.names().iter().any(|n| n == "team.agent.spawned"),
+            "team.agent.spawned must not be emitted when guard rejects the caller; saw {:?}",
+            recorder.names()
+        );
         session.stop();
     }
 }

@@ -29,6 +29,7 @@ pub mod remote_agent_service;
 pub mod skill_manager;
 pub mod stream_event;
 pub mod task_manager;
+mod team_guide_prompt;
 pub mod types;
 
 pub use acp_agent::AcpAgentManager;

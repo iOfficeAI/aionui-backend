@@ -377,13 +377,13 @@ pub fn build_team_state(
     if let Some(cron_service) = cron_service {
         conv_service.set_cron_service(Some(cron_service));
     }
-    let service = Arc::new(TeamSessionService::new(
+    let service = TeamSessionService::new(
         team_repo,
         conv_service,
         services.event_bus.clone(),
         services.worker_task_manager.clone(),
         backend_binary_path,
-    ));
+    );
     TeamRouterState { service }
 }
 

@@ -14,11 +14,20 @@ pub enum TeamError {
     #[error("Invalid request: {0}")]
     InvalidRequest(String),
 
+    #[error("Leader-only action: {0}")]
+    LeaderOnly(String),
+
     #[error("Session not found: {0}")]
     SessionNotFound(String),
 
     #[error("Blocked task not found: {0}")]
     BlockedTaskNotFound(String),
+
+    #[error("Backend not allowed: {0}")]
+    BackendNotAllowed(String),
+
+    #[error("Agent name already taken: {0}")]
+    DuplicateAgentName(String),
 
     #[error("{0}")]
     Database(#[from] aionui_db::DbError),
@@ -34,8 +43,11 @@ impl From<TeamError> for AppError {
             TeamError::AgentNotFound(msg) => AppError::NotFound(msg),
             TeamError::TaskNotFound(msg) => AppError::NotFound(msg),
             TeamError::InvalidRequest(msg) => AppError::BadRequest(msg),
+            TeamError::LeaderOnly(msg) => AppError::Forbidden(msg),
             TeamError::SessionNotFound(msg) => AppError::NotFound(msg),
             TeamError::BlockedTaskNotFound(msg) => AppError::BadRequest(msg),
+            TeamError::BackendNotAllowed(msg) => AppError::BadRequest(msg),
+            TeamError::DuplicateAgentName(msg) => AppError::BadRequest(format!("Agent name already taken: {msg}")),
             TeamError::Database(db_err) => AppError::from(db_err),
             TeamError::Json(e) => AppError::Internal(format!("JSON error: {e}")),
         }
@@ -71,6 +83,12 @@ mod tests {
     }
 
     #[test]
+    fn leader_only_maps_to_forbidden() {
+        let err: AppError = TeamError::LeaderOnly("spawn_agent".into()).into();
+        assert!(matches!(err, AppError::Forbidden(msg) if msg == "spawn_agent"));
+    }
+
+    #[test]
     fn session_not_found_maps_to_not_found() {
         let err: AppError = TeamError::SessionNotFound("t1".into()).into();
         assert!(matches!(err, AppError::NotFound(_)));
@@ -80,6 +98,18 @@ mod tests {
     fn blocked_task_not_found_maps_to_bad_request() {
         let err: AppError = TeamError::BlockedTaskNotFound("tk-x".into()).into();
         assert!(matches!(err, AppError::BadRequest(_)));
+    }
+
+    #[test]
+    fn backend_not_allowed_maps_to_bad_request() {
+        let err: AppError = TeamError::BackendNotAllowed("gemini".into()).into();
+        assert!(matches!(err, AppError::BadRequest(msg) if msg == "gemini"));
+    }
+
+    #[test]
+    fn duplicate_agent_name_maps_to_bad_request() {
+        let err: AppError = TeamError::DuplicateAgentName("alice".into()).into();
+        assert!(matches!(err, AppError::BadRequest(msg) if msg.contains("alice")));
     }
 
     #[test]

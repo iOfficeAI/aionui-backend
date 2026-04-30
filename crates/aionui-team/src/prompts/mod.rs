@@ -4,63 +4,43 @@ pub mod team_guide;
 pub use team_guide::{TEAM_GUIDE_PROMPT_TEMPLATE, build_team_guide_prompt};
 pub mod teammate;
 
-use crate::types::{MailboxMessage, MailboxMessageType, TaskStatus, TeamAgent, TeamTask, TeammateRole};
+use std::collections::HashMap;
 
-pub fn build_lead_prompt(team_name: &str, members: &[TeamAgent]) -> String {
-    let mut prompt = String::with_capacity(2048);
+use crate::prompts::lead::{AvailableAgentType, LeadPromptParams};
+use crate::types::{MailboxMessage, MailboxMessageType, TaskStatus, TeamAgent, TeamTask};
 
-    prompt.push_str(&format!(
-        "You are the Lead Agent of team \"{team_name}\". \
-         Your role is to decompose user requests into tasks, \
-         delegate work to teammates, and track progress to completion.\n\n"
-    ));
+/// Build the leader system prompt.
+///
+/// Delegates to [`lead::build_lead_prompt`], which mirrors the AionUi
+/// `leadPrompt.ts` template verbatim. A one-line `Team: "<name>"` header
+/// is prepended so the leader knows which team it belongs to (AionUi
+/// surfaces this through other channels, but the backend session has no
+/// other place to inject it).
+///
+/// `available_agent_types` carries `(backend_id, display_name)` pairs that
+/// feed the `## Available Agent Types for Spawning` section; callers
+/// should source these from the team-capable backend whitelist.
+pub fn build_lead_prompt(team_name: &str, members: &[TeamAgent], available_agent_types: &[(String, String)]) -> String {
+    let agent_types: Vec<AvailableAgentType> = available_agent_types
+        .iter()
+        .map(|(backend, display)| AvailableAgentType {
+            agent_type: backend.clone(),
+            display_name: display.clone(),
+        })
+        .collect();
+    let renamed: HashMap<String, String> = HashMap::new();
 
-    prompt.push_str("## Team Members\n\n");
-    if members.is_empty() {
-        prompt.push_str("No teammates available. You must handle all work yourself.\n\n");
-    } else {
-        for m in members {
-            let role_label = match m.role {
-                TeammateRole::Lead => "Lead (you)",
-                TeammateRole::Teammate => "Teammate",
-            };
-            prompt.push_str(&format!(
-                "- **{}** (slot: `{}`, role: {}, backend: {}, model: {})\n",
-                m.name, m.slot_id, role_label, m.backend, m.model,
-            ));
-        }
-        prompt.push('\n');
-    }
+    let params = LeadPromptParams {
+        team_name,
+        teammates: members,
+        available_agent_types: &agent_types,
+        available_assistants: &[],
+        renamed_agents: &renamed,
+        team_workspace: None,
+    };
 
-    prompt.push_str("## Available Tools\n\n");
-    prompt.push_str(
-        "- `team_send_message(to, message)` — Send a message to a teammate by slotId, \
-         or broadcast to all with to=\"*\".\n\
-         - `team_spawn_agent(name, backend)` — Dynamically create a new teammate \
-         (allowed backends: claude, codex). Lead only.\n\
-         - `team_task_create(subject, description?, owner?, blockedBy?)` — \
-         Create a task on the task board.\n\
-         - `team_task_update(taskId, status?, description?, owner?, blockedBy?)` — \
-         Update a task. Set status to \"completed\" when done.\n\
-         - `team_task_list()` — List all tasks with their status and dependencies.\n\
-         - `team_members()` — List all team members with roles and status.\n\
-         - `team_rename_agent(slotId, newName)` — Rename a teammate.\n\
-         - `team_shutdown_agent(slotId, reason?)` — Request a teammate to shut down. \
-         Lead only.\n\n",
-    );
-
-    prompt.push_str("## Workflow Guidelines\n\n");
-    prompt.push_str(
-        "1. Break down user requests into discrete tasks using `team_task_create`.\n\
-         2. Assign tasks to teammates with the `owner` field.\n\
-         3. Set up dependencies with `blockedBy` when tasks must run in order.\n\
-         4. Send instructions to teammates via `team_send_message`.\n\
-         5. Monitor progress — teammates send idle notifications when done.\n\
-         6. Mark tasks completed as work is finished.\n\
-         7. When all work is complete, send a final summary to the user.\n",
-    );
-
-    prompt
+    let body = lead::build_lead_prompt(&params);
+    format!("Team: \"{team_name}\"\n\n{body}")
 }
 
 pub fn build_teammate_prompt(agent: &TeamAgent, team_name: &str) -> String {
@@ -155,6 +135,7 @@ pub fn build_wake_payload(agent: &TeamAgent, tasks: &[TeamTask], unread_messages
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::TeammateRole;
 
     fn make_lead() -> TeamAgent {
         TeamAgent {
@@ -218,50 +199,102 @@ mod tests {
 
     // -- Lead prompt ----------------------------------------------------------
 
+    fn default_agent_types() -> Vec<(String, String)> {
+        vec![
+            ("claude".into(), "Claude".into()),
+            ("codex".into(), "Codex".into()),
+            ("gemini".into(), "Gemini".into()),
+        ]
+    }
+
     #[test]
     fn lead_prompt_contains_team_name() {
-        let prompt = build_lead_prompt("Alpha", &[]);
+        let types = default_agent_types();
+        let prompt = build_lead_prompt("Alpha", &[], &types);
         assert!(prompt.contains("\"Alpha\""));
     }
 
     #[test]
     fn lead_prompt_contains_member_list() {
+        let types = default_agent_types();
         let members = vec![make_lead(), make_teammate("w1", "Worker1")];
-        let prompt = build_lead_prompt("Alpha", &members);
+        let prompt = build_lead_prompt("Alpha", &members, &types);
 
-        assert!(prompt.contains("**Lead**"));
-        assert!(prompt.contains("slot: `lead-1`"));
-        assert!(prompt.contains("**Worker1**"));
-        assert!(prompt.contains("slot: `w1`"));
-        assert!(prompt.contains("Lead (you)"));
-        assert!(prompt.contains("Teammate"));
+        // AionUi bullet format: `- {name} ({backend}, status: {status})`
+        assert!(prompt.contains("- Lead (acp, status:"));
+        assert!(prompt.contains("- Worker1 (acp, status:"));
     }
 
     #[test]
-    fn lead_prompt_contains_tool_descriptions() {
-        let prompt = build_lead_prompt("Alpha", &[]);
+    fn lead_prompt_contains_core_sections() {
+        let types = default_agent_types();
+        let prompt = build_lead_prompt("Alpha", &[], &types);
 
+        // Workflow — 15-step procedure with model listing at step 3
+        assert!(prompt.contains("## Workflow"));
+        assert!(prompt.contains("FIRST call `team_list_models`"));
+        assert!(prompt.contains("Wait for explicit confirmation before using team_spawn_agent"));
+        assert!(prompt.contains("End your turn after the proposal"));
+
+        // Model Selection Guidelines
+        assert!(prompt.contains("## Model Selection Guidelines"));
+        assert!(prompt.contains("exact model ID strings"));
+        assert!(prompt.contains("omit the model parameter"));
+
+        // Conversation Style — don't pitch proposals up-front
+        assert!(prompt.contains("## Conversation Style"));
+        assert!(prompt.contains("reply warmly and naturally"));
+
+        // Idle, sequencing, shutdown, important rules
+        assert!(prompt.contains("## Teammate Idle State"));
+        assert!(prompt.contains("## Sequencing Dependent Work"));
+        assert!(prompt.contains("## Shutting Down Teammates"));
+        assert!(prompt.contains("team_shutdown_agent"));
+        assert!(prompt.contains("## Important Rules"));
+
+        // Team coordination tool list still referenced
         assert!(prompt.contains("team_send_message"));
         assert!(prompt.contains("team_spawn_agent"));
-        assert!(prompt.contains("team_task_create"));
-        assert!(prompt.contains("team_task_update"));
-        assert!(prompt.contains("team_task_list"));
         assert!(prompt.contains("team_members"));
+        assert!(prompt.contains("team_task_list"));
         assert!(prompt.contains("team_rename_agent"));
-        assert!(prompt.contains("team_shutdown_agent"));
     }
 
     #[test]
-    fn lead_prompt_contains_workflow_guidelines() {
-        let prompt = build_lead_prompt("Alpha", &[]);
-        assert!(prompt.contains("Workflow Guidelines"));
-        assert!(prompt.contains("Break down user requests"));
+    fn lead_prompt_includes_available_agent_types_section() {
+        let types = default_agent_types();
+        let prompt = build_lead_prompt("Alpha", &[], &types);
+
+        assert!(prompt.contains("## Available Agent Types for Spawning"));
+        assert!(prompt.contains("- `claude` — Claude"));
+        assert!(prompt.contains("- `codex` — Codex"));
+        assert!(prompt.contains("- `gemini` — Gemini"));
+        assert!(prompt.contains("Use `team_list_models`"));
     }
 
     #[test]
-    fn lead_prompt_no_members_shows_solo_message() {
-        let prompt = build_lead_prompt("Solo", &[]);
-        assert!(prompt.contains("No teammates available"));
+    fn lead_prompt_omits_agent_types_section_when_empty() {
+        let prompt = build_lead_prompt("Alpha", &[], &[]);
+        assert!(!prompt.contains("## Available Agent Types for Spawning"));
+    }
+
+    #[test]
+    fn lead_prompt_no_members_shows_empty_lineup_copy() {
+        let types = default_agent_types();
+        let prompt = build_lead_prompt("Solo", &[], &types);
+        assert!(prompt.contains("(no teammates yet"));
+        assert!(prompt.contains("propose the lineup to the user first"));
+    }
+
+    #[test]
+    fn lead_prompt_has_no_unsubstituted_placeholders() {
+        let types = default_agent_types();
+        let members = vec![make_lead(), make_teammate("w1", "Worker1")];
+        let prompt = build_lead_prompt("Alpha", &members, &types);
+        assert!(
+            !prompt.contains("${"),
+            "unsubstituted template placeholder leaked:\n{prompt}"
+        );
     }
 
     // -- Teammate prompt ------------------------------------------------------

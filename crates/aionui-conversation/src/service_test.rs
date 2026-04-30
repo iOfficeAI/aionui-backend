@@ -2342,3 +2342,51 @@ async fn create_honors_legacy_alias_fields_from_clone_merge() {
     assert!(resp.extra.get("exclude_builtin_skills").is_none());
     assert!(resp.extra.get("loaded_skills").is_none());
 }
+
+// ── insert_raw_message ────────────────────────────────────────────
+// Exercised by the team wake path (mirroring non-user mailbox rows into
+// the target agent's conversation so the UI shows who spoke). Covers both
+// the DB write and the live `message.stream` broadcast.
+
+#[tokio::test]
+async fn insert_raw_message_persists_row_and_broadcasts_stream() {
+    let (svc, broadcaster, repo, _task_mgr) = make_service();
+    let conv = svc.create("user_1", make_create_req()).await.unwrap();
+    // Clear the create event so our assertion sees only the insert broadcast.
+    let _ = broadcaster.take_events();
+
+    let row = MessageRow {
+        id: "msg-mirror-1".into(),
+        conversation_id: conv.id.clone(),
+        msg_id: Some("msg-mirror-1".into()),
+        r#type: "text".into(),
+        content: serde_json::json!({
+            "content": "from teammate",
+            "teammate_message": true,
+            "sender_name": "Lead",
+        })
+        .to_string(),
+        position: Some("left".into()),
+        status: Some("finish".into()),
+        hidden: false,
+        created_at: 1234,
+    };
+
+    svc.insert_raw_message(&row).await.unwrap();
+
+    let stored = repo.messages.lock().unwrap().clone();
+    assert_eq!(stored.len(), 1, "row must be persisted via repo.insert_message");
+    assert_eq!(stored[0].id, "msg-mirror-1");
+    assert_eq!(stored[0].position.as_deref(), Some("left"));
+
+    let events = broadcaster.take_events();
+    let stream_events: Vec<_> = events.iter().filter(|e| e.name == "message.stream").collect();
+    assert_eq!(stream_events.len(), 1, "expected exactly one message.stream event");
+    let data = &stream_events[0].data;
+    assert_eq!(data["conversation_id"], conv.id);
+    assert_eq!(data["msg_id"], "msg-mirror-1");
+    assert_eq!(data["type"], "text");
+    assert_eq!(data["position"], "left");
+    assert_eq!(data["data"]["content"], "from teammate");
+    assert_eq!(data["data"]["teammate_message"], true);
+}

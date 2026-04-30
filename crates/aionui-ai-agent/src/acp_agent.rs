@@ -10,7 +10,8 @@ use crate::stream_event::{
     AgentStreamEvent, AvailableCommandsEventData, FinishEventData, SessionAssignedEventData, StartEventData,
     permission_request_to_event_data,
 };
-use crate::types::{AcpBuildExtra, SendMessageData, SlashCommandItem};
+use crate::team_guide_prompt;
+use crate::types::{AcpBuildExtra, AgentStreamChunk, SendMessageData, SlashCommandItem};
 use agent_client_protocol::schema::{
     AgentCapabilities, AvailableCommand, CancelNotification, ContentBlock, HttpHeader, LoadSessionRequest, McpServer,
     McpServerHttp, NewSessionRequest, PromptRequest, SessionConfigKind, SessionConfigOption, SessionId,
@@ -65,6 +66,29 @@ fn normalize_requested_mode(metadata: &AgentMetadata, mode: &str) -> String {
     trimmed.to_owned()
 }
 
+/// Whether the agent described by `metadata` uses Claude-style meta resume
+/// (`session/new` with `_meta.claudeCode.options.resume`) instead of the
+/// generic `session/load` path.
+///
+/// Mirrors the AionUi frontend rule
+/// `useClaudeMetaResume = backend === 'claude' || !!caps?._meta?.claudeCode`.
+///
+/// Handshake blobs persisted by the backend are normalised to snake_case
+/// (see `sdk_to_snake_value`), so the lookup prefers `claude_code` and
+/// falls back to `claudeCode` for any blob that bypassed normalisation.
+fn agent_metadata_uses_claude_meta_resume(metadata: &AgentMetadata) -> bool {
+    if metadata.backend.as_deref() == Some("claude") {
+        return true;
+    }
+    metadata
+        .handshake
+        .agent_capabilities
+        .as_ref()
+        .and_then(|caps| caps.get("_meta"))
+        .and_then(|meta| meta.get("claude_code").or_else(|| meta.get("claudeCode")))
+        .is_some()
+}
+
 /// Extract the `current_value` string from a `SessionConfigKind` —
 /// currently only the Select kind has a string value we can replay
 /// through `session/set_session_config_option`. Boolean toggles and
@@ -90,22 +114,90 @@ fn confirm_option_id(data: &Value) -> Option<String> {
     }
 }
 
+/// Compose the first-message preset context for a solo ACP agent, optionally
+/// prepending the Team Guide prompt (W5-D28b).
+///
+/// The guide is injected iff **both** conditions hold:
+/// 1. The session is not already part of a team (`team_mcp_stdio_config`
+///    absent on [`AcpBuildExtra`]) — in-team agents receive a different
+///    coordination prompt via their team MCP bridge, and must not be told to
+///    propose a fresh team from inside one.
+/// 2. The backend is on the solo-guide whitelist (see
+///    [`team_guide_prompt::is_solo_team_guide_backend`]). Unknown backends
+///    receive no guide, matching AionUi's `opts.backend`-gated solo
+///    injection.
+///
+/// When the guide is added it is appended after any pre-existing
+/// `preset_context` so user-configured rules still take precedence at the
+/// top of the `[Assistant Rules]` block assembled by
+/// [`crate::first_message_injector::inject_first_message_prefix`].
+fn compose_preset_context_with_team_guide(
+    base_preset_context: Option<&str>,
+    backend: Option<&str>,
+    has_team_session: bool,
+) -> Option<String> {
+    let base = base_preset_context
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned);
+
+    if has_team_session {
+        return base;
+    }
+    let backend_key = backend.unwrap_or_default();
+    if !team_guide_prompt::is_solo_team_guide_backend(backend_key) {
+        return base;
+    }
+
+    let guide = team_guide_prompt::build_solo_team_guide_prompt(backend_key);
+    match base {
+        Some(ctx) => Some(format!("{ctx}\n\n{guide}")),
+        None => Some(guide),
+    }
+}
+
+/// Backends for which solo conversations receive the Guide MCP server
+/// (W5 team-capable whitelist). Duplicated locally rather than imported
+/// from `aionui_team::guide::capability` because `aionui-team` already
+/// depends on this crate (see `team_mcp_server` below for the same
+/// rationale). The two lists must stay in sync until one side is hoisted
+/// into a shared crate.
+const TEAM_CAPABLE_BACKENDS: &[&str] = &["claude", "codex", "gemini", "aionrs"];
+
 /// Build a `NewSessionRequest` for `session/new`, injecting the team MCP
-/// stdio server when `config.team_mcp_stdio_config` is present.
+/// stdio server when `config.team_mcp_stdio_config` is present, or the
+/// Guide MCP server when the conversation is solo but the backend is
+/// team-capable.
 ///
-/// When the config is absent the returned payload is identical to the
-/// legacy single-chat path (`mcp_servers` empty), so solo conversations
-/// are unaffected.
+/// The two injections are mutually exclusive: a team session already has
+/// its own MCP server and does not need the Guide. A solo session on a
+/// non-team-capable backend gets neither, matching the legacy single-chat
+/// payload byte-for-byte.
 ///
-/// The stdio server follows the phase1 interface-contracts §3 shape:
-/// `command = backend_binary_path`, `args = ["mcp-bridge"]`, `env` =
-/// the three `TEAM_MCP_*` pairs defined on `TeamMcpStdioConfig`.
+/// The team MCP server injected here uses HTTP transport (see
+/// `team_mcp_server` below) — the `backend_binary_path` / `mcp-bridge`
+/// stdio shape described in phase1 interface-contracts §3 is used only
+/// by the bridge subprocess in `aionui-team`, not by this path.
+///
+/// W5-D28c ships the guard only — the Guide MCP server itself (config
+/// type, port/token resolution) lands with D26a/D27, after which the
+/// `// TODO(D26a)` branch here will push an `McpServer::Http` onto
+/// `mcp_servers` instead of falling through.
 fn build_new_session_request(workspace: &str, config: &AcpBuildExtra) -> NewSessionRequest {
     let req = NewSessionRequest::new(workspace);
-    let Some(cfg) = config.team_mcp_stdio_config.as_ref() else {
+    if let Some(cfg) = config.team_mcp_stdio_config.as_ref() {
+        return req.mcp_servers(vec![team_mcp_server(cfg)]);
+    }
+    // Solo session: inject Guide only when the backend is team-capable.
+    if let Some(backend) = config.backend.as_deref()
+        && TEAM_CAPABLE_BACKENDS.contains(&backend)
+    {
+        // TODO(D26a): push `McpServer::Http` for the Guide server here,
+        // using the `GuideMcpConfig` (port + auth token) sourced from
+        // `AcpBuildExtra` once the Guide server lands.
         return req;
-    };
-    req.mcp_servers(vec![team_mcp_server(cfg)])
+    }
+    req
 }
 
 /// Translate a `TeamMcpStdioConfig` into the ACP SDK wire type expected by
@@ -225,6 +317,11 @@ pub struct AcpAgentManager {
     protocol: AcpProtocol,
     /// Typed event broadcast channel.
     event_tx: broadcast::Sender<AgentStreamEvent>,
+    /// Raw stream chunk broadcast channel consumed by the team scheduler's
+    /// wake-timeout watchdog. Emission points are wired up in W4-D25c-2;
+    /// this channel exists from D25c-1 onward so `subscribe_stream` can
+    /// hand out live receivers regardless of whether emitters are active.
+    stream_tx: broadcast::Sender<AgentStreamChunk>,
     /// Mutable runtime state.
     state: RwLock<AcpState>,
     /// Timestamp of last activity (atomic for lock-free reads).
@@ -461,10 +558,11 @@ impl AcpAgentManager {
             .ok_or_else(|| AppError::Internal("Failed to take stdio from CLI process".into()))?;
 
         let (event_tx, _) = broadcast::channel(256);
+        let (stream_tx, _) = broadcast::channel(256);
         let (permission_tx, permission_rx) = mpsc::channel(32);
 
         // Connect via ACP SDK — executes initialize handshake
-        let protocol = AcpProtocol::connect(stdin, stdout, event_tx.clone(), permission_tx)
+        let protocol = AcpProtocol::connect(stdin, stdout, event_tx.clone(), stream_tx.clone(), permission_tx)
             .await
             .map_err(|e| {
                 error!(
@@ -507,6 +605,7 @@ impl AcpAgentManager {
             process: Arc::new(process),
             protocol,
             event_tx,
+            stream_tx,
             state: RwLock::new(AcpState {
                 status: None,
                 session_id: None,
@@ -698,11 +797,23 @@ impl AcpAgentManager {
         // Backends with native skill discovery (e.g. Claude via .claude/skills/)
         // only need preset_context here; others get the full [Assistant Rules]
         // block with a skills index.
+        //
+        // Before handing off, (W5-D28b) prepend the solo Team Guide prompt to
+        // `preset_context` when this agent is *not* part of a team and the
+        // backend is on the solo-guide whitelist. Agents inside a team
+        // (non-empty `team_mcp_stdio_config`) are deliberately excluded —
+        // they coordinate through the team MCP bridge and must not receive
+        // the "propose a team" prompt.
+        let composed_preset_context = compose_preset_context_with_team_guide(
+            self.config.preset_context.as_deref(),
+            self.backend(),
+            self.config.team_mcp_stdio_config.is_some(),
+        );
         let injected_content = inject_first_message_prefix(
             &data.content,
             &self.skill_manager,
             InjectionConfig {
-                preset_context: self.config.preset_context.as_deref(),
+                preset_context: composed_preset_context.as_deref(),
                 skills: &self.config.skills,
                 native_skill_support: self.native_skill_support(),
                 // Whether the user chose this workspace — determined at
@@ -743,11 +854,55 @@ impl AcpAgentManager {
     /// last explicit choice; the CLI's own `current_*` is only used
     /// when the snapshot has nothing yet.
     async fn session_resume_and_send(&self, data: &SendMessageData, session_id: Option<&str>) -> Result<(), AppError> {
-        if self.supports_session_load()
+        if self.uses_claude_meta_resume() {
+            // Claude backend: use session/new with _meta.claudeCode.options.resume
+            // instead of session/load. This matches AionUi frontend behavior and
+            // ensures mcpServers are re-injected on resume.
+            if let Some(sid) = session_id {
+                let mut meta = serde_json::Map::new();
+                let mut claude_code = serde_json::Map::new();
+                let mut options = serde_json::Map::new();
+                options.insert("resume".into(), Value::String(sid.to_owned()));
+                claude_code.insert("options".into(), Value::Object(options));
+                meta.insert("claudeCode".into(), Value::Object(claude_code));
+
+                let req = build_new_session_request(&self.workspace, &self.config).meta(meta);
+
+                info!(
+                    session_id = %sid,
+                    has_team_mcp = self.config.team_mcp_stdio_config.is_some(),
+                    mcp_servers_count = req.mcp_servers.len(),
+                    "session_resume: using session/new with claudeCode.options.resume"
+                );
+
+                let session_response = self.protocol.new_session(req).await.map_err(AppError::from)?;
+
+                let new_sid = session_response.session_id.to_string();
+                {
+                    let mut snapshot = self.runtime_snapshot.write().await;
+                    if let Some(models) = session_response.models {
+                        snapshot.set_model_info(models);
+                    }
+                    if let Some(modes) = session_response.modes {
+                        snapshot.set_modes(modes);
+                    }
+                    if let Some(config_options) = session_response.config_options {
+                        snapshot.set_config_options(config_options);
+                    }
+                }
+                self.emit_snapshot_events().await;
+
+                let mut state = self.state.write().await;
+                state.session_id = Some(new_sid.clone());
+                drop(state);
+
+                self.apply_preferred_config_selections(&new_sid).await;
+                return self.prompt_existing_session(data, Some(&new_sid)).await;
+            }
+        } else if self.supports_session_load()
             && let Some(sid) = session_id
         {
-            // Capture anything preload put into the snapshot so the
-            // CLI merge below can keep it.
+            // Non-Claude backends (e.g. Codex): use session/load
             let (preloaded_mode, preloaded_model) = {
                 let snapshot = self.runtime_snapshot.read().await;
                 (
@@ -763,10 +918,6 @@ impl AcpAgentManager {
                 .map_err(AppError::from)?;
 
             let mut snapshot = self.runtime_snapshot.write().await;
-            // Available lists always come from the CLI (source of truth
-            // for what the agent now supports). `current_*` prefers
-            // the preloaded value when present — that's the user's
-            // last explicit choice.
             if let Some(mut models) = resp.models {
                 if let Some(db_current) = preloaded_model {
                     models.current_model_id = db_current.into();
@@ -898,6 +1049,14 @@ impl AcpAgentManager {
         self.state.read().await.session_id.clone()
     }
 
+    /// Restore a previously persisted session_id (e.g. from DB on task rebuild).
+    /// Enables resume path on next send_message instead of creating a fresh session.
+    pub async fn restore_session_id(&self, sid: String) {
+        let mut state = self.state.write().await;
+        state.session_id = Some(sid);
+        state.has_messages = true;
+    }
+
     /// Vendor label this session was spawned as (e.g. "claude"), if any.
     pub fn backend(&self) -> Option<&str> {
         self.metadata.backend.as_deref()
@@ -921,6 +1080,13 @@ impl AcpAgentManager {
     /// The raw ACP wire field is `loadSession` (camelCase); we store
     /// the snake_case form because every handshake blob is normalised
     /// before being persisted (see `sdk_to_snake_value`).
+    /// Whether this agent uses Claude-style meta resume (session/new with
+    /// `_meta.claudeCode.options.resume`) instead of session/load.
+    /// Matches AionUi frontend: `useClaudeMetaResume = backend === 'claude' || !!caps?._meta?.claudeCode`
+    fn uses_claude_meta_resume(&self) -> bool {
+        agent_metadata_uses_claude_meta_resume(&self.metadata)
+    }
+
     fn supports_session_load(&self) -> bool {
         self.metadata
             .handshake
@@ -976,9 +1142,32 @@ impl IAgentManager for AcpAgentManager {
         self.event_tx.subscribe()
     }
 
+    fn subscribe_stream(&self) -> broadcast::Receiver<AgentStreamChunk> {
+        self.stream_tx.subscribe()
+    }
+
     async fn send_message(&self, data: SendMessageData) -> Result<(), AppError> {
         self.last_activity.store(now_ms(), Ordering::Relaxed);
-        self.ensure_session_and_send(&data).await
+
+        // Drive the session, then emit a terminal chunk so subscribers
+        // (wake timeout watchdog, crash detector) always see a Finish or
+        // Error at the end of every turn — matching the contract documented
+        // on `AgentStreamChunk`.
+        let result = self.ensure_session_and_send(&data).await;
+        match &result {
+            Ok(()) => {
+                let _ = self.stream_tx.send(AgentStreamChunk::Finish {
+                    agent_crash: false,
+                    stop_reason: None,
+                });
+            }
+            Err(err) => {
+                let _ = self.stream_tx.send(AgentStreamChunk::Error {
+                    message: err.to_string(),
+                });
+            }
+        }
+        result
     }
 
     async fn stop(&self) -> Result<(), AppError> {
@@ -1107,6 +1296,19 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    /// The stream channel powering [`AcpAgentManager::subscribe_stream`] is
+    /// created identically to the one inside `new()` — capacity 256 and
+    /// the `AgentStreamChunk` element type. Subscribing before any emit
+    /// yields a live receiver that observes `TryRecvError::Empty`. Once
+    /// D25c-2 wires up emitters, existing subscribers will begin seeing
+    /// chunks; the empty-on-idle contract stays intact.
+    #[test]
+    fn stream_channel_yields_live_receiver_that_is_initially_empty() {
+        let (tx, _) = broadcast::channel::<AgentStreamChunk>(256);
+        let mut rx = tx.subscribe();
+        assert!(matches!(rx.try_recv(), Err(broadcast::error::TryRecvError::Empty)));
+    }
+
     #[test]
     fn confirm_option_id_accepts_string_or_object() {
         assert_eq!(
@@ -1215,6 +1417,69 @@ mod tests {
         assert_eq!(normalize_requested_mode(&other, "autoEdit"), "autoEdit");
     }
 
+    /// Claude backend must take the `session/new` + `_meta.claudeCode.options.resume`
+    /// path so `mcpServers` are re-injected on resume. `backend == "claude"`
+    /// alone is enough — we don't need the handshake to advertise `_meta`.
+    #[test]
+    fn uses_claude_meta_resume_true_for_claude_backend() {
+        let mut meta = metadata_with_yolo_id(None);
+        meta.backend = Some("claude".into());
+        assert!(agent_metadata_uses_claude_meta_resume(&meta));
+    }
+
+    /// A non-Claude-labelled backend that still advertises
+    /// `agent_capabilities._meta.claudeCode` (snake_case, as persisted by
+    /// `sdk_to_snake_value`) must also follow the Claude resume path —
+    /// this matches the frontend's `!!caps?._meta?.claudeCode` check.
+    #[test]
+    fn uses_claude_meta_resume_true_for_meta_claude_code() {
+        let mut meta = metadata_with_yolo_id(None);
+        meta.backend = Some("custom-claude-wrapper".into());
+        meta.handshake.agent_capabilities = Some(json!({
+            "_meta": {
+                "claude_code": { "some": "flag" }
+            }
+        }));
+        assert!(agent_metadata_uses_claude_meta_resume(&meta));
+
+        // A handshake that bypassed snake_case normalisation (camelCase
+        // `claudeCode`) must still be recognised.
+        let mut camel_meta = metadata_with_yolo_id(None);
+        camel_meta.backend = Some("custom-claude-wrapper".into());
+        camel_meta.handshake.agent_capabilities = Some(json!({
+            "_meta": {
+                "claudeCode": { "some": "flag" }
+            }
+        }));
+        assert!(agent_metadata_uses_claude_meta_resume(&camel_meta));
+    }
+
+    /// Codex (and any non-Claude backend without the `_meta.claudeCode`
+    /// marker) must fall through to the `session/load` branch.
+    #[test]
+    fn uses_claude_meta_resume_false_for_codex() {
+        let mut meta = metadata_with_yolo_id(Some("full-access"));
+        meta.backend = Some("codex".into());
+        assert!(!agent_metadata_uses_claude_meta_resume(&meta));
+
+        // Codex with unrelated capability keys must still be false.
+        meta.handshake.agent_capabilities = Some(json!({
+            "load_session": true,
+            "_meta": { "codex": { "whatever": true } }
+        }));
+        assert!(!agent_metadata_uses_claude_meta_resume(&meta));
+    }
+
+    /// Metadata with no `backend` label and no handshake capabilities
+    /// must not opt into the Claude resume path.
+    #[test]
+    fn uses_claude_meta_resume_false_for_empty() {
+        let meta = metadata_with_yolo_id(None);
+        assert!(meta.backend.is_none());
+        assert!(meta.handshake.agent_capabilities.is_none());
+        assert!(!agent_metadata_uses_claude_meta_resume(&meta));
+    }
+
     fn build_extra_without_team() -> AcpBuildExtra {
         serde_json::from_value(json!({ "backend": "claude" })).unwrap()
     }
@@ -1234,8 +1499,10 @@ mod tests {
 
     #[test]
     fn build_new_session_request_skips_mcp_servers_without_team_config() {
-        // Solo-chat path: no `team_mcp_stdio_config` → payload must stay
-        // byte-for-byte identical to the legacy `NewSessionRequest::new(cwd)`.
+        // Solo-chat path on a team-capable backend: no
+        // `team_mcp_stdio_config` and Guide injection is still pending
+        // D26a, so `mcp_servers` remains empty (matches the legacy
+        // single-chat payload byte-for-byte).
         let req = build_new_session_request("/workspace", &build_extra_without_team());
         assert!(
             req.mcp_servers.is_empty(),
@@ -1245,32 +1512,143 @@ mod tests {
     }
 
     #[test]
-    fn build_new_session_request_injects_team_stdio_server() {
+    fn build_new_session_request_solo_non_capable_backend_yields_empty_mcp_servers() {
+        // Non-whitelisted backend: Guide must not be injected even once
+        // D26a lands. This test pins the guard shape — it becomes
+        // load-bearing when the D26a follow-up starts pushing
+        // `McpServer::Http` onto the list.
+        let extra: AcpBuildExtra = serde_json::from_value(json!({ "backend": "custom" })).unwrap();
+        let req = build_new_session_request("/workspace", &extra);
+        assert!(
+            req.mcp_servers.is_empty(),
+            "non-capable backend must not inject Guide MCP, got {:?}",
+            req.mcp_servers
+        );
+    }
+
+    #[test]
+    fn build_new_session_request_solo_missing_backend_yields_empty_mcp_servers() {
+        // Defensive: `extra.backend` is optional and historically may be
+        // absent on legacy conversations. Guard must handle `None`.
+        let extra: AcpBuildExtra = serde_json::from_value(json!({})).unwrap();
+        let req = build_new_session_request("/workspace", &extra);
+        assert!(
+            req.mcp_servers.is_empty(),
+            "missing backend must not inject Guide MCP, got {:?}",
+            req.mcp_servers
+        );
+    }
+
+    #[test]
+    fn build_new_session_request_team_session_takes_priority_over_guide() {
+        // Mutual exclusion: a team session injects the team MCP server
+        // and must not also receive the Guide server once D26a lands.
+        // Today this reduces to "team path still yields exactly one
+        // server" — the assertion will tighten when the Guide branch
+        // starts pushing servers.
+        let req = build_new_session_request("/workspace", &build_extra_with_team());
+        assert_eq!(
+            req.mcp_servers.len(),
+            1,
+            "team session must inject exactly the team MCP server, not the Guide",
+        );
+    }
+
+    /// Team MCP injection uses the HTTP transport on the `agent-client-protocol`
+    /// schema (see `team_mcp_server`): `claude-agent-acp` actively connects to
+    /// HTTP servers whereas its stdio path has spawn/init timing issues. This
+    /// test pins the wire shape — name derived from `team_id`, URL pointing at
+    /// the loopback port, and both `Authorization: Bearer <token>` and
+    /// `X-Slot-Id` headers attached — so any accidental revert back to
+    /// `McpServer::Stdio` fails loud.
+    #[test]
+    fn build_new_session_request_injects_team_http_server() {
         let req = build_new_session_request("/workspace", &build_extra_with_team());
         assert_eq!(req.mcp_servers.len(), 1, "exactly one team MCP server");
 
         let server = req.mcp_servers.into_iter().next().unwrap();
-        let stdio = match server {
-            McpServer::Stdio(s) => s,
-            other => panic!("expected Stdio variant, got {other:?}"),
+        let http = match server {
+            McpServer::Http(h) => h,
+            other => panic!("expected Http variant, got {other:?}"),
         };
 
-        use std::path::PathBuf;
-        assert_eq!(stdio.name, "aionui-team-team-42");
-        assert_eq!(stdio.command, PathBuf::from("/usr/bin/aionui-backend"));
-        assert_eq!(stdio.args, vec!["mcp-bridge".to_owned()]);
+        assert_eq!(http.name, "aionui-team-team-42");
+        assert_eq!(http.url, "http://127.0.0.1:54321");
 
-        let env: std::collections::HashMap<_, _> =
-            stdio.env.iter().map(|v| (v.name.as_str(), v.value.as_str())).collect();
-        assert_eq!(env.get(TeamMcpStdioConfig::ENV_PORT), Some(&"54321"));
-        assert_eq!(env.get(TeamMcpStdioConfig::ENV_TOKEN), Some(&"tok-abc"));
-        assert_eq!(env.get(TeamMcpStdioConfig::ENV_SLOT_ID), Some(&"slot-lead"));
+        let headers: std::collections::HashMap<_, _> = http
+            .headers
+            .iter()
+            .map(|h| (h.name.as_str(), h.value.as_str()))
+            .collect();
+        assert_eq!(headers.get("Authorization"), Some(&"Bearer tok-abc"));
+        assert_eq!(headers.get("X-Slot-Id"), Some(&"slot-lead"));
     }
 
     #[test]
     fn normalize_requested_mode_trims_and_returns_empty_for_blank() {
         let meta = metadata_with_yolo_id(Some("full-access"));
         assert_eq!(normalize_requested_mode(&meta, "   "), "");
+    }
+
+    const TEAM_GUIDE_MARKER: &str = "## Team Mode";
+
+    #[test]
+    fn compose_preset_context_injects_team_guide_for_solo_whitelisted_backend() {
+        let out = compose_preset_context_with_team_guide(None, Some("claude"), false).expect("guide must be injected");
+        assert!(
+            out.contains(TEAM_GUIDE_MARKER),
+            "solo whitelisted backend must receive Team Guide prompt, got: {out}"
+        );
+    }
+
+    #[test]
+    fn compose_preset_context_preserves_base_context_before_team_guide() {
+        let base = "User rule: always respond in English.";
+        let out =
+            compose_preset_context_with_team_guide(Some(base), Some("gemini"), false).expect("guide must be injected");
+        let guide_idx = out.find(TEAM_GUIDE_MARKER).expect("team guide present");
+        let base_idx = out.find(base).expect("base rule present");
+        assert!(
+            base_idx < guide_idx,
+            "base preset_context must come before the Team Guide so user rules stay at the top of [Assistant Rules]"
+        );
+    }
+
+    #[test]
+    fn compose_preset_context_skips_team_guide_when_already_in_team() {
+        // Agent bound to a team: `team_mcp_stdio_config` present ⇒
+        // `has_team_session = true`. Must NOT inject the Team Guide prompt.
+        let out = compose_preset_context_with_team_guide(None, Some("claude"), true);
+        assert!(out.is_none(), "in-team agent must not receive Team Guide, got: {out:?}");
+
+        let with_base = compose_preset_context_with_team_guide(Some("Keep responses short."), Some("claude"), true)
+            .expect("base context must pass through");
+        assert!(
+            !with_base.contains(TEAM_GUIDE_MARKER),
+            "in-team agent must not receive Team Guide even when base context exists"
+        );
+        assert!(with_base.contains("Keep responses short."));
+    }
+
+    #[test]
+    fn compose_preset_context_skips_team_guide_for_unknown_backend() {
+        // Solo agent, but backend not on the whitelist: pass base context
+        // through (possibly `None`) without adding the Team Guide.
+        assert!(compose_preset_context_with_team_guide(None, Some("qwen"), false).is_none());
+        assert!(compose_preset_context_with_team_guide(None, None, false).is_none());
+
+        let with_base = compose_preset_context_with_team_guide(Some("Existing rule."), Some("qwen"), false)
+            .expect("base context must pass through unchanged");
+        assert_eq!(with_base, "Existing rule.");
+    }
+
+    #[test]
+    fn compose_preset_context_treats_blank_base_as_absent() {
+        // Whitespace-only base context should be treated as "none" so we
+        // don't leak "\n\n" prefixes into the injected Team Guide.
+        let out = compose_preset_context_with_team_guide(Some("   \n\t"), Some("claude"), false)
+            .expect("guide must still be injected");
+        assert!(out.starts_with("## Team Mode"));
     }
 
     /// Each session-driven event projects onto exactly one handshake

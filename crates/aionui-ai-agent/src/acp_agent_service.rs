@@ -194,10 +194,17 @@ impl AcpAgentService {
     /// (e.g. the manager was rebuilt after a crash), it is aborted
     /// before being replaced so we do not double-write.
     pub async fn attach(&self, conversation_id: String, handle: AgentManagerHandle) {
-        if let Some(acp) = handle.as_any().downcast_ref::<AcpAgentManager>()
-            && let Some(state) = self.load_snapshot_state(&conversation_id).await
-        {
-            acp.preload_snapshot(state).await;
+        if let Some(acp) = handle.as_any().downcast_ref::<AcpAgentManager>() {
+            // Restore runtime snapshot (modes, models, config selections)
+            if let Some(state) = self.load_snapshot_state(&conversation_id).await {
+                acp.preload_snapshot(state).await;
+            }
+            // Restore session_id from DB so resume path works after restart
+            if let Ok(Some(row)) = self.repo.get(&conversation_id).await {
+                if let Some(sid) = row.session_id {
+                    acp.restore_session_id(sid).await;
+                }
+            }
         }
 
         let rx = handle.subscribe();

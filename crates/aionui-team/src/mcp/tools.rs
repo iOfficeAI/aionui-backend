@@ -194,11 +194,26 @@ pub struct SendMessageInput {
     pub message: String,
 }
 
-#[derive(Debug, Deserialize)]
+/// Arguments for the `team_spawn_agent` MCP tool call.
+///
+/// The AionUi contract (`docs/teams/phase1/aionui-audit.md` §2.1) names the
+/// agent-type field `agent_type` and adds `custom_agent_id` + `model`. The
+/// phase-1 Rust dispatch originally exposed `backend` (and `role`); those are
+/// preserved for back-compat and used as fallbacks when the modern fields
+/// are not provided — `backend` is treated as an alias for `agent_type`.
+#[derive(Debug, Default, Deserialize)]
 pub struct SpawnAgentInput {
     pub name: String,
+    #[serde(default)]
     pub role: Option<String>,
-    pub backend: String,
+    #[serde(default)]
+    pub backend: Option<String>,
+    #[serde(default)]
+    pub agent_type: Option<String>,
+    #[serde(default)]
+    pub custom_agent_id: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -264,17 +279,22 @@ pub fn parse_tool_call(
             }
             let input: SpawnAgentInput = serde_json::from_value(arguments.clone())
                 .map_err(|e| format!("Invalid arguments for team_spawn_agent: {e}"))?;
-            if !is_whitelisted_backend(&input.backend) {
+            let backend = input
+                .agent_type
+                .clone()
+                .or(input.backend.clone())
+                .ok_or_else(|| "Missing 'agent_type' (or legacy 'backend') for team_spawn_agent".to_string())?;
+            if !is_whitelisted_backend(&backend) {
                 return Err(format!(
                     "Backend '{}' not allowed. Whitelist: {}",
-                    input.backend,
+                    backend,
                     SPAWN_BACKEND_WHITELIST.join(", ")
                 ));
             }
             Ok(SchedulerAction::SpawnAgent {
                 name: input.name,
                 role: input.role.unwrap_or_else(|| "teammate".into()),
-                backend: input.backend,
+                backend,
             })
         }
         "team_task_create" => {

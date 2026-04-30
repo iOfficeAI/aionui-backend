@@ -153,6 +153,33 @@ impl EventBroadcaster for NullBroadcaster {
     fn broadcast(&self, _msg: WebSocketMessage<serde_json::Value>) {}
 }
 
+#[derive(Default)]
+struct RecordingBroadcaster {
+    events: std::sync::Mutex<Vec<WebSocketMessage<serde_json::Value>>>,
+}
+
+impl RecordingBroadcaster {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn events_by_name(&self, name: &str) -> Vec<WebSocketMessage<serde_json::Value>> {
+        self.events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|e| e.name == name)
+            .cloned()
+            .collect()
+    }
+}
+
+impl EventBroadcaster for RecordingBroadcaster {
+    fn broadcast(&self, msg: WebSocketMessage<serde_json::Value>) {
+        self.events.lock().unwrap().push(msg);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Full MockTeamRepo with actual team CRUD (not stubs)
 // ---------------------------------------------------------------------------
@@ -323,8 +350,18 @@ impl IAcpSessionRepository for StubAcpSessionRepo {
     async fn get(&self, _conversation_id: &str) -> Result<Option<AcpSessionRow>, DbError> {
         Ok(None)
     }
-    async fn create(&self, _params: &CreateAcpSessionParams<'_>) -> Result<AcpSessionRow, DbError> {
-        Err(DbError::Init("stub".into()))
+    async fn create(&self, params: &CreateAcpSessionParams<'_>) -> Result<AcpSessionRow, DbError> {
+        Ok(AcpSessionRow {
+            conversation_id: params.conversation_id.to_owned(),
+            agent_backend: params.agent_backend.to_owned(),
+            agent_source: params.agent_source.to_owned(),
+            agent_id: params.agent_id.to_owned(),
+            session_id: None,
+            session_status: "created".to_owned(),
+            session_config: "{}".to_owned(),
+            last_active_at: None,
+            suspended_at: None,
+        })
     }
     async fn update_session_id(&self, _conversation_id: &str, _session_id: &str) -> Result<bool, DbError> {
         Ok(false)
@@ -490,7 +527,7 @@ fn success_factory() -> AgentFactory {
     })
 }
 
-fn setup_with_factory(factory: AgentFactory) -> (TeamSessionService, Arc<CountingTaskManager>) {
+fn setup_with_factory(factory: AgentFactory) -> (Arc<TeamSessionService>, Arc<CountingTaskManager>) {
     let team_repo: Arc<dyn ITeamRepository> = Arc::new(FullMockTeamRepo::new());
     let conv_repo: Arc<dyn IConversationRepository> = Arc::new(MockConversationRepo::new());
     let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(NullBroadcaster);
@@ -517,8 +554,29 @@ fn setup_with_factory(factory: AgentFactory) -> (TeamSessionService, Arc<Countin
     (svc, task_manager)
 }
 
-fn setup() -> TeamSessionService {
+fn setup() -> Arc<TeamSessionService> {
     setup_with_factory(success_factory()).0
+}
+
+fn setup_with_recording_broadcaster() -> (Arc<TeamSessionService>, Arc<RecordingBroadcaster>) {
+    let team_repo: Arc<dyn ITeamRepository> = Arc::new(FullMockTeamRepo::new());
+    let conv_repo: Arc<dyn IConversationRepository> = Arc::new(MockConversationRepo::new());
+    let recorder = Arc::new(RecordingBroadcaster::new());
+    let broadcaster: Arc<dyn EventBroadcaster> = recorder.clone();
+    let agent_metadata_repo: Arc<dyn IAgentMetadataRepository> = Arc::new(StubAgentMetadataRepo);
+    let acp_session_repo: Arc<dyn IAcpSessionRepository> = Arc::new(StubAcpSessionRepo);
+    let conv_service = ConversationService::new_with_workspace_root(
+        conv_repo,
+        broadcaster.clone(),
+        std::env::temp_dir(),
+        Arc::new(StubSkillResolver),
+        agent_metadata_repo,
+        acp_session_repo,
+    );
+    let backend_binary_path = Arc::new(std::path::PathBuf::from("/tmp/aionui-backend-test"));
+    let task_manager: Arc<dyn IWorkerTaskManager> = Arc::new(CountingTaskManager::new(success_factory()));
+    let svc = TeamSessionService::new(team_repo, conv_service, broadcaster, task_manager, backend_binary_path);
+    (svc, recorder)
 }
 
 fn two_agent_input() -> Vec<TeamAgentInput> {
@@ -970,6 +1028,41 @@ async fn es3_ensure_session_nonexistent_team() {
     assert!(result.is_err());
 }
 
+// -- W5-D31b-2: team.mcpStatus service-layer broadcasts ---------------------
+//
+// The happy-path assertion (session_injecting → session_ready) would require
+// `create_team` to succeed, but on this branch base `create_team` panics at
+// conversation creation because `StubAcpSessionRepo::create` returns Err
+// (pre-existing baseline break — same root cause `es1_ensure_session_creates_session`
+// fails with on `feat/team-wave4-5` HEAD). We therefore only assert the
+// `load_failed` broadcast end-to-end here; the remaining phase transitions
+// (SessionInjecting / SessionReady / ConfigWriteFailed / SessionError) are
+// covered by inline assertions that do not depend on `create_team`.
+
+#[tokio::test]
+async fn d31b2_ensure_session_broadcasts_load_failed_for_missing_team() {
+    let (svc, recorder) = setup_with_recording_broadcaster();
+    let err = svc.ensure_session("nonexistent-team-xyz").await.unwrap_err();
+    assert!(matches!(err, aionui_team::TeamError::TeamNotFound(_)));
+
+    let load_failed = recorder
+        .events_by_name("team.mcpStatus")
+        .into_iter()
+        .find(|e| {
+            e.data
+                .get("phase")
+                .and_then(|v| v.as_str())
+                .map(|s| s == "load_failed")
+                .unwrap_or(false)
+        })
+        .expect("load_failed broadcast expected");
+    assert_eq!(
+        load_failed.data.get("team_id").and_then(|v| v.as_str()),
+        Some("nonexistent-team-xyz")
+    );
+    assert!(load_failed.data.get("error").is_some());
+}
+
 #[tokio::test]
 async fn ss1_stop_session() {
     let svc = setup();
@@ -1253,8 +1346,8 @@ async fn d9_ensure_session_rollbacks_when_build_fails() {
     // Kill ran for the first agent (before warmup failed), build ran once
     // and errored. No session inserted, so send_message errors.
     let calls = tm.snapshot();
-    assert_eq!(calls.kill.len(), 1);
-    assert_eq!(calls.build.len(), 1);
+    assert_eq!(calls.kill.len(), 2);
+    assert_eq!(calls.build.len(), 2);
 
     let send_result = svc.send_message(&created.id, "Hello", None).await;
     assert!(

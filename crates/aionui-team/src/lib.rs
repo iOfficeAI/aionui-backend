@@ -2,6 +2,7 @@
 pub mod crash_detection;
 pub mod error;
 pub mod events;
+pub mod guide;
 pub mod mailbox;
 pub mod mcp;
 pub mod prompts;
@@ -17,11 +18,14 @@ pub mod types;
 pub use crash_detection::{CrashReason, detect_crash, is_rate_limited};
 pub use error::TeamError;
 pub use events::TeamEventEmitter;
+pub use guide::{GuideMcpServer, handle_aion_list_models};
 pub use mailbox::Mailbox;
 pub use mcp::{TeamMcpServer, TeamMcpStdioConfig, TeamMcpStdioServerSpec};
 pub use prompts::{build_lead_prompt, build_teammate_prompt, build_wake_payload};
 pub use routes::{TeamRouterState, team_routes};
-pub use scheduler::{SchedulerAction, TeammateManager, WAKE_TIMEOUT_MS, WakePayload, format_crash_testament};
+pub use scheduler::{
+    SchedulerAction, TeammateManager, WAKE_TIMEOUT_MS, WakePayload, format_crash_testament, normalize_name,
+};
 pub use service::TeamSessionService;
 pub use session::{TeamSession, WakeInput};
 pub use task_board::{TaskBoard, TaskUpdate};

@@ -1,9 +1,10 @@
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 use aionui_ai_agent::IWorkerTaskManager;
 use aionui_api_types::{
-    AddAgentRequest, CreateConversationRequest, CreateTeamRequest, TeamAgentResponse, TeamResponse,
+    AddAgentRequest, CreateConversationRequest, CreateTeamRequest, TeamAgentResponse, TeamMcpPhase,
+    TeamMcpStatusPayload, TeamResponse, WebSocketMessage,
 };
 use aionui_common::{AgentKillReason, AgentType, ProviderWithModel, generate_id, now_ms};
 use aionui_conversation::ConversationService;
@@ -36,6 +37,12 @@ pub struct TeamSessionService {
     /// read-modify-write the `agents` JSON with stale state (last-writer-wins
     /// would otherwise drop entries).
     add_agent_locks: Arc<DashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// Back-pointer used by [`TeamSession::spawn_agent`] to reach DB-facing
+    /// orchestration without threading the service through every session method.
+    /// Stored as `Weak` so the session map does not create a strong cycle with
+    /// the service that owns it. Set once during [`TeamSessionService::new`]
+    /// via [`Arc::new_cyclic`].
+    self_ref: Weak<TeamSessionService>,
 }
 
 impl TeamSessionService {
@@ -45,8 +52,8 @@ impl TeamSessionService {
         broadcaster: Arc<dyn EventBroadcaster>,
         task_manager: Arc<dyn IWorkerTaskManager>,
         backend_binary_path: Arc<PathBuf>,
-    ) -> Self {
-        Self {
+    ) -> Arc<Self> {
+        Arc::new_cyclic(|weak| Self {
             repo,
             conversation_service,
             broadcaster,
@@ -54,6 +61,27 @@ impl TeamSessionService {
             backend_binary_path,
             sessions: Arc::new(DashMap::new()),
             add_agent_locks: Arc::new(DashMap::new()),
+            self_ref: weak.clone(),
+        })
+    }
+
+    /// Restore sessions for all existing teams. Called once at app startup
+    /// so that MCP servers are available before any user sends a message.
+    pub async fn restore_all_sessions(&self) {
+        let teams = match self.repo.list_teams().await {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to list teams for session restore");
+                return;
+            }
+        };
+        for team in &teams {
+            if let Err(e) = self.ensure_session(&team.id).await {
+                tracing::warn!(team_id = %team.id, error = %e, "failed to restore session on startup");
+            }
+        }
+        if !teams.is_empty() {
+            tracing::info!(count = teams.len(), "team sessions restored on startup");
         }
     }
 
@@ -395,25 +423,51 @@ impl TeamSessionService {
             return Ok(());
         }
 
-        let row = self
-            .repo
-            .get_team(team_id)
-            .await?
-            .ok_or_else(|| TeamError::TeamNotFound(team_id.into()))?;
+        let row = match self.repo.get_team(team_id).await {
+            Ok(Some(row)) => row,
+            Ok(None) => {
+                self.broadcast_mcp_phase(team_id, "", TeamMcpPhase::LoadFailed, None, |p| {
+                    p.error = Some(format!("team not found: {team_id}"));
+                });
+                return Err(TeamError::TeamNotFound(team_id.into()));
+            }
+            Err(e) => {
+                self.broadcast_mcp_phase(team_id, "", TeamMcpPhase::LoadFailed, None, |p| {
+                    p.error = Some(e.to_string());
+                });
+                return Err(e.into());
+            }
+        };
         let user_id = row.user_id.clone();
         let team = Team::from_row(&row)?;
         let agents_snapshot: Vec<TeamAgent> = team.agents.clone();
 
-        let session = TeamSession::start(
+        let session = match TeamSession::start(
             team,
             self.repo.clone(),
             self.broadcaster.clone(),
             self.backend_binary_path.clone(),
             self.task_manager.clone(),
+            user_id.clone(),
+            self.self_ref.clone(),
         )
-        .await?;
+        .await
+        {
+            Ok(session) => session,
+            Err(e) => {
+                self.broadcast_mcp_phase(team_id, "", TeamMcpPhase::SessionError, None, |p| {
+                    p.error = Some(e.to_string());
+                });
+                return Err(e);
+            }
+        };
 
-        if let Err(e) = self.rebuild_agent_processes(&session, &user_id, &agents_snapshot).await {
+        self.broadcast_mcp_phase(team_id, "", TeamMcpPhase::SessionInjecting, None, |_| {});
+
+        if let Err(e) = self
+            .rebuild_agent_processes(team_id, &session, &user_id, &agents_snapshot)
+            .await
+        {
             session.stop();
             return Err(e);
         }
@@ -426,41 +480,61 @@ impl TeamSessionService {
         };
         self.sessions.insert(team_id.to_owned(), entry);
 
+        self.broadcast_mcp_phase(team_id, "", TeamMcpPhase::SessionReady, None, |p| {
+            p.server_count = Some(agents_snapshot.len());
+        });
+
         Ok(())
+    }
+
+    fn broadcast_mcp_phase<F>(&self, team_id: &str, slot_id: &str, phase: TeamMcpPhase, port: Option<u16>, customize: F)
+    where
+        F: FnOnce(&mut TeamMcpStatusPayload),
+    {
+        let mut payload = TeamMcpStatusPayload {
+            team_id: team_id.to_owned(),
+            slot_id: slot_id.to_owned(),
+            phase,
+            port,
+            server_count: None,
+            error: None,
+        };
+        customize(&mut payload);
+        let event = WebSocketMessage::new(
+            "team.mcpStatus",
+            serde_json::to_value(payload).expect("serialize mcp status payload"),
+        );
+        self.broadcaster.broadcast(event);
     }
 
     async fn rebuild_agent_processes(
         &self,
+        team_id: &str,
         session: &TeamSession,
-        user_id: &str,
+        _user_id: &str,
         agents: &[TeamAgent],
     ) -> Result<(), TeamError> {
         for agent in agents {
             let cfg = session.mcp_stdio_config(&agent.slot_id);
             let patch = serde_json::json!({ "team_mcp_stdio_config": cfg });
 
-            self.conversation_service
+            if let Err(e) = self
+                .conversation_service
                 .update_extra(&agent.conversation_id, patch)
                 .await
-                .map_err(|e| {
-                    TeamError::InvalidRequest(format!(
-                        "failed to persist team_mcp_stdio_config for {}: {e}",
-                        agent.slot_id
-                    ))
-                })?;
+            {
+                let msg = format!("failed to persist team_mcp_stdio_config for {}: {e}", agent.slot_id);
+                self.broadcast_mcp_phase(team_id, &agent.slot_id, TeamMcpPhase::ConfigWriteFailed, None, |p| {
+                    p.error = Some(msg.clone());
+                });
+                return Err(TeamError::InvalidRequest(msg));
+            }
 
-            self.task_manager
-                .kill(&agent.conversation_id, Some(AgentKillReason::TeamMcpRebuild))
-                .map_err(|e| {
-                    TeamError::InvalidRequest(format!("failed to kill agent task {}: {e}", agent.conversation_id))
-                })?;
-
-            self.conversation_service
-                .warmup(user_id, &agent.conversation_id, &self.task_manager)
-                .await
-                .map_err(|e| {
-                    TeamError::InvalidRequest(format!("failed to rebuild agent task {}: {e}", agent.conversation_id))
-                })?;
+            // Kill cached task so next get_or_build_task reads fresh config from DB.
+            // Don't warmup — let the next user message trigger rebuild naturally.
+            // Claude CLI persists session history to disk; session/new+resume
+            // restores it, so conversation context is NOT lost across restarts.
+            let _ = self.task_manager.kill(&agent.conversation_id, Some(AgentKillReason::TeamMcpRebuild));
         }
         Ok(())
     }
@@ -541,12 +615,162 @@ impl TeamSessionService {
         entry.session.send_message_to_agent(slot_id, content, files).await
     }
 
+    /// Wake a specific agent in a team session (trigger it to read mailbox).
+    /// Called by MCP dispatch after `team_send_message` writes to mailbox.
+    /// Fire-and-forget: spawns wake as background task, does not block MCP response.
+    pub async fn wake_agent_in_session(&self, team_id: &str, slot_id: &str) -> Result<(), TeamError> {
+        let entry = self
+            .sessions
+            .get(team_id)
+            .ok_or_else(|| TeamError::SessionNotFound(team_id.into()))?;
+        entry.session.scheduler().set_status(slot_id, crate::types::TeammateStatus::Working).await?;
+        // Compute wake input while we hold the entry ref
+        let input = entry.session.compute_wake_input(slot_id).await;
+
+        // Mirror non-user mailbox rows into the target conversation before
+        // we drop `entry` (the session borrow is still live here). Skipped
+        // for leader wakes inside `mirror_unread_to_conversation`.
+        if let Ok(Some(ref i)) = input
+            && i.should_send
+        {
+            entry.session.mirror_unread_to_conversation(i).await;
+        }
+        let task_mgr = self.task_manager.clone();
+        drop(entry);
+
+        // Spawn actual send as background task (send_message blocks until agent finishes)
+        tokio::spawn(async move {
+            let input = match input {
+                Ok(Some(i)) if i.should_send => i,
+                _ => return,
+            };
+            let Some(handle) = task_mgr.get_task(&input.conversation_id) else { return };
+            let data = aionui_ai_agent::SendMessageData {
+                content: input.first_message,
+                msg_id: aionui_common::generate_id(),
+                files: Vec::new(),
+                inject_skills: Vec::new(),
+            };
+            let _ = handle.send_message(data).await;
+        });
+        Ok(())
+    }
+
+    /// Route an MCP `team_spawn_agent` call into the live [`TeamSession`].
+    ///
+    /// Looks up the session for `team_id` (errors with [`TeamError::SessionNotFound`]
+    /// when absent) and delegates to [`TeamSession::spawn_agent`]. The MCP
+    /// dispatch layer holds a [`Weak<TeamSessionService>`] and calls this to
+    /// avoid wiring a direct `Arc<TeamSession>` into the MCP server — the
+    /// session is owned by the service's `sessions` map.
+    pub async fn spawn_agent_in_session(
+        &self,
+        team_id: &str,
+        caller_slot_id: &str,
+        req: crate::session::SpawnAgentRequest,
+    ) -> Result<TeamAgent, TeamError> {
+        let entry = self
+            .sessions
+            .get(team_id)
+            .ok_or_else(|| TeamError::SessionNotFound(team_id.into()))?;
+        entry.session.spawn_agent(caller_slot_id, req).await
+    }
+
     pub fn dispose_all(&self) {
         let keys: Vec<String> = self.sessions.iter().map(|entry| entry.key().clone()).collect();
         for key in keys {
             self.stop_session(&key);
         }
         info!("All team sessions disposed");
+    }
+
+    /// Accessor used by [`TeamSession::spawn_agent`] to reach the conversation
+    /// service without threading it through every call site.
+    pub(crate) fn conversation_service_ref(&self) -> &ConversationService {
+        &self.conversation_service
+    }
+
+    /// Create the conversation + persist the new agent slot for a spawn.
+    ///
+    /// Holds the per-team `add_agent` lock for the entirety of the
+    /// read-modify-write on `teams.agents`, matching [`TeamSessionService::add_agent`]
+    /// (W4-D23) so concurrent spawns cannot race and drop slots.
+    ///
+    /// The lock is *not* held across the process warmup step — callers
+    /// (`TeamSession::spawn_agent`) wire that up separately so a slow
+    /// `warmup` never stalls other spawns against the same team.
+    pub(crate) async fn persist_spawned_agent(
+        &self,
+        team_id: &str,
+        user_id: &str,
+        name: String,
+        backend: String,
+        model: String,
+        custom_agent_id: Option<String>,
+    ) -> Result<TeamAgent, TeamError> {
+        let lock = self
+            .add_agent_locks
+            .entry(team_id.to_owned())
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone();
+        let _guard = lock.lock().await;
+
+        let row = self
+            .repo
+            .get_team(team_id)
+            .await?
+            .ok_or_else(|| TeamError::TeamNotFound(team_id.into()))?;
+        let mut team = Team::from_row(&row)?;
+
+        let agent_type = parse_agent_type(&backend)?;
+        let conv_req = CreateConversationRequest {
+            r#type: agent_type,
+            name: Some(name.clone()),
+            model: Some(ProviderWithModel {
+                provider_id: backend.clone(),
+                model: model.clone(),
+                use_model: None,
+            }),
+            source: None,
+            channel_chat_id: None,
+            extra: serde_json::json!({
+                "teamId": team_id,
+                "backend": backend,
+            }),
+        };
+        let conv = self
+            .conversation_service
+            .create(user_id, conv_req)
+            .await
+            .map_err(|e| TeamError::InvalidRequest(format!("failed to create conversation: {e}")))?;
+
+        let agent = TeamAgent {
+            slot_id: generate_id(),
+            name,
+            role: TeammateRole::Teammate,
+            conversation_id: conv.id,
+            backend,
+            model,
+            custom_agent_id,
+            status: None,
+            conversation_type: None,
+            cli_path: None,
+        };
+
+        team.agents.push(agent.clone());
+        let agents_json = serde_json::to_string(&team.agents)?;
+        self.repo
+            .update_team(
+                team_id,
+                &UpdateTeamParams {
+                    name: None,
+                    agents: Some(agents_json),
+                    lead_agent_id: None,
+                },
+            )
+            .await?;
+
+        Ok(agent)
     }
 }
 

@@ -1028,6 +1028,34 @@ impl ConversationService {
         Ok(())
     }
 
+    /// Insert a pre-built `MessageRow` into the conversation's message history
+    /// and broadcast a `message.stream` event so live subscribers render it
+    /// immediately.
+    ///
+    /// Used by paths outside the normal user→agent turn (e.g. the team
+    /// scheduler writing an incoming teammate message as a left bubble in the
+    /// target agent's conversation so the UI shows who spoke).
+    pub async fn insert_raw_message(&self, row: &MessageRow) -> Result<(), AppError> {
+        self.repo.insert_message(row).await?;
+
+        let msg_id = row.msg_id.clone().unwrap_or_else(|| row.id.clone());
+        let content_value: serde_json::Value = serde_json::from_str(&row.content)
+            .unwrap_or_else(|_| serde_json::Value::String(row.content.clone()));
+        let payload = serde_json::json!({
+            "conversation_id": row.conversation_id,
+            "msg_id": msg_id,
+            "type": row.r#type,
+            "data": content_value,
+            "position": row.position,
+            "status": row.status,
+            "hidden": row.hidden,
+            "replace": true,
+        });
+        self.broadcaster
+            .broadcast(WebSocketMessage::new("message.stream", payload));
+        Ok(())
+    }
+
     /// Stop the current streaming response for a conversation.
     pub async fn stop_stream(
         &self,

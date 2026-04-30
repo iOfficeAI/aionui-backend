@@ -59,6 +59,14 @@ fn make_agent(slot_id: &str, name: &str, role: TeammateRole) -> TeamAgent {
 // Test-plan §9: Prompt Templates
 // ===========================================================================
 
+fn default_agent_types() -> Vec<(String, String)> {
+    vec![
+        ("claude".into(), "Claude".into()),
+        ("codex".into(), "Codex".into()),
+        ("gemini".into(), "Gemini".into()),
+    ]
+}
+
 // -- LP-1: Lead prompt contains member list ----------------------------------
 
 #[test]
@@ -68,31 +76,33 @@ fn lp1_lead_prompt_contains_member_list() {
         make_agent("w1", "Alice", TeammateRole::Teammate),
         make_agent("w2", "Bob", TeammateRole::Teammate),
     ];
-    let prompt = build_lead_prompt("Alpha", &members);
+    let types = default_agent_types();
+    let prompt = build_lead_prompt("Alpha", &members, &types);
 
-    assert!(prompt.contains("**Lead**"), "lead name missing");
-    assert!(prompt.contains("**Alice**"), "teammate Alice missing");
-    assert!(prompt.contains("**Bob**"), "teammate Bob missing");
-    assert!(prompt.contains("slot: `lead-1`"), "lead slot_id missing");
-    assert!(prompt.contains("slot: `w1`"), "alice slot_id missing");
-    assert!(prompt.contains("slot: `w2`"), "bob slot_id missing");
+    // AionUi bullet format: `- {name} ({backend}, status: {status})`
+    assert!(prompt.contains("- Lead ("), "lead name missing");
+    assert!(prompt.contains("- Alice ("), "teammate Alice missing");
+    assert!(prompt.contains("- Bob ("), "teammate Bob missing");
 }
 
 // -- LP-2: Lead prompt contains tool descriptions ----------------------------
 
 #[test]
 fn lp2_lead_prompt_contains_tool_descriptions() {
-    let prompt = build_lead_prompt("Beta", &[]);
+    let prompt = build_lead_prompt("Beta", &[], &default_agent_types());
 
+    // AionUi lead prompt references the `team_*` coordination tools that the
+    // leader must use; the MCP layer enumerates them with arguments, so the
+    // prompt mentions each tool at least once.
     let expected_tools = [
         "team_send_message",
         "team_spawn_agent",
         "team_task_create",
-        "team_task_update",
         "team_task_list",
         "team_members",
         "team_rename_agent",
         "team_shutdown_agent",
+        "team_list_models",
     ];
     for tool in expected_tools {
         assert!(prompt.contains(tool), "missing tool: {tool}");
@@ -103,12 +113,15 @@ fn lp2_lead_prompt_contains_tool_descriptions() {
 
 #[test]
 fn lp3_lead_prompt_contains_task_management_guidance() {
-    let prompt = build_lead_prompt("Gamma", &[]);
+    let prompt = build_lead_prompt("Gamma", &[], &default_agent_types());
 
-    assert!(prompt.contains("Break down"), "missing decompose guidance");
+    assert!(prompt.contains("Break the work into tasks"), "missing decompose guidance");
     assert!(prompt.contains("Assign tasks"), "missing assign guidance");
-    assert!(prompt.contains("dependencies"), "missing dependency guidance");
-    assert!(prompt.contains("Monitor progress"), "missing monitoring guidance");
+    assert!(prompt.contains("dependency"), "missing dependency guidance");
+    assert!(
+        prompt.contains("When teammates report back"),
+        "missing teammate result-review guidance"
+    );
 }
 
 // -- TP-1: Teammate prompt contains execution guidance -----------------------

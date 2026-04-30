@@ -27,6 +27,7 @@ use tracing::{debug, warn};
 
 use crate::acp_error::AcpError;
 use crate::stream_event::{self, AgentStreamEvent};
+use crate::types::AgentStreamChunk;
 
 use agent_client_protocol::schema::{
     AgentCapabilities, AuthMethod, AuthenticateRequest, CancelNotification, CloseSessionRequest, ExtNotification,
@@ -65,6 +66,7 @@ enum AcpAgentCommand {
     SessionUpdate {
         notification: SessionNotification,
         event_tx: broadcast::Sender<AgentStreamEvent>,
+        stream_tx: broadcast::Sender<AgentStreamChunk>,
     },
     /// Agent requests permission from the user before performing an action.
     RequestPermission {
@@ -159,6 +161,7 @@ impl AcpProtocol {
         stdin: ChildStdin,
         stdout: ChildStdout,
         event_tx: broadcast::Sender<AgentStreamEvent>,
+        stream_tx: broadcast::Sender<AgentStreamChunk>,
         permission_tx: mpsc::Sender<PermissionRequest>,
     ) -> Result<Self, AcpError> {
         let alive = Arc::new(AtomicBool::new(true));
@@ -175,6 +178,7 @@ impl AcpProtocol {
             stdin,
             stdout,
             event_tx,
+            stream_tx,
             permission_tx,
             init_tx,
             clicmd_rx,
@@ -368,10 +372,12 @@ async fn execute_initialize(
 ///
 /// This is the top-level future spawned as the background task in
 /// [`AcpProtocol::connect`].
+#[allow(clippy::too_many_arguments)]
 async fn run_sdk_event_loop(
     stdin: ChildStdin,
     stdout: ChildStdout,
     event_tx: broadcast::Sender<AgentStreamEvent>,
+    stream_tx: broadcast::Sender<AgentStreamChunk>,
     permission_tx: mpsc::Sender<PermissionRequest>,
     init_tx: oneshot::Sender<Result<InitializeResponse, AcpError>>,
     clicmd_rx: mpsc::Receiver<AcpClientCommand>,
@@ -387,6 +393,7 @@ async fn run_sdk_event_loop(
                     let cmd = AcpAgentCommand::SessionUpdate {
                         notification,
                         event_tx: event_tx.clone(),
+                        stream_tx: stream_tx.clone(),
                     };
                     dispatch_agent_command(cmd).await;
                     Ok(())
@@ -505,12 +512,25 @@ async fn dispatch_client_command(connection: &ConnectionTo<Agent>, cmd: AcpClien
 /// Mirrors [`dispatch_client_command`] for the client → agent direction.
 async fn dispatch_agent_command(cmd: AcpAgentCommand) {
     match cmd {
-        AcpAgentCommand::SessionUpdate { notification, event_tx } => {
+        AcpAgentCommand::SessionUpdate {
+            notification,
+            event_tx,
+            stream_tx,
+        } => {
             log_incoming("session/update", &json_str(&notification));
 
             let events = stream_event::session_notification_to_events(&notification);
             for event in events {
                 let _ = event_tx.send(event);
+            }
+
+            // Parallel projection onto the AgentStreamChunk broadcast channel.
+            // Subscribers (wake timeout watchdog, crash detector) only care
+            // about message/thought/tool-call chunks; handshake-like updates
+            // are filtered out inside `session_notification_to_chunks`.
+            let chunks = stream_event::session_notification_to_chunks(&notification);
+            for chunk in chunks {
+                let _ = stream_tx.send(chunk);
             }
         }
         AcpAgentCommand::RequestPermission {

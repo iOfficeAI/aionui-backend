@@ -116,7 +116,8 @@ pub use system::{
 pub use team::{
     AddAgentRequest, CreateTeamRequest, RenameAgentRequest, RenameTeamRequest, SendAgentMessageRequest,
     SendTeamMessageRequest, TeamAgentInput, TeamAgentRemovedPayload, TeamAgentRenamedPayload, TeamAgentResponse,
-    TeamAgentSpawnedPayload, TeamAgentStatusPayload, TeamListResponse, TeamResponse,
+    TeamAgentShutdownPayload, TeamAgentSpawnedPayload, TeamAgentStatusPayload, TeamListResponse, TeamMcpPhase,
+    TeamMcpStatusPayload, TeamResponse, TeammateMessagePayload,
 };
 pub use team_mcp::TeamMcpStdioConfig;
 pub use websocket::WebSocketMessage;

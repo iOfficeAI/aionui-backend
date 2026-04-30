@@ -167,6 +167,71 @@ pub struct TeamAgentRenamedPayload {
     pub name: String,
 }
 
+/// Payload for `team.agent.shutdown` WebSocket event.
+///
+/// Pushed when a teammate acknowledges a Lead-initiated shutdown by
+/// replying `shutdown_approved`. The acknowledging teammate is identified
+/// by `slot_id`; `remove_agent` (and the accompanying
+/// `team.agent.removed` event) follows asynchronously once the agent
+/// process is actually killed and state is cleared.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TeamAgentShutdownPayload {
+    pub team_id: String,
+    pub slot_id: String,
+}
+
+/// Lifecycle phases of the per-team MCP stdio bridge + ACP session.
+///
+/// Emitted by the MCP supervisor whenever a teammate slot transitions
+/// through its bring-up / degraded / ready states so the frontend can
+/// surface actionable status for each agent.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum TeamMcpPhase {
+    TcpReady,
+    TcpError,
+    SessionInjecting,
+    SessionReady,
+    SessionError,
+    LoadFailed,
+    Degraded,
+    ConfigWriteFailed,
+    McpToolsWaiting,
+    McpToolsReady,
+}
+
+/// Payload for `team.mcp.status` WebSocket event.
+///
+/// Pushed whenever a teammate's MCP bridge or ACP session transitions to
+/// a new [`TeamMcpPhase`]. Optional fields carry phase-specific detail:
+/// `port` for TCP bring-up, `server_count` for tool readiness, `error`
+/// for failure phases.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TeamMcpStatusPayload {
+    pub team_id: String,
+    pub slot_id: String,
+    pub phase: TeamMcpPhase,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub server_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Payload for `team.teammate.message` WebSocket event.
+///
+/// Pushed when a teammate sends a message to another agent within the
+/// team; identifies both the sender (`from_slot_id` / `from_name`) and
+/// the conversation the message belongs to.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TeammateMessagePayload {
+    pub conversation_id: String,
+    pub content: String,
+    pub from_slot_id: String,
+    pub from_name: String,
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -592,6 +657,19 @@ mod tests {
         assert_eq!(parsed, payload);
     }
 
+    #[test]
+    fn team_agent_shutdown_payload_roundtrip() {
+        let payload = TeamAgentShutdownPayload {
+            team_id: "t1".into(),
+            slot_id: "s2".into(),
+        };
+        let json = serde_json::to_value(&payload).unwrap();
+        assert_eq!(json["team_id"], "t1");
+        assert_eq!(json["slot_id"], "s2");
+        let parsed: TeamAgentShutdownPayload = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed, payload);
+    }
+
     // -- Deserialize from snake_case JSON (matching Rust field names) -----------
 
     #[test]
@@ -627,5 +705,119 @@ mod tests {
         assert_eq!(team.id, "team-1");
         assert_eq!(team.lead_agent_id.as_deref(), Some("s1"));
         assert_eq!(team.created_at, 1000);
+    }
+
+    // -- F. TeamMcpPhase serde roundtrip --------------------------------------
+
+    fn assert_phase_roundtrip(phase: TeamMcpPhase, wire: &str) {
+        let json = serde_json::to_value(&phase).unwrap();
+        assert_eq!(json, serde_json::Value::String(wire.into()));
+        let parsed: TeamMcpPhase = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed, phase);
+    }
+
+    #[test]
+    fn team_mcp_phase_tcp_ready_roundtrip() {
+        assert_phase_roundtrip(TeamMcpPhase::TcpReady, "tcp_ready");
+    }
+
+    #[test]
+    fn team_mcp_phase_tcp_error_roundtrip() {
+        assert_phase_roundtrip(TeamMcpPhase::TcpError, "tcp_error");
+    }
+
+    #[test]
+    fn team_mcp_phase_session_injecting_roundtrip() {
+        assert_phase_roundtrip(TeamMcpPhase::SessionInjecting, "session_injecting");
+    }
+
+    #[test]
+    fn team_mcp_phase_session_ready_roundtrip() {
+        assert_phase_roundtrip(TeamMcpPhase::SessionReady, "session_ready");
+    }
+
+    #[test]
+    fn team_mcp_phase_session_error_roundtrip() {
+        assert_phase_roundtrip(TeamMcpPhase::SessionError, "session_error");
+    }
+
+    #[test]
+    fn team_mcp_phase_load_failed_roundtrip() {
+        assert_phase_roundtrip(TeamMcpPhase::LoadFailed, "load_failed");
+    }
+
+    #[test]
+    fn team_mcp_phase_degraded_roundtrip() {
+        assert_phase_roundtrip(TeamMcpPhase::Degraded, "degraded");
+    }
+
+    #[test]
+    fn team_mcp_phase_config_write_failed_roundtrip() {
+        assert_phase_roundtrip(TeamMcpPhase::ConfigWriteFailed, "config_write_failed");
+    }
+
+    #[test]
+    fn team_mcp_phase_mcp_tools_waiting_roundtrip() {
+        assert_phase_roundtrip(TeamMcpPhase::McpToolsWaiting, "mcp_tools_waiting");
+    }
+
+    #[test]
+    fn team_mcp_phase_mcp_tools_ready_roundtrip() {
+        assert_phase_roundtrip(TeamMcpPhase::McpToolsReady, "mcp_tools_ready");
+    }
+
+    // -- G. TeamMcpStatusPayload & TeammateMessagePayload ---------------------
+
+    #[test]
+    fn serialize_team_mcp_status_payload_all_fields_present() {
+        let payload = TeamMcpStatusPayload {
+            team_id: "team-1".into(),
+            slot_id: "slot-2".into(),
+            phase: TeamMcpPhase::SessionReady,
+            port: Some(54321),
+            server_count: Some(7),
+            error: Some("boom".into()),
+        };
+        let json = serde_json::to_value(&payload).unwrap();
+        assert_eq!(json["team_id"], "team-1");
+        assert_eq!(json["slot_id"], "slot-2");
+        assert_eq!(json["phase"], "session_ready");
+        assert_eq!(json["port"], 54321);
+        assert_eq!(json["server_count"], 7);
+        assert_eq!(json["error"], "boom");
+    }
+
+    #[test]
+    fn serialize_team_mcp_status_payload_optional_fields_omitted() {
+        let payload = TeamMcpStatusPayload {
+            team_id: "team-1".into(),
+            slot_id: "slot-2".into(),
+            phase: TeamMcpPhase::TcpReady,
+            port: None,
+            server_count: None,
+            error: None,
+        };
+        let json = serde_json::to_value(&payload).unwrap();
+        assert_eq!(json["team_id"], "team-1");
+        assert_eq!(json["slot_id"], "slot-2");
+        assert_eq!(json["phase"], "tcp_ready");
+        assert!(json.get("port").is_none());
+        assert!(json.get("server_count").is_none());
+        assert!(json.get("error").is_none());
+    }
+
+    #[test]
+    fn serialize_teammate_message_payload_all_fields_present() {
+        let payload = TeammateMessagePayload {
+            conversation_id: "conv-9".into(),
+            content: "ping".into(),
+            from_slot_id: "slot-1".into(),
+            from_name: "Lead".into(),
+        };
+        let json = serde_json::to_value(&payload).unwrap();
+        assert_eq!(json["conversation_id"], "conv-9");
+        assert_eq!(json["content"], "ping");
+        assert_eq!(json["from_slot_id"], "slot-1");
+        assert_eq!(json["from_name"], "Lead");
     }
 }

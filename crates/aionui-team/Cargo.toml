@@ -24,3 +24,4 @@ agent-client-protocol = "0.11.1"
 
 [dev-dependencies]
 sqlx.workspace = true
+tokio = { workspace = true, features = ["test-util"] }

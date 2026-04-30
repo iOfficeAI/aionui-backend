@@ -1,11 +1,14 @@
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use aionui_ai_agent::types::AgentStreamChunk;
 use aionui_realtime::EventBroadcaster;
 use dashmap::{DashMap, DashSet};
-use tokio::sync::Mutex;
-use tracing::debug;
+use tokio::sync::{Mutex, broadcast};
+use tracing::{debug, warn};
 
 use crate::crash_detection::CrashReason;
 use crate::error::TeamError;
@@ -17,6 +20,24 @@ use crate::types::{MailboxMessage, MailboxMessageType, TeamAgent, TeamTask, Team
 pub const WAKE_TIMEOUT_MS: u64 = 60_000;
 
 const FINALIZE_DEDUP_WINDOW: Duration = Duration::from_secs(5);
+
+// ---------------------------------------------------------------------------
+// normalize_name — canonical form for agent-name conflict checks
+// ---------------------------------------------------------------------------
+
+/// Normalize an agent name to its canonical form for conflict detection.
+///
+/// Rules (see interface-contracts §15.1):
+/// 1. Trim leading/trailing whitespace.
+/// 2. Drop control characters (`char::is_control`).
+/// 3. Lowercase (Unicode-aware via `to_lowercase`).
+pub fn normalize_name(name: &str) -> String {
+    name.trim()
+        .chars()
+        .filter(|c| !c.is_control())
+        .collect::<String>()
+        .to_lowercase()
+}
 
 // ---------------------------------------------------------------------------
 // SchedulerAction — actions parsed from an agent's turn response
@@ -78,6 +99,8 @@ pub struct WakePayload {
 struct AgentSlot {
     agent: TeamAgent,
     status: TeammateStatus,
+    /// True until the first wake completes — used to inject role prompt on cold start.
+    needs_role_prompt: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -95,8 +118,18 @@ pub struct TeammateManager {
     // conversation; without this dedup window, finalize_turn would run twice
     // and double-write the IdleNotification (aionui-audit §4.3, §8 #3).
     finalized_turns: Arc<DashMap<String, Instant>>,
-    wake_timeouts: DashMap<String, tokio::task::JoinHandle<()>>,
+    wake_timeouts: Arc<DashMap<String, tokio::task::JoinHandle<()>>>,
 }
+
+/// Callback invoked when the wake-timeout watchdog elapses without seeing
+/// any stream activity for a slot.
+///
+/// Reason: `arm_wake_timeout` is written against `origin/main`, where
+/// `handle_inactivity_timeout` (W4-D22, PR #99) does not yet exist. Taking
+/// the recovery action as an injected closure keeps this module decoupled —
+/// once D22 lands, callers just pass `mgr.handle_inactivity_timeout(...)`
+/// through this slot without touching `arm_wake_timeout` itself.
+pub type WakeTimeoutHandler = Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
 
 /// Status set that counts as "settled" for the purpose of
 /// "all teammates settled → wake leader" transitions.
@@ -164,11 +197,14 @@ impl TeammateManager {
     ) -> Self {
         let mut slots = HashMap::new();
         for agent in agents {
+            let mut a = agent.clone();
+            a.status = Some(TeammateStatus::Idle);
             slots.insert(
-                agent.slot_id.clone(),
+                a.slot_id.clone(),
                 AgentSlot {
-                    agent: agent.clone(),
+                    agent: a,
                     status: TeammateStatus::Idle,
+                    needs_role_prompt: true,
                 },
             );
         }
@@ -181,7 +217,7 @@ impl TeammateManager {
             events,
             active_wakes: DashSet::new(),
             finalized_turns: Arc::new(DashMap::new()),
-            wake_timeouts: DashMap::new(),
+            wake_timeouts: Arc::new(DashMap::new()),
         }
     }
 
@@ -394,6 +430,7 @@ impl TeammateManager {
             AgentSlot {
                 agent: agent.clone(),
                 status: TeammateStatus::Idle,
+                needs_role_prompt: true,
             },
         );
         self.events.broadcast_agent_spawned(agent);
@@ -406,15 +443,59 @@ impl TeammateManager {
     }
 
     /// Remove an agent slot at runtime.
-    pub async fn remove_agent(&self, slot_id: &str) -> Result<(), TeamError> {
+    ///
+    /// Also clears any scheduler-side state tied to the slot so a later
+    /// re-spawn (or a stale callback from the killed agent task) cannot be
+    /// blocked by leftover wake locks, wake timeouts, or finalize-dedup
+    /// entries. See [`Self::clear_agent_state`] for the state inventory.
+    ///
+    /// Returns the removed slot's `conversation_id` so the session layer can
+    /// terminate the underlying worker process via
+    /// `IWorkerTaskManager::kill` (W5-D30d-1). The scheduler does not own the
+    /// task manager, mirroring the delegation pattern used by
+    /// [`Self::handle_agent_crash`]: cross-crate side effects are handed back
+    /// to the session.
+    pub async fn remove_agent(&self, slot_id: &str) -> Result<Option<String>, TeamError> {
         let mut slots = self.slots.lock().await;
-        slots
+        let removed = slots
             .remove(slot_id)
             .ok_or_else(|| TeamError::AgentNotFound(slot_id.to_owned()))?;
+        let conversation_id = removed.agent.conversation_id.clone();
         drop(slots);
+        self.clear_agent_state(slot_id, &conversation_id);
         self.events.broadcast_agent_removed(slot_id);
         debug!(team_id = %self.team_id, slot_id, "agent removed from scheduler");
-        Ok(())
+        Ok(Some(conversation_id))
+    }
+
+    /// Announce that a teammate has acknowledged a Lead-initiated shutdown
+    /// request (returned `shutdown_approved` via `team_send_message`).
+    ///
+    /// This is the first signal the frontend receives; actual removal
+    /// (process kill, state cleanup, `team.agent.removed`) is driven
+    /// separately by `remove_agent` once the orchestration layer decides to
+    /// tear the slot down. Broadcast is best-effort and does not mutate
+    /// scheduler state on its own.
+    pub fn notify_shutdown_acknowledged(&self, slot_id: &str) {
+        self.events.broadcast_agent_shutdown(slot_id);
+        debug!(team_id = %self.team_id, slot_id, "agent shutdown acknowledged");
+    }
+
+    /// Clear all scheduler-side state associated with a removed agent.
+    ///
+    /// Drops three independent entries so nothing survives to affect the
+    /// slot's next life (re-spawn with the same id, or a sibling slot that
+    /// shares the same conversation):
+    /// * `active_wakes` — W4-D18a wake-in-flight lock
+    /// * `wake_timeouts` — W4-D18b-1 per-slot wake watchdog task
+    /// * `finalized_turns` — W4-D19a Finish/Error dedup window (keyed by
+    ///   `conversation_id`, not `slot_id`)
+    ///
+    /// Idempotent: every underlying call tolerates missing entries.
+    pub fn clear_agent_state(&self, slot_id: &str, conversation_id: &str) {
+        self.active_wakes.remove(slot_id);
+        self.clear_wake_timeout(slot_id);
+        self.finalized_turns.remove(conversation_id);
     }
 
     /// Rename an agent slot.
@@ -433,6 +514,19 @@ impl TeammateManager {
     pub async fn list_agents(&self) -> Vec<TeamAgent> {
         let slots = self.slots.lock().await;
         slots.values().map(|s| s.agent.clone()).collect()
+    }
+
+    /// Check and consume the cold-start flag for a slot.
+    /// Returns true on the first call (agent needs role prompt), false after.
+    pub async fn take_needs_role_prompt(&self, slot_id: &str) -> bool {
+        let mut slots = self.slots.lock().await;
+        if let Some(slot) = slots.get_mut(slot_id) {
+            let needed = slot.needs_role_prompt;
+            slot.needs_role_prompt = false;
+            needed
+        } else {
+            false
+        }
     }
 
     pub async fn list_tasks(&self) -> Result<Vec<crate::types::TeamTask>, TeamError> {
@@ -474,6 +568,70 @@ impl TeammateManager {
         }
     }
 
+    /// Arm a wake-timeout watchdog for `slot_id`.
+    ///
+    /// Spawns a background task that subscribes to `stream_rx` and enforces
+    /// the [`WAKE_TIMEOUT_MS`] inactivity budget:
+    ///
+    /// - Any chunk (`Text` / `Thought` / `ToolUse` / `Error`) resets the
+    ///   deadline — the agent is still alive and producing output.
+    /// - A `Finish` chunk, or a closed / lagging channel, exits the watchdog
+    ///   cleanly (no timeout fires).
+    /// - If no chunk arrives within the deadline, `on_timeout(slot_id)` is
+    ///   invoked exactly once and the watchdog exits.
+    ///
+    /// In every exit path the map entry is removed so the `JoinHandle` is
+    /// dropped promptly.
+    ///
+    /// If a previous watchdog is still running for this slot, it is aborted
+    /// first — a fresh wake supersedes any stale watchdog (aionui-audit §6.2).
+    pub fn arm_wake_timeout(
+        &self,
+        slot_id: &str,
+        stream_rx: broadcast::Receiver<AgentStreamChunk>,
+        on_timeout: WakeTimeoutHandler,
+    ) {
+        let slot_id_owned = slot_id.to_owned();
+        let map = self.wake_timeouts.clone();
+        let map_for_task = map.clone();
+        let handle = tokio::spawn(async move {
+            let mut rx = stream_rx;
+            let timeout = Duration::from_millis(WAKE_TIMEOUT_MS);
+            let sleep = tokio::time::sleep(timeout);
+            tokio::pin!(sleep);
+
+            let timed_out = loop {
+                tokio::select! {
+                    chunk = rx.recv() => {
+                        match chunk {
+                            Ok(AgentStreamChunk::Finish { .. }) => break false,
+                            Err(broadcast::error::RecvError::Closed) => break false,
+                            Err(broadcast::error::RecvError::Lagged(n)) => {
+                                warn!(slot_id = %slot_id_owned, skipped = n, "wake watchdog lagged");
+                                sleep.as_mut().reset(tokio::time::Instant::now() + timeout);
+                            }
+                            Ok(_) => {
+                                // Activity detected — reset deadline.
+                                sleep.as_mut().reset(tokio::time::Instant::now() + timeout);
+                            }
+                        }
+                    }
+                    _ = &mut sleep => break true,
+                }
+            };
+
+            if timed_out {
+                on_timeout(slot_id_owned.clone()).await;
+            }
+
+            map_for_task.remove(&slot_id_owned);
+        });
+
+        if let Some(old) = map.insert(slot_id.to_owned(), handle) {
+            old.abort();
+        }
+    }
+
     /// Attempt to claim the right to finalize the turn for `conversation_id`.
     ///
     /// Returns `true` when the caller should proceed with finalize. Returns
@@ -510,6 +668,130 @@ impl TeammateManager {
         self.finalized_turns.remove(conversation_id);
     }
 
+    /// Handle a teammate crash: notify lead, update status, drop locks/timeouts.
+    ///
+    /// Runs the five-step recovery sequence for a non-lead agent that the
+    /// scheduler has detected as crashed (W4-D20a `detect_crash` classifier):
+    ///
+    /// 1. Write a crash testament to the lead's mailbox
+    ///    (via [`Self::write_crash_testament`]). The testament carries the
+    ///    reason and optional last message so the lead can decide how to
+    ///    recover.
+    /// 2. Transition the crashed slot to [`TeammateStatus::Error`] — the
+    ///    enum's terminal failure state. `"failed"` is serde-aliased to
+    ///    `Error`, matching the frontend contract.
+    /// 3. Release the wake lock in case one was held — otherwise a future
+    ///    wake for the same slot would be blocked forever.
+    /// 4. Cancel any pending wake timeout — the crashed slot will never
+    ///    answer, so keeping the timeout alive wastes a handle and risks a
+    ///    late spurious callback.
+    /// 5. Return the lead slot_id so the caller (session layer) can wake
+    ///    the lead. Mirrors [`Self::mark_idle`]'s contract: the scheduler
+    ///    does not invoke agent managers directly; it hands the wake target
+    ///    back to the session, which owns the `compute_wake_input` +
+    ///    `send_message` plumbing.
+    ///
+    /// Leader crash (W4-D20c): there is no higher-ranked agent to notify or
+    /// wake, so steps 1 and 5 degrade to no-ops — no self-addressed testament,
+    /// no self-wake. Steps 2-4 still run so status, wake lock, and wake
+    /// timeout do not leak. The leader slot stays in the roster so downstream
+    /// session code can still emit an error event for it.
+    pub async fn handle_agent_crash(
+        &self,
+        slot_id: &str,
+        reason: CrashReason,
+        last_message: Option<&str>,
+    ) -> Result<Option<String>, TeamError> {
+        let (agent_name, is_lead) = {
+            let slots = self.slots.lock().await;
+            let slot = slots
+                .get(slot_id)
+                .ok_or_else(|| TeamError::AgentNotFound(slot_id.to_owned()))?;
+            (slot.agent.name.clone(), slot.agent.role == TeammateRole::Lead)
+        };
+
+        // Step 1: testament to lead (no-op when crasher is the lead or no lead exists).
+        self.write_crash_testament(slot_id, &agent_name, &reason, last_message)
+            .await?;
+
+        // Step 2: mark the slot as terminally failed.
+        self.set_status(slot_id, TeammateStatus::Error).await?;
+
+        // Step 3/4: release wake lock and cancel pending wake timeout.
+        self.release_wake_lock(slot_id);
+        self.clear_wake_timeout(slot_id);
+
+        // Step 5: hand the lead slot back to the caller to wake, but only
+        // when the crasher is a teammate. On leader crash there is no
+        // higher-ranked agent to escalate to — return None (W4-D20c).
+        if is_lead {
+            return Ok(None);
+        }
+        Ok(self.find_lead_slot_id().await)
+    }
+
+    /// Handle a teammate that went silent for longer than the wake-timeout
+    /// window (see [`WAKE_TIMEOUT_MS`]).
+    ///
+    /// This is invoked by the inactivity watchdog spawned in W4-D18b-2: when
+    /// no stream chunk arrives for the slot within the timeout window, the
+    /// watchdog calls this handler to recover local state. It mirrors the
+    /// bookkeeping performed by crash recovery (status + locks + timeouts)
+    /// but does not emit a crash testament — the diagnosis is different
+    /// (inactivity, not process death) and the message routes through the
+    /// normal mailbox channel so the lead sees it like any other teammate
+    /// update.
+    ///
+    /// Flow:
+    /// 1. Transition the slot to [`TeammateStatus::Error`] — mirrors how
+    ///    crash recovery marks terminal failure. A stuck agent is useless
+    ///    to the team until the lead intervenes.
+    /// 2. Release the wake lock — the watchdog itself acquired it when
+    ///    starting the turn, and nothing else will release it now.
+    /// 3. Clear the wake timeout entry — this handler is the timer's own
+    ///    body, so the stored `JoinHandle` is already about to complete,
+    ///    but removing it keeps the map bounded.
+    /// 4. If the stuck slot is a teammate, write a diagnostic message to
+    ///    the lead mailbox and return the lead slot id so the caller can
+    ///    wake the lead. If the stuck slot is the lead itself, there is
+    ///    nobody to notify or wake — return `None` and stop.
+    pub async fn handle_inactivity_timeout(&self, slot_id: &str) -> Result<Option<String>, TeamError> {
+        let (agent_name, is_lead) = {
+            let slots = self.slots.lock().await;
+            let slot = slots
+                .get(slot_id)
+                .ok_or_else(|| TeamError::AgentNotFound(slot_id.to_owned()))?;
+            (slot.agent.name.clone(), slot.agent.role == TeammateRole::Lead)
+        };
+
+        self.set_status(slot_id, TeammateStatus::Error).await?;
+        self.release_wake_lock(slot_id);
+        self.clear_wake_timeout(slot_id);
+
+        if is_lead {
+            return Ok(None);
+        }
+
+        let Some(lead_slot_id) = self.find_lead_slot_id().await else {
+            return Ok(None);
+        };
+        let message = format!(
+            "Teammate '{}' timed out after 60s of inactivity. Please investigate.",
+            agent_name
+        );
+        self.mailbox
+            .write(
+                &self.team_id,
+                &lead_slot_id,
+                slot_id,
+                MailboxMessageType::Message,
+                &message,
+                None,
+            )
+            .await?;
+        Ok(Some(lead_slot_id))
+    }
+
     // -----------------------------------------------------------------------
     // Private helpers
     // -----------------------------------------------------------------------
@@ -541,6 +823,38 @@ impl TeammateManager {
                 slot_id,
                 MailboxMessageType::Message,
                 &testament,
+                None,
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Notify the leader that a teammate declined a shutdown request.
+    ///
+    /// Called when `team_send_message` intercepts a `shutdown_rejected: <reason>`
+    /// payload. The teammate continues to run; the lead receives a mailbox
+    /// message describing who refused and why. No-op when no lead exists or
+    /// when the sender is the lead itself.
+    pub async fn notify_shutdown_rejected(&self, from_slot_id: &str, reason: &str) -> Result<(), TeamError> {
+        let Some(lead_slot_id) = self.find_lead_slot_id().await else {
+            return Ok(());
+        };
+        if lead_slot_id == from_slot_id {
+            return Ok(());
+        }
+        let agent_name = self
+            .get_agent(from_slot_id)
+            .await
+            .map(|a| a.name)
+            .unwrap_or_else(|_| from_slot_id.to_owned());
+        let content = format!("Teammate '{agent_name}' declined shutdown: {reason}");
+        self.mailbox
+            .write(
+                &self.team_id,
+                &lead_slot_id,
+                from_slot_id,
+                MailboxMessageType::Message,
+                &content,
                 None,
             )
             .await?;
@@ -611,8 +925,11 @@ impl TeammateManager {
 
         {
             let slots = self.slots.lock().await;
-            if !slots.contains_key(target_slot_id) {
-                return Err(TeamError::AgentNotFound(target_slot_id.to_owned()));
+            let target = slots
+                .get(target_slot_id)
+                .ok_or_else(|| TeamError::AgentNotFound(target_slot_id.to_owned()))?;
+            if target.agent.role == TeammateRole::Lead {
+                return Err(TeamError::InvalidRequest("cannot shutdown the team lead".into()));
             }
         }
 
@@ -697,6 +1014,35 @@ mod tests {
     use super::*;
     use crate::test_utils::MockTeamRepo;
     use aionui_api_types::WebSocketMessage;
+
+    // -----------------------------------------------------------------
+    // normalize_name — §15.1 contract
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn normalize_name_trims_outer_whitespace() {
+        assert_eq!(normalize_name("  Alice  "), "alice");
+        assert_eq!(normalize_name("\tBob\n"), "bob");
+    }
+
+    #[test]
+    fn normalize_name_lowercases_ascii_and_unicode() {
+        assert_eq!(normalize_name("ALICE"), "alice");
+        assert_eq!(normalize_name("Crème"), "crème");
+    }
+
+    #[test]
+    fn normalize_name_filters_control_characters() {
+        // Null + bell in the middle + outer whitespace.
+        assert_eq!(normalize_name("  Ali\x00ce\x07 "), "alice");
+    }
+
+    #[test]
+    fn normalize_name_collides_on_case_and_whitespace() {
+        // Conflict-detection invariant: two inputs that only differ by
+        // surrounding whitespace / case must normalize to the same string.
+        assert_eq!(normalize_name("  Leader  "), normalize_name("leader"));
+    }
 
     struct RecordingBroadcaster {
         events: std::sync::Mutex<Vec<WebSocketMessage<serde_json::Value>>>,
@@ -927,10 +1273,27 @@ mod tests {
         let agents = make_team_agents();
         let (mgr, bc) = make_manager(&agents);
 
-        mgr.remove_agent("worker-2").await.unwrap();
+        let conv_id = mgr.remove_agent("worker-2").await.unwrap();
+        assert_eq!(conv_id.as_deref(), Some("conv-worker-2"));
 
         let all = mgr.list_agents().await;
         assert_eq!(all.len(), 2);
+        assert!(
+            all.iter().all(|a| a.slot_id != "worker-2"),
+            "list_agents must not contain the removed slot_id"
+        );
+        assert!(
+            all.iter().any(|a| a.slot_id == "lead-1") && all.iter().any(|a| a.slot_id == "worker-1"),
+            "list_agents must retain every slot that was not removed"
+        );
+
+        assert!(
+            matches!(
+                mgr.get_agent("worker-2").await,
+                Err(TeamError::AgentNotFound(ref s)) if s == "worker-2"
+            ),
+            "get_agent on a removed slot must return AgentNotFound"
+        );
 
         let removed_events: Vec<_> = bc
             .events()
@@ -942,12 +1305,106 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn notify_shutdown_acknowledged_broadcasts_shutdown_event() {
+        let agents = make_team_agents();
+        let (mgr, bc) = make_manager(&agents);
+
+        mgr.notify_shutdown_acknowledged("worker-2");
+
+        let shutdown_events: Vec<_> = bc
+            .events()
+            .into_iter()
+            .filter(|e| e.name == "team.agent.shutdown")
+            .collect();
+        assert_eq!(shutdown_events.len(), 1);
+        assert_eq!(shutdown_events[0].data["slot_id"], "worker-2");
+        assert_eq!(shutdown_events[0].data["team_id"], mgr.team_id);
+    }
+
+    #[tokio::test]
+    async fn notify_shutdown_acknowledged_does_not_remove_slot() {
+        let agents = make_team_agents();
+        let (mgr, _) = make_manager(&agents);
+        let before = mgr.list_agents().await.len();
+
+        mgr.notify_shutdown_acknowledged("worker-2");
+
+        assert_eq!(mgr.list_agents().await.len(), before);
+    }
+
+    #[tokio::test]
     async fn remove_nonexistent_agent_fails() {
         let agents = make_team_agents();
         let (mgr, _) = make_manager(&agents);
 
         let result = mgr.remove_agent("ghost").await;
         assert!(matches!(result, Err(TeamError::AgentNotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn remove_agent_clears_wake_lock_timeout_and_finalize_dedup() {
+        let agents = make_team_agents();
+        let (mgr, _) = make_manager(&agents);
+        let conv_id = "conv-worker-2"; // matches make_agent("worker-2")
+
+        // Populate all three state stores for worker-2.
+        assert!(mgr.acquire_wake_lock("worker-2"));
+        let handle = tokio::spawn(async { tokio::time::sleep(Duration::from_secs(999)).await });
+        mgr.wake_timeouts.insert("worker-2".into(), handle);
+        assert!(mgr.begin_finalize(conv_id));
+
+        mgr.remove_agent("worker-2").await.unwrap();
+
+        assert!(
+            !mgr.active_wakes.contains("worker-2"),
+            "active_wakes must not retain a removed slot"
+        );
+        assert!(
+            mgr.wake_timeouts.get("worker-2").is_none(),
+            "wake_timeouts must not retain a removed slot"
+        );
+        assert!(
+            mgr.finalized_turns.get(conv_id).is_none(),
+            "finalized_turns must not retain the removed slot's conversation_id"
+        );
+    }
+
+    #[tokio::test]
+    async fn remove_agent_twice_second_call_is_noop_and_no_extra_broadcast() {
+        let agents = make_team_agents();
+        let (mgr, bc) = make_manager(&agents);
+
+        mgr.remove_agent("worker-2").await.unwrap();
+        let second = mgr.remove_agent("worker-2").await;
+        assert!(
+            matches!(second, Err(TeamError::AgentNotFound(ref s)) if s == "worker-2"),
+            "second remove of the same slot must fail with AgentNotFound"
+        );
+
+        let removed_events: Vec<_> = bc
+            .events()
+            .into_iter()
+            .filter(|e| e.name == "team.agent.removed")
+            .collect();
+        assert_eq!(
+            removed_events.len(),
+            1,
+            "failed second remove must not emit another team.agent.removed"
+        );
+    }
+
+    #[tokio::test]
+    async fn remove_agent_clear_state_is_idempotent() {
+        // clear_agent_state tolerates missing entries — calling it on a slot
+        // that never populated any of the three stores is a no-op, not a panic.
+        let agents = make_team_agents();
+        let (mgr, _) = make_manager(&agents);
+
+        mgr.remove_agent("worker-1").await.unwrap();
+
+        assert!(!mgr.active_wakes.contains("worker-1"));
+        assert!(mgr.wake_timeouts.get("worker-1").is_none());
+        assert!(mgr.finalized_turns.get("conv-worker-1").is_none());
     }
 
     #[tokio::test]
@@ -1146,6 +1603,52 @@ mod tests {
         };
         let result = mgr.execute_action("worker-1", &action).await;
         assert!(matches!(result, Err(TeamError::InvalidRequest(_))));
+    }
+
+    #[tokio::test]
+    async fn lead_cannot_shutdown_lead() {
+        let agents = make_team_agents();
+        let repo = Arc::new(MockTeamRepo::new());
+        let mailbox = Arc::new(Mailbox::new(repo.clone()));
+        let task_board = Arc::new(TaskBoard::new(repo));
+        let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(RecordingBroadcaster::new());
+        let mgr = TeammateManager::new("t1".into(), &agents, mailbox.clone(), task_board, broadcaster);
+
+        let action = SchedulerAction::ShutdownAgent {
+            slot_id: "lead-1".into(),
+            reason: Some("trying to shutdown self".into()),
+        };
+        let result = mgr.execute_action("lead-1", &action).await;
+        assert!(
+            matches!(&result, Err(TeamError::InvalidRequest(msg)) if msg.contains("lead")),
+            "lead shutting down lead must be rejected, got {result:?}"
+        );
+
+        // No ShutdownRequest message should have been written to the lead's mailbox.
+        let lead_msgs = mailbox.read_unread("t1", "lead-1").await.unwrap();
+        assert!(lead_msgs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn lead_can_shutdown_worker() {
+        // Positive-path sanity check that the new target-role guard does not
+        // regress the normal shutdown flow.
+        let agents = make_team_agents();
+        let repo = Arc::new(MockTeamRepo::new());
+        let mailbox = Arc::new(Mailbox::new(repo.clone()));
+        let task_board = Arc::new(TaskBoard::new(repo));
+        let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(RecordingBroadcaster::new());
+        let mgr = TeammateManager::new("t1".into(), &agents, mailbox.clone(), task_board, broadcaster);
+
+        let action = SchedulerAction::ShutdownAgent {
+            slot_id: "worker-1".into(),
+            reason: Some("not needed".into()),
+        };
+        mgr.execute_action("lead-1", &action).await.unwrap();
+
+        let msgs = mailbox.read_unread("t1", "worker-1").await.unwrap();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].msg_type, MailboxMessageType::ShutdownRequest);
     }
 
     // -- execute_action: RenameAgent -----------------------------------------
@@ -1548,6 +2051,168 @@ mod tests {
         map.remove("nonexistent");
     }
 
+    // -- W4-D18b-2: arm_wake_timeout --------------------------------------------
+
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    fn counting_handler(counter: Arc<AtomicU32>) -> WakeTimeoutHandler {
+        Arc::new(move |_slot_id: String| {
+            let c = counter.clone();
+            Box::pin(async move {
+                c.fetch_add(1, Ordering::SeqCst);
+            })
+        })
+    }
+
+    async fn wait_for_map_empty(mgr: &TeammateManager, slot_id: &str, ticks: u32) {
+        for _ in 0..ticks {
+            if mgr.wake_timeouts.get(slot_id).is_none() {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+    }
+
+    /// Yield repeatedly so a freshly spawned watchdog task gets a chance to
+    /// reach its `select!` (and arm its sleep) before the test advances time.
+    async fn let_watchdog_settle() {
+        for _ in 0..32 {
+            tokio::task::yield_now().await;
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn arm_wake_timeout_fires_handler_after_deadline() {
+        let agents = make_team_agents();
+        let (mgr, _) = make_manager(&agents);
+        let counter = Arc::new(AtomicU32::new(0));
+        let (tx, rx) = broadcast::channel::<AgentStreamChunk>(8);
+
+        mgr.arm_wake_timeout("worker-1", rx, counting_handler(counter.clone()));
+        // Keep the sender alive so the channel does not close before the deadline.
+        let_watchdog_settle().await;
+        // Advance slightly past the deadline — handler must fire exactly once.
+        tokio::time::advance(Duration::from_millis(WAKE_TIMEOUT_MS + 500)).await;
+        wait_for_map_empty(&mgr, "worker-1", 128).await;
+
+        assert_eq!(counter.load(Ordering::SeqCst), 1, "handler must fire on inactivity");
+        assert!(
+            mgr.wake_timeouts.get("worker-1").is_none(),
+            "map entry must be cleared after watchdog exit"
+        );
+        drop(tx);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn arm_wake_timeout_activity_resets_deadline() {
+        let agents = make_team_agents();
+        let (mgr, _) = make_manager(&agents);
+        let counter = Arc::new(AtomicU32::new(0));
+        let (tx, rx) = broadcast::channel::<AgentStreamChunk>(8);
+
+        mgr.arm_wake_timeout("worker-1", rx, counting_handler(counter.clone()));
+        let_watchdog_settle().await;
+
+        // Just before the first deadline, an activity chunk arrives.
+        tokio::time::advance(Duration::from_millis(WAKE_TIMEOUT_MS - 1_000)).await;
+        tx.send(AgentStreamChunk::Text { text: "hi".into() }).unwrap();
+        // Let the select branch observe the chunk before advancing again.
+        tokio::task::yield_now().await;
+
+        // Advance another near-full window — deadline should have been reset,
+        // so no timeout has fired yet.
+        tokio::time::advance(Duration::from_millis(WAKE_TIMEOUT_MS - 1_000)).await;
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            0,
+            "activity must reset deadline; handler must not have fired"
+        );
+
+        // Cross the new deadline — handler fires.
+        tokio::time::advance(Duration::from_millis(2_000)).await;
+        wait_for_map_empty(&mgr, "worker-1", 128).await;
+        assert_eq!(counter.load(Ordering::SeqCst), 1);
+        drop(tx);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn arm_wake_timeout_finish_exits_without_firing() {
+        let agents = make_team_agents();
+        let (mgr, _) = make_manager(&agents);
+        let counter = Arc::new(AtomicU32::new(0));
+        let (tx, rx) = broadcast::channel::<AgentStreamChunk>(8);
+
+        mgr.arm_wake_timeout("worker-1", rx, counting_handler(counter.clone()));
+        let_watchdog_settle().await;
+
+        tx.send(AgentStreamChunk::Finish {
+            agent_crash: false,
+            stop_reason: Some("end_turn".into()),
+        })
+        .unwrap();
+        wait_for_map_empty(&mgr, "worker-1", 128).await;
+
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            0,
+            "Finish must not trigger timeout handler"
+        );
+        assert!(
+            mgr.wake_timeouts.get("worker-1").is_none(),
+            "map entry must be cleared after Finish"
+        );
+
+        // Advance past the would-be deadline to make sure no lingering timer fires.
+        tokio::time::advance(Duration::from_millis(WAKE_TIMEOUT_MS * 2)).await;
+        assert_eq!(counter.load(Ordering::SeqCst), 0);
+        drop(tx);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn arm_wake_timeout_channel_close_exits_without_firing() {
+        let agents = make_team_agents();
+        let (mgr, _) = make_manager(&agents);
+        let counter = Arc::new(AtomicU32::new(0));
+        let (tx, rx) = broadcast::channel::<AgentStreamChunk>(8);
+
+        mgr.arm_wake_timeout("worker-1", rx, counting_handler(counter.clone()));
+        let_watchdog_settle().await;
+        drop(tx);
+        wait_for_map_empty(&mgr, "worker-1", 128).await;
+
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            0,
+            "closed channel must not fire inactivity handler"
+        );
+        assert!(mgr.wake_timeouts.get("worker-1").is_none());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn arm_wake_timeout_replaces_existing_watchdog() {
+        let agents = make_team_agents();
+        let (mgr, _) = make_manager(&agents);
+        let counter_a = Arc::new(AtomicU32::new(0));
+        let counter_b = Arc::new(AtomicU32::new(0));
+
+        let (tx_a, rx_a) = broadcast::channel::<AgentStreamChunk>(8);
+        mgr.arm_wake_timeout("worker-1", rx_a, counting_handler(counter_a.clone()));
+
+        // Immediately re-arm — the first watchdog must be aborted.
+        let (tx_b, rx_b) = broadcast::channel::<AgentStreamChunk>(8);
+        mgr.arm_wake_timeout("worker-1", rx_b, counting_handler(counter_b.clone()));
+        let_watchdog_settle().await;
+
+        // Cross the deadline. Only one handler (the second watchdog's) may fire.
+        tokio::time::advance(Duration::from_millis(WAKE_TIMEOUT_MS + 500)).await;
+        wait_for_map_empty(&mgr, "worker-1", 128).await;
+
+        assert_eq!(counter_a.load(Ordering::SeqCst), 0, "aborted watchdog must not fire");
+        assert_eq!(counter_b.load(Ordering::SeqCst), 1, "replacement watchdog must fire");
+        drop(tx_a);
+        drop(tx_b);
+    }
+
     // -- W4-D20b1: crash testament formatting -----------------------------------
 
     #[test]
@@ -1653,6 +2318,383 @@ mod tests {
         mgr.write_crash_testament("lead-1", "Lead", &CrashReason::ProcessExited, None)
             .await
             .unwrap();
+
+        let lead_msgs = mailbox.read_unread("t1", "lead-1").await.unwrap();
+        assert!(lead_msgs.is_empty());
+    }
+
+    // -- W4-D20b-2: handle_agent_crash -----------------------------------------
+
+    #[tokio::test]
+    async fn handle_agent_crash_marks_slot_as_error() {
+        let agents = make_team_agents();
+        let (mgr, _) = make_manager(&agents);
+
+        mgr.set_status("worker-1", TeammateStatus::Working).await.unwrap();
+
+        let wake_target = mgr
+            .handle_agent_crash("worker-1", CrashReason::ProcessExited, None)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            mgr.get_status("worker-1").await.unwrap(),
+            TeammateStatus::Error,
+            "crashed slot must end in Error (aka Failed)"
+        );
+        assert_eq!(wake_target, Some("lead-1".to_string()));
+    }
+
+    #[tokio::test]
+    async fn handle_agent_crash_releases_wake_lock() {
+        let agents = make_team_agents();
+        let (mgr, _) = make_manager(&agents);
+
+        assert!(mgr.acquire_wake_lock("worker-1"));
+
+        mgr.handle_agent_crash("worker-1", CrashReason::SessionNotFound, Some("last words"))
+            .await
+            .unwrap();
+
+        assert!(
+            mgr.acquire_wake_lock("worker-1"),
+            "wake lock must be released after crash so the slot is reusable"
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_agent_crash_writes_testament_to_lead() {
+        let agents = make_team_agents();
+        let repo = Arc::new(MockTeamRepo::new());
+        let mailbox = Arc::new(Mailbox::new(repo.clone()));
+        let task_board = Arc::new(TaskBoard::new(repo));
+        let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(RecordingBroadcaster::new());
+        let mgr = TeammateManager::new("t1".into(), &agents, mailbox.clone(), task_board, broadcaster);
+
+        mgr.handle_agent_crash("worker-1", CrashReason::Unknown("segfault".into()), Some("cleaning up"))
+            .await
+            .unwrap();
+
+        let lead_msgs = mailbox.read_unread("t1", "lead-1").await.unwrap();
+        assert_eq!(lead_msgs.len(), 1);
+        assert_eq!(lead_msgs[0].from_agent_id, "worker-1");
+        assert!(lead_msgs[0].content.contains("Worker1"));
+        assert!(lead_msgs[0].content.contains("segfault"));
+        assert!(lead_msgs[0].content.contains("cleaning up"));
+    }
+
+    #[tokio::test]
+    async fn handle_agent_crash_returns_lead_slot_for_teammate_crash() {
+        let agents = make_team_agents();
+        let (mgr, _) = make_manager(&agents);
+
+        let wake_target = mgr
+            .handle_agent_crash("worker-2", CrashReason::ProcessExited, None)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            wake_target,
+            Some("lead-1".to_string()),
+            "caller needs the lead slot id to trigger a wake"
+        );
+    }
+
+    // -- W4-D20c: handle_agent_crash leader branch -----------------------------
+
+    #[tokio::test]
+    async fn handle_agent_crash_leader_branch_returns_none() {
+        // Leader crash has no higher-ranked agent to wake. handle_agent_crash
+        // must not self-wake and must not remove the leader slot — downstream
+        // session code inspects the leader entry to emit the error event.
+        // Local state (status/locks) still gets cleaned so nothing leaks.
+        let agents = make_team_agents();
+        let repo = Arc::new(MockTeamRepo::new());
+        let mailbox = Arc::new(Mailbox::new(repo.clone()));
+        let task_board = Arc::new(TaskBoard::new(repo));
+        let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(RecordingBroadcaster::new());
+        let mgr = TeammateManager::new("t1".into(), &agents, mailbox.clone(), task_board, broadcaster);
+
+        mgr.set_status("lead-1", TeammateStatus::Working).await.unwrap();
+        assert!(mgr.acquire_wake_lock("lead-1"));
+
+        let wake_target = mgr
+            .handle_agent_crash("lead-1", CrashReason::ProcessExited, Some("last words"))
+            .await
+            .unwrap();
+
+        assert_eq!(wake_target, None, "leader crash must not self-wake");
+        assert_eq!(mgr.get_status("lead-1").await.unwrap(), TeammateStatus::Error);
+        assert!(
+            mgr.acquire_wake_lock("lead-1"),
+            "lock must be released even for the leader branch"
+        );
+
+        // Leader cannot write a testament to itself — the mailbox must be
+        // empty, otherwise the leader would read its own death notice on a
+        // future resume.
+        let lead_msgs = mailbox.read_unread("t1", "lead-1").await.unwrap();
+        assert!(
+            lead_msgs.is_empty(),
+            "leader crash must not produce a self-addressed testament"
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_agent_crash_leader_keeps_agents_list_intact() {
+        // Leader crash must not remove slots from the roster — the session
+        // layer still needs to enumerate teammates to emit finalization /
+        // error events.
+        let agents = make_team_agents();
+        let (mgr, _) = make_manager(&agents);
+
+        let before: Vec<String> = mgr.list_agents().await.into_iter().map(|a| a.slot_id).collect();
+
+        mgr.handle_agent_crash("lead-1", CrashReason::SessionNotFound, None)
+            .await
+            .unwrap();
+
+        let after: Vec<String> = mgr.list_agents().await.into_iter().map(|a| a.slot_id).collect();
+
+        assert_eq!(before, after, "leader crash must preserve the agents list");
+    }
+
+    #[tokio::test]
+    async fn handle_agent_crash_leader_clears_wake_timeout() {
+        // Pending wake timeouts for the leader must be cancelled on crash —
+        // the slot will never answer, so a lingering timer only risks a late
+        // spurious callback.
+        let agents = make_team_agents();
+        let (mgr, _) = make_manager(&agents);
+
+        let handle = tokio::spawn(async {
+            tokio::time::sleep(std::time::Duration::from_secs(999)).await;
+        });
+        mgr.wake_timeouts.insert("lead-1".into(), handle);
+
+        mgr.handle_agent_crash("lead-1", CrashReason::ProcessExited, None)
+            .await
+            .unwrap();
+
+        assert!(
+            mgr.wake_timeouts.get("lead-1").is_none(),
+            "wake timeout entry must be removed after leader crash"
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_agent_crash_clears_wake_timeout() {
+        let agents = make_team_agents();
+        let (mgr, _) = make_manager(&agents);
+
+        // Install a long-running dummy timeout so we can observe that it was
+        // cancelled once the crash handler ran.
+        let handle = tokio::spawn(async {
+            tokio::time::sleep(std::time::Duration::from_secs(999)).await;
+        });
+        mgr.wake_timeouts.insert("worker-1".into(), handle);
+
+        mgr.handle_agent_crash("worker-1", CrashReason::ProcessExited, None)
+            .await
+            .unwrap();
+
+        assert!(
+            mgr.wake_timeouts.get("worker-1").is_none(),
+            "wake timeout entry must be removed after crash"
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_agent_crash_unknown_slot_errors() {
+        let agents = make_team_agents();
+        let (mgr, _) = make_manager(&agents);
+
+        let result = mgr.handle_agent_crash("ghost", CrashReason::ProcessExited, None).await;
+
+        assert!(matches!(result, Err(TeamError::AgentNotFound(_))));
+    }
+
+    // -- W4-D22: handle_inactivity_timeout -------------------------------------
+
+    #[tokio::test]
+    async fn handle_inactivity_timeout_teammate_marks_error_and_wakes_lead() {
+        let agents = make_team_agents();
+        let repo = Arc::new(MockTeamRepo::new());
+        let mailbox = Arc::new(Mailbox::new(repo.clone()));
+        let task_board = Arc::new(TaskBoard::new(repo));
+        let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(RecordingBroadcaster::new());
+        let mgr = TeammateManager::new("t1".into(), &agents, mailbox.clone(), task_board, broadcaster);
+
+        mgr.set_status("worker-1", TeammateStatus::Working).await.unwrap();
+
+        let wake_target = mgr.handle_inactivity_timeout("worker-1").await.unwrap();
+
+        assert_eq!(
+            mgr.get_status("worker-1").await.unwrap(),
+            TeammateStatus::Error,
+            "stuck slot must end in Error"
+        );
+        assert_eq!(wake_target, Some("lead-1".to_string()));
+
+        let lead_msgs = mailbox.read_unread("t1", "lead-1").await.unwrap();
+        assert_eq!(lead_msgs.len(), 1);
+        assert_eq!(lead_msgs[0].from_agent_id, "worker-1");
+        assert_eq!(lead_msgs[0].msg_type, MailboxMessageType::Message);
+        assert!(lead_msgs[0].content.contains("Worker1"));
+        assert!(lead_msgs[0].content.contains("timed out"));
+    }
+
+    #[tokio::test]
+    async fn handle_inactivity_timeout_leader_returns_none_no_mailbox_write() {
+        let agents = make_team_agents();
+        let repo = Arc::new(MockTeamRepo::new());
+        let mailbox = Arc::new(Mailbox::new(repo.clone()));
+        let task_board = Arc::new(TaskBoard::new(repo));
+        let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(RecordingBroadcaster::new());
+        let mgr = TeammateManager::new("t1".into(), &agents, mailbox.clone(), task_board, broadcaster);
+
+        mgr.set_status("lead-1", TeammateStatus::Working).await.unwrap();
+        assert!(mgr.acquire_wake_lock("lead-1"));
+
+        let wake_target = mgr.handle_inactivity_timeout("lead-1").await.unwrap();
+
+        assert_eq!(wake_target, None, "leader inactivity must not self-wake");
+        assert_eq!(mgr.get_status("lead-1").await.unwrap(), TeammateStatus::Error);
+        assert!(
+            mgr.acquire_wake_lock("lead-1"),
+            "lock must be released even when leader stuck"
+        );
+
+        let lead_msgs = mailbox.read_unread("t1", "lead-1").await.unwrap();
+        assert!(
+            lead_msgs.is_empty(),
+            "leader must not receive a self-addressed timeout message"
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_inactivity_timeout_releases_wake_lock() {
+        let agents = make_team_agents();
+        let (mgr, _) = make_manager(&agents);
+
+        assert!(mgr.acquire_wake_lock("worker-1"));
+
+        mgr.handle_inactivity_timeout("worker-1").await.unwrap();
+
+        assert!(
+            mgr.acquire_wake_lock("worker-1"),
+            "wake lock must be released after inactivity timeout"
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_inactivity_timeout_clears_wake_timeout_entry() {
+        let agents = make_team_agents();
+        let (mgr, _) = make_manager(&agents);
+
+        let handle = tokio::spawn(async {
+            tokio::time::sleep(std::time::Duration::from_secs(999)).await;
+        });
+        mgr.wake_timeouts.insert("worker-1".into(), handle);
+
+        mgr.handle_inactivity_timeout("worker-1").await.unwrap();
+
+        assert!(
+            mgr.wake_timeouts.get("worker-1").is_none(),
+            "wake timeout entry must be removed after inactivity recovery"
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_inactivity_timeout_unknown_slot_errors() {
+        let agents = make_team_agents();
+        let (mgr, _) = make_manager(&agents);
+
+        let result = mgr.handle_inactivity_timeout("ghost").await;
+
+        assert!(matches!(result, Err(TeamError::AgentNotFound(_))));
+    }
+
+    #[tokio::test]
+    async fn handle_inactivity_timeout_no_lead_returns_none() {
+        // Team with no lead: a stuck teammate has nowhere to route the
+        // diagnostic message. The handler must still clean local state
+        // and must not panic or return an error.
+        let agents = vec![
+            make_agent("worker-1", "Worker1", TeammateRole::Teammate),
+            make_agent("worker-2", "Worker2", TeammateRole::Teammate),
+        ];
+        let repo = Arc::new(MockTeamRepo::new());
+        let mailbox = Arc::new(Mailbox::new(repo.clone()));
+        let task_board = Arc::new(TaskBoard::new(repo));
+        let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(RecordingBroadcaster::new());
+        let mgr = TeammateManager::new("t1".into(), &agents, mailbox.clone(), task_board, broadcaster);
+
+        let wake_target = mgr.handle_inactivity_timeout("worker-1").await.unwrap();
+
+        assert_eq!(wake_target, None);
+        assert_eq!(mgr.get_status("worker-1").await.unwrap(), TeammateStatus::Error);
+
+        let msgs2 = mailbox.read_unread("t1", "worker-2").await.unwrap();
+        assert!(msgs2.is_empty());
+    }
+
+    // -- W5-D30b: notify_shutdown_rejected -------------------------------------
+
+    #[tokio::test]
+    async fn notify_shutdown_rejected_delivers_to_lead_mailbox() {
+        let agents = make_team_agents();
+        let repo = Arc::new(MockTeamRepo::new());
+        let mailbox = Arc::new(Mailbox::new(repo.clone()));
+        let task_board = Arc::new(TaskBoard::new(repo));
+        let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(RecordingBroadcaster::new());
+        let mgr = TeammateManager::new("t1".into(), &agents, mailbox.clone(), task_board, broadcaster);
+
+        mgr.notify_shutdown_rejected("worker-1", "still working on task X")
+            .await
+            .unwrap();
+
+        let lead_msgs = mailbox.read_unread("t1", "lead-1").await.unwrap();
+        assert_eq!(lead_msgs.len(), 1);
+        assert_eq!(lead_msgs[0].from_agent_id, "worker-1");
+        assert!(lead_msgs[0].content.contains("Worker1"));
+        assert!(lead_msgs[0].content.contains("declined shutdown"));
+        assert!(lead_msgs[0].content.contains("still working on task X"));
+
+        // Agent was not removed
+        assert!(mgr.get_agent("worker-1").await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn notify_shutdown_rejected_noop_when_no_lead() {
+        let agents = vec![
+            make_agent("worker-1", "Worker1", TeammateRole::Teammate),
+            make_agent("worker-2", "Worker2", TeammateRole::Teammate),
+        ];
+        let repo = Arc::new(MockTeamRepo::new());
+        let mailbox = Arc::new(Mailbox::new(repo.clone()));
+        let task_board = Arc::new(TaskBoard::new(repo));
+        let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(RecordingBroadcaster::new());
+        let mgr = TeammateManager::new("t1".into(), &agents, mailbox.clone(), task_board, broadcaster);
+
+        mgr.notify_shutdown_rejected("worker-1", "busy").await.unwrap();
+
+        let msgs1 = mailbox.read_unread("t1", "worker-1").await.unwrap();
+        let msgs2 = mailbox.read_unread("t1", "worker-2").await.unwrap();
+        assert!(msgs1.is_empty());
+        assert!(msgs2.is_empty());
+    }
+
+    #[tokio::test]
+    async fn notify_shutdown_rejected_noop_when_sender_is_lead() {
+        let agents = make_team_agents();
+        let repo = Arc::new(MockTeamRepo::new());
+        let mailbox = Arc::new(Mailbox::new(repo.clone()));
+        let task_board = Arc::new(TaskBoard::new(repo));
+        let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(RecordingBroadcaster::new());
+        let mgr = TeammateManager::new("t1".into(), &agents, mailbox.clone(), task_board, broadcaster);
+
+        mgr.notify_shutdown_rejected("lead-1", "irrelevant").await.unwrap();
 
         let lead_msgs = mailbox.read_unread("t1", "lead-1").await.unwrap();
         assert!(lead_msgs.is_empty());

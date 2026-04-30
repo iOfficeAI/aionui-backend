@@ -24,6 +24,10 @@ impl RecordingBroadcaster {
             events: std::sync::Mutex::new(vec![]),
         }
     }
+
+    fn events(&self) -> Vec<WebSocketMessage<Value>> {
+        self.events.lock().unwrap().clone()
+    }
 }
 
 impl EventBroadcaster for RecordingBroadcaster {
@@ -68,25 +72,43 @@ fn make_agents() -> Vec<TeamAgent> {
 struct TestEnv {
     server: TeamMcpServer,
     _repo: Arc<MockTeamRepo>,
+    broadcaster: Arc<RecordingBroadcaster>,
 }
 
 async fn setup() -> TestEnv {
     let repo = Arc::new(MockTeamRepo::new());
     let mailbox = Arc::new(Mailbox::new(repo.clone()));
     let task_board = Arc::new(TaskBoard::new(repo.clone()));
-    let broadcaster: Arc<dyn EventBroadcaster> = Arc::new(RecordingBroadcaster::new());
+    let recorder = Arc::new(RecordingBroadcaster::new());
+    let broadcaster: Arc<dyn EventBroadcaster> = recorder.clone();
     let agents = make_agents();
     let scheduler = Arc::new(TeammateManager::new(
         "team-1".into(),
         &agents,
         mailbox,
         task_board,
-        broadcaster,
+        broadcaster.clone(),
     ));
 
-    let server = TeamMcpServer::start("test-token-123".into(), scheduler).await.unwrap();
+    // W5-D29e: standalone MCP server without a live TeamSessionService —
+    // the Weak cannot upgrade, so `team_spawn_agent` will surface the
+    // service-unavailable error. Non-spawn tools still exercise scheduler
+    // flows directly and do not hit this path.
+    let server = TeamMcpServer::start(
+        "test-token-123".into(),
+        scheduler,
+        "team-1".into(),
+        broadcaster,
+        std::sync::Weak::new(),
+    )
+    .await
+    .unwrap();
 
-    TestEnv { server, _repo: repo }
+    TestEnv {
+        server,
+        _repo: repo,
+        broadcaster: recorder,
+    }
 }
 
 async fn connect_and_init(port: u16, token: &str, slot_id: &str) -> TcpStream {
@@ -313,12 +335,81 @@ async fn ts3_send_message_to_nonexistent_agent() {
     env.server.stop();
 }
 
+#[tokio::test]
+async fn ts_shutdown_approved_intercepted() {
+    let env = setup().await;
+    let mut stream = connect_and_init(env.server.port(), "test-token-123", "worker-1").await;
+
+    let resp = call_tool(
+        &mut stream,
+        2,
+        "team_send_message",
+        json!({"to": "lead-1", "message": "shutdown_approved"}),
+    )
+    .await;
+
+    assert!(!is_error_response(&resp));
+    let text = extract_text(&resp);
+    let payload: Value = serde_json::from_str(&text).expect("interception payload is JSON");
+    assert_eq!(payload["status"], "shutdown_approved_received");
+
+    env.server.stop();
+}
+
+#[tokio::test]
+async fn ts_shutdown_rejected_intercepted() {
+    let env = setup().await;
+    let mut stream = connect_and_init(env.server.port(), "test-token-123", "worker-1").await;
+
+    let resp = call_tool(
+        &mut stream,
+        2,
+        "team_send_message",
+        json!({"to": "lead-1", "message": "shutdown_rejected: still finishing task"}),
+    )
+    .await;
+
+    assert!(!is_error_response(&resp));
+    let text = extract_text(&resp);
+    let payload: Value = serde_json::from_str(&text).expect("interception payload is JSON");
+    assert_eq!(payload["status"], "shutdown_rejected_received");
+
+    env.server.stop();
+}
+
+#[tokio::test]
+async fn ts_regular_message_not_intercepted() {
+    let env = setup().await;
+    let mut stream = connect_and_init(env.server.port(), "test-token-123", "worker-1").await;
+
+    let resp = call_tool(
+        &mut stream,
+        2,
+        "team_send_message",
+        json!({"to": "lead-1", "message": "just a normal update"}),
+    )
+    .await;
+
+    assert!(!is_error_response(&resp));
+    let text = extract_text(&resp);
+    assert!(text.contains("lead-1"));
+    assert!(!text.contains("shutdown_approved_received"));
+    assert!(!text.contains("shutdown_rejected_received"));
+
+    env.server.stop();
+}
+
 // ---------------------------------------------------------------------------
 // Tests: team_spawn_agent (SP-1, SP-2, SP-3)
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn sp1_lead_spawns_whitelisted_agent() {
+async fn sp1_lead_spawn_requires_live_session_service() {
+    // W5-D29e: this standalone test env spins up TeamMcpServer with
+    // `Weak::new()` (no live TeamSessionService), so a well-formed Lead
+    // spawn now surfaces the service-unavailable error. Real session-level
+    // spawn success is covered by `tests/e2e_smoke.rs` scenario 2 and by
+    // lib unit tests in `src/session.rs` that wire a TeamSessionService.
     let env = setup().await;
     let mut stream = connect_and_init(env.server.port(), "test-token-123", "lead-1").await;
 
@@ -330,10 +421,12 @@ async fn sp1_lead_spawns_whitelisted_agent() {
     )
     .await;
 
-    assert!(!is_error_response(&resp));
+    assert!(is_error_response(&resp));
     let text = extract_text(&resp);
-    assert!(text.contains("Helper"));
-    assert!(text.contains("spawn"));
+    assert!(
+        text.contains("Team service not available"),
+        "expected service-unavailable error, got {text:?}"
+    );
 
     env.server.stop();
 }
@@ -535,6 +628,18 @@ async fn tm1_list_all_members() {
     assert!(names.contains(&"Leader"));
     assert!(names.contains(&"Worker"));
 
+    // Regression: cold-start agents (including the lead before its first
+    // wake) must report an explicit `idle` status — never `null` — so MCP
+    // clients do not misread a live teammate as offline.
+    for m in &members {
+        assert_eq!(
+            m["status"].as_str(),
+            Some("idle"),
+            "team_members must report idle status for cold-start agents, got {:?}",
+            m["status"]
+        );
+    }
+
     env.server.stop();
 }
 
@@ -734,6 +839,145 @@ async fn sb3_different_agents_get_different_slot_ids() {
         kv_lead[TeamMcpStdioConfig::ENV_SLOT_ID],
         kv_worker[TeamMcpStdioConfig::ENV_SLOT_ID]
     );
+}
+
+// ---------------------------------------------------------------------------
+// Tests: mcpStatus broadcast (W5-D31b-1)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn mcp_status_tcp_ready_is_broadcast_on_successful_bind() {
+    use aionui_api_types::{TeamMcpPhase, TeamMcpStatusPayload};
+
+    let env = setup().await;
+    let port = env.server.port();
+
+    let events = env.broadcaster.events();
+    let status_events: Vec<_> = events.iter().filter(|e| e.name == "team.mcpStatus").collect();
+    assert_eq!(
+        status_events.len(),
+        1,
+        "expected exactly one team.mcpStatus event after bind, got {}",
+        status_events.len()
+    );
+
+    let payload: TeamMcpStatusPayload = serde_json::from_value(status_events[0].data.clone()).unwrap();
+    assert_eq!(payload.team_id, "team-1");
+    assert_eq!(payload.slot_id, "");
+    assert!(matches!(payload.phase, TeamMcpPhase::TcpReady));
+    assert_eq!(payload.port, Some(port));
+    assert!(payload.server_count.is_none());
+    assert!(payload.error.is_none());
+
+    env.server.stop();
+
+    env.server.stop();
+}
+
+// ---------------------------------------------------------------------------
+// Tests: W5-D30b — shutdown_rejected detection in team_send_message
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn tsr1_shutdown_rejected_notifies_lead_and_preserves_agent() {
+    let env = setup().await;
+    let mut stream = connect_and_init(env.server.port(), "test-token-123", "worker-1").await;
+
+    let resp = call_tool(
+        &mut stream,
+        2,
+        "team_send_message",
+        json!({"to": "lead-1", "message": "shutdown_rejected: still working"}),
+    )
+    .await;
+
+    assert!(!is_error_response(&resp));
+    let text = extract_text(&resp);
+    assert!(
+        text.contains("shutdown_rejected"),
+        "response should echo the sentinel, got: {text}"
+    );
+    assert!(
+        text.contains("still working"),
+        "response should echo the reason, got: {text}"
+    );
+
+    // Leader mailbox contains the notification, worker did not receive a
+    // literal copy of the sentinel.
+    let state = env._repo.state.lock().unwrap();
+    let lead_msgs: Vec<_> = state.messages.iter().filter(|m| m.to_agent_id == "lead-1").collect();
+    assert_eq!(lead_msgs.len(), 1, "expected exactly one message to lead");
+    assert_eq!(lead_msgs[0].from_agent_id, "worker-1");
+    assert!(lead_msgs[0].content.contains("Worker"));
+    assert!(lead_msgs[0].content.contains("declined shutdown"));
+    assert!(lead_msgs[0].content.contains("still working"));
+
+    let lead_self_msgs: Vec<_> = state
+        .messages
+        .iter()
+        .filter(|m| m.to_agent_id == "lead-1" && m.content == "shutdown_rejected: still working")
+        .collect();
+    assert!(
+        lead_self_msgs.is_empty(),
+        "raw sentinel must not be delivered as a normal message"
+    );
+    drop(state);
+
+    env.server.stop();
+}
+
+#[tokio::test]
+async fn tsr2_shutdown_rejected_with_whitespace_reason() {
+    let env = setup().await;
+    let mut stream = connect_and_init(env.server.port(), "test-token-123", "worker-1").await;
+
+    let resp = call_tool(
+        &mut stream,
+        2,
+        "team_send_message",
+        json!({"to": "lead-1", "message": "  shutdown_rejected:   need more time  "}),
+    )
+    .await;
+
+    assert!(!is_error_response(&resp));
+
+    let state = env._repo.state.lock().unwrap();
+    let lead_msgs: Vec<_> = state.messages.iter().filter(|m| m.to_agent_id == "lead-1").collect();
+    assert_eq!(lead_msgs.len(), 1);
+    // Reason is trimmed before inclusion in the notification.
+    assert!(lead_msgs[0].content.contains("need more time"));
+    assert!(!lead_msgs[0].content.contains("  need more time  "));
+    drop(state);
+
+    env.server.stop();
+}
+
+#[tokio::test]
+async fn tsr3_send_message_without_sentinel_still_routes_normally() {
+    let env = setup().await;
+    let mut stream = connect_and_init(env.server.port(), "test-token-123", "worker-1").await;
+
+    let resp = call_tool(
+        &mut stream,
+        2,
+        "team_send_message",
+        json!({"to": "lead-1", "message": "regular update"}),
+    )
+    .await;
+
+    assert!(!is_error_response(&resp));
+    let text = extract_text(&resp);
+    assert!(text.contains("Message sent"));
+
+    // The literal message lands in the lead mailbox unchanged.
+    let state = env._repo.state.lock().unwrap();
+    let lead_msg = state
+        .messages
+        .iter()
+        .find(|m| m.to_agent_id == "lead-1")
+        .expect("message should be delivered");
+    assert_eq!(lead_msg.content, "regular update");
+    drop(state);
 
     env.server.stop();
 }
