@@ -512,7 +512,7 @@ async fn http_mcp_loop(
         tokio::select! {
             accept = listener.accept() => {
                 let Ok((mut stream, _)) = accept else { continue };
-                let token = auth_token.clone();
+                let _token = auth_token.clone();
                 let sched = scheduler.clone();
                 tokio::spawn(async move {
                     let mut buf = vec![0u8; 65536];
@@ -567,7 +567,7 @@ async fn http_mcp_loop(
                                 .find(|l| l.to_lowercase().starts_with("authorization:"))
                                 .and_then(|l| l.split_whitespace().last())
                                 .unwrap_or("");
-                            let slot_id = auth_header; // Will use header as slot_id for now
+                            let _slot_id = auth_header; // Will use header as slot_id for now
                             match dispatch_tool(tool_name, &arguments, &sched, auth_header, TeammateRole::Lead).await {
                                 Ok(text) => json!({ "content": [{"type": "text", "text": text}] }),
                                 Err(text) => json!({ "content": [{"type": "text", "text": text}], "isError": true }),

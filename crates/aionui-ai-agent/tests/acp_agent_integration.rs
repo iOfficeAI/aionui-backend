@@ -100,7 +100,6 @@ async fn make_mock_agent(script: &str, backend: &str) -> (Arc<AcpAgentManager>, 
         },
         config,
         skill_manager,
-        Arc::new(std::path::PathBuf::from("/tmp/aionui-backend")),
         catalog_tx,
     )
     .await

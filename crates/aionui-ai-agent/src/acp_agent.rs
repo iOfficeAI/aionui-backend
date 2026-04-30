@@ -1,32 +1,34 @@
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::Mutex as StdMutex;
-use std::sync::atomic::{AtomicI64, Ordering};
-use std::time::Duration;
-
+use crate::IAgentManager;
 use crate::acp_protocol::{AcpProtocol, PermissionDecision, PermissionRequest};
-
 use crate::acp_runtime_snapshot::AcpRuntimeSnapshot;
 use crate::acp_runtime_snapshot::PersistedSessionState;
 use crate::agent_registry::CatalogSender;
 use crate::cli_process::CliAgentProcess;
+use crate::first_message_injector::{InjectionConfig, inject_first_message_prefix};
 use crate::skill_manager::AcpSkillManager;
-use crate::stream_event::{AgentStreamEvent, permission_request_to_event_data};
+use crate::stream_event::{
+    AgentStreamEvent, AvailableCommandsEventData, FinishEventData, SessionAssignedEventData, StartEventData,
+    permission_request_to_event_data,
+};
 use crate::types::{AcpBuildExtra, SendMessageData, SlashCommandItem};
 use agent_client_protocol::schema::{
-    AgentCapabilities, AvailableCommand, CancelNotification, ContentBlock, EnvVariable, HttpHeader, LoadSessionRequest,
-    McpServer, McpServerHttp, NewSessionRequest, PromptRequest, SessionConfigOption, SessionId, SessionModeState,
-    SessionModelState, SetSessionConfigOptionRequest, SetSessionModeRequest, SetSessionModelRequest, UsageUpdate,
+    AgentCapabilities, AvailableCommand, CancelNotification, ContentBlock, HttpHeader, LoadSessionRequest, McpServer,
+    McpServerHttp, NewSessionRequest, PromptRequest, SessionConfigKind, SessionConfigOption, SessionId,
+    SessionModeState, SessionModelState, SetSessionConfigOptionRequest, SetSessionModeRequest, SetSessionModelRequest,
+    UsageUpdate,
 };
-use aionui_api_types::{AgentHandshake, AgentMetadata};
-
 use aionui_api_types::TeamMcpStdioConfig;
+use aionui_api_types::{AgentHandshake, AgentMetadata};
 use aionui_common::{
     AgentKillReason, AgentType, AppError, CommandSpec, Confirmation, ConversationStatus, TimestampMs,
     normalize_keys_to_snake_case, now_ms,
 };
 use serde_json::Value;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
+use std::sync::atomic::{AtomicI64, Ordering};
+use std::time::Duration;
 use tokio::sync::{Mutex, RwLock, broadcast, mpsc, oneshot};
 use tracing::{debug, error, info};
 
@@ -68,8 +70,7 @@ fn normalize_requested_mode(metadata: &AgentMetadata, mode: &str) -> String {
 /// through `session/set_session_config_option`. Boolean toggles and
 /// other future kinds return `None` and are skipped by the replay
 /// path.
-fn extract_config_current_value(kind: &agent_client_protocol::schema::SessionConfigKind) -> Option<String> {
-    use agent_client_protocol::schema::SessionConfigKind;
+fn extract_config_current_value(kind: &SessionConfigKind) -> Option<String> {
     match kind {
         SessionConfigKind::Select(sel) => Some(sel.current_value.to_string()),
         _ => None,
@@ -99,16 +100,12 @@ fn confirm_option_id(data: &Value) -> Option<String> {
 /// The stdio server follows the phase1 interface-contracts §3 shape:
 /// `command = backend_binary_path`, `args = ["mcp-bridge"]`, `env` =
 /// the three `TEAM_MCP_*` pairs defined on `TeamMcpStdioConfig`.
-fn build_new_session_request(
-    workspace: &str,
-    config: &AcpBuildExtra,
-    backend_binary_path: &std::path::Path,
-) -> NewSessionRequest {
+fn build_new_session_request(workspace: &str, config: &AcpBuildExtra) -> NewSessionRequest {
     let req = NewSessionRequest::new(workspace);
     let Some(cfg) = config.team_mcp_stdio_config.as_ref() else {
         return req;
     };
-    req.mcp_servers(vec![team_mcp_server(cfg, backend_binary_path)])
+    req.mcp_servers(vec![team_mcp_server(cfg)])
 }
 
 /// Translate a `TeamMcpStdioConfig` into the ACP SDK wire type expected by
@@ -119,7 +116,7 @@ fn build_new_session_request(
 /// logic is inlined here rather than reused because `aionui-team` already
 /// depends on this crate, so importing the spec would cycle. Both sides
 /// derive `name` from `cfg.team_id` (phase1 interface-contracts §3).
-fn team_mcp_server(cfg: &TeamMcpStdioConfig, _backend_binary_path: &std::path::Path) -> McpServer {
+fn team_mcp_server(cfg: &TeamMcpStdioConfig) -> McpServer {
     // Use HTTP transport — claude-agent-acp supports http and actively
     // connects to it (unlike stdio which has spawn/init timing issues).
     let url = format!("http://127.0.0.1:{}", cfg.port);
@@ -243,11 +240,7 @@ pub struct AcpAgentManager {
     /// Whether a graceful shutdown is in progress.
     closing: std::sync::atomic::AtomicBool,
     /// Shared skill manager — used to discover skills for first-message injection.
-    skill_manager: Arc<crate::skill_manager::AcpSkillManager>,
-    /// Absolute path to the backend binary, used as the `command` of the
-    /// stdio MCP bridge when a team session is attached to this agent.
-    /// Captured once at app startup (`std::env::current_exe()`).
-    backend_binary_path: Arc<PathBuf>,
+    skill_manager: Arc<AcpSkillManager>,
 }
 
 impl AcpAgentManager {
@@ -457,7 +450,6 @@ impl AcpAgentManager {
         command_spec: CommandSpec,
         config: AcpBuildExtra,
         skill_manager: Arc<AcpSkillManager>,
-        backend_binary_path: Arc<PathBuf>,
         catalog_tx: CatalogSender,
     ) -> Result<Self, AppError> {
         let process = CliAgentProcess::spawn_for_sdk(command_spec).await?;
@@ -527,7 +519,6 @@ impl AcpAgentManager {
             runtime_snapshot: RwLock::new(runtime_snapshot),
             closing: std::sync::atomic::AtomicBool::new(false),
             skill_manager,
-            backend_binary_path,
         };
 
         Ok(manager)
@@ -654,11 +645,9 @@ impl AcpAgentManager {
         // Emit Start event
         let _ = self
             .event_tx
-            .send(AgentStreamEvent::Start(crate::stream_event::StartEventData {
-                session_id: None,
-            }));
+            .send(AgentStreamEvent::Start(StartEventData { session_id: None }));
 
-        let req = build_new_session_request(&self.workspace, &self.config, self.backend_binary_path.as_path());
+        let req = build_new_session_request(&self.workspace, &self.config);
         tracing::info!(
             has_team_mcp = self.config.team_mcp_stdio_config.is_some(),
             mcp_servers_count = req.mcp_servers.len(),
@@ -690,11 +679,11 @@ impl AcpAgentManager {
         // Notify subscribers (e.g. AcpAgentService) so the new id is
         // persisted into `acp_session.session_id` — resume can then
         // choose `session/load` instead of a fresh `session/new`.
-        let _ = self.event_tx.send(AgentStreamEvent::SessionAssigned(
-            crate::stream_event::SessionAssignedEventData {
+        let _ = self
+            .event_tx
+            .send(AgentStreamEvent::SessionAssigned(SessionAssignedEventData {
                 session_id: sid.clone(),
-            },
-        ));
+            }));
 
         self.apply_preferred_mode(&sid).await?;
         self.apply_preferred_config_selections(&sid).await;
@@ -703,10 +692,10 @@ impl AcpAgentManager {
         // Backends with native skill discovery (e.g. Claude via .claude/skills/)
         // only need preset_context here; others get the full [Assistant Rules]
         // block with a skills index.
-        let injected_content = crate::first_message_injector::inject_first_message_prefix(
+        let injected_content = inject_first_message_prefix(
             &data.content,
             &self.skill_manager,
-            crate::first_message_injector::InjectionConfig {
+            InjectionConfig {
                 preset_context: self.config.preset_context.as_deref(),
                 skills: &self.config.skills,
                 native_skill_support: self.native_skill_support(),
@@ -732,9 +721,7 @@ impl AcpAgentManager {
         // Emit Finish event when prompt completes
         let _ = self
             .event_tx
-            .send(AgentStreamEvent::Finish(crate::stream_event::FinishEventData {
-                session_id: Some(sid),
-            }));
+            .send(AgentStreamEvent::Finish(FinishEventData { session_id: Some(sid) }));
 
         Ok(())
     }
@@ -805,11 +792,9 @@ impl AcpAgentManager {
         let sid = session_id.ok_or_else(|| AppError::Internal("Cannot prompt: no session ID available".into()))?;
 
         // Emit Start event
-        let _ = self
-            .event_tx
-            .send(AgentStreamEvent::Start(crate::stream_event::StartEventData {
-                session_id: Some(sid.to_owned()),
-            }));
+        let _ = self.event_tx.send(AgentStreamEvent::Start(StartEventData {
+            session_id: Some(sid.to_owned()),
+        }));
 
         self.protocol
             .prompt(PromptRequest::new(
@@ -820,11 +805,9 @@ impl AcpAgentManager {
             .map_err(AppError::from)?;
 
         // Emit Finish event
-        let _ = self
-            .event_tx
-            .send(AgentStreamEvent::Finish(crate::stream_event::FinishEventData {
-                session_id: Some(sid.to_owned()),
-            }));
+        let _ = self.event_tx.send(AgentStreamEvent::Finish(FinishEventData {
+            session_id: Some(sid.to_owned()),
+        }));
 
         Ok(())
     }
@@ -879,11 +862,11 @@ impl AcpAgentManager {
             let _ = self.event_tx.send(AgentStreamEvent::AcpConfigOption(v));
         }
         if let Some(cmds) = snapshot.available_commands() {
-            let _ = self.event_tx.send(AgentStreamEvent::AvailableCommands(
-                crate::stream_event::AvailableCommandsEventData {
+            let _ = self
+                .event_tx
+                .send(AgentStreamEvent::AvailableCommands(AvailableCommandsEventData {
                     commands: cmds.to_vec(),
-                },
-            ));
+                }));
         }
     }
 
@@ -958,7 +941,7 @@ impl AcpAgentManager {
 }
 
 #[async_trait::async_trait]
-impl crate::agent_manager::IAgentManager for AcpAgentManager {
+impl IAgentManager for AcpAgentManager {
     fn agent_type(&self) -> AgentType {
         AgentType::Acp
     }
@@ -1246,11 +1229,7 @@ mod tests {
     fn build_new_session_request_skips_mcp_servers_without_team_config() {
         // Solo-chat path: no `team_mcp_stdio_config` → payload must stay
         // byte-for-byte identical to the legacy `NewSessionRequest::new(cwd)`.
-        let req = build_new_session_request(
-            "/workspace",
-            &build_extra_without_team(),
-            std::path::Path::new("/usr/bin/aionui-backend"),
-        );
+        let req = build_new_session_request("/workspace", &build_extra_without_team());
         assert!(
             req.mcp_servers.is_empty(),
             "solo chat must not inject any MCP servers, got {:?}",
@@ -1260,11 +1239,7 @@ mod tests {
 
     #[test]
     fn build_new_session_request_injects_team_stdio_server() {
-        let req = build_new_session_request(
-            "/workspace",
-            &build_extra_with_team(),
-            std::path::Path::new("/usr/bin/aionui-backend"),
-        );
+        let req = build_new_session_request("/workspace", &build_extra_with_team());
         assert_eq!(req.mcp_servers.len(), 1, "exactly one team MCP server");
 
         let server = req.mcp_servers.into_iter().next().unwrap();
@@ -1273,6 +1248,7 @@ mod tests {
             other => panic!("expected Stdio variant, got {other:?}"),
         };
 
+        use std::path::PathBuf;
         assert_eq!(stdio.name, "aionui-team-team-42");
         assert_eq!(stdio.command, PathBuf::from("/usr/bin/aionui-backend"));
         assert_eq!(stdio.args, vec!["mcp-bridge".to_owned()]);
@@ -1311,11 +1287,6 @@ mod tests {
         assert_eq!(cfg.config_options, Some(json!([{"id":"mode"}])));
 
         // An unrelated event emits no update.
-        assert!(
-            catalog_partial_from_event(&AgentStreamEvent::Start(crate::stream_event::StartEventData {
-                session_id: None
-            }))
-            .is_none()
-        );
+        assert!(catalog_partial_from_event(&AgentStreamEvent::Start(StartEventData { session_id: None })).is_none());
     }
 }
