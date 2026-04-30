@@ -66,6 +66,29 @@ fn normalize_requested_mode(metadata: &AgentMetadata, mode: &str) -> String {
     trimmed.to_owned()
 }
 
+/// Whether the agent described by `metadata` uses Claude-style meta resume
+/// (`session/new` with `_meta.claudeCode.options.resume`) instead of the
+/// generic `session/load` path.
+///
+/// Mirrors the AionUi frontend rule
+/// `useClaudeMetaResume = backend === 'claude' || !!caps?._meta?.claudeCode`.
+///
+/// Handshake blobs persisted by the backend are normalised to snake_case
+/// (see `sdk_to_snake_value`), so the lookup prefers `claude_code` and
+/// falls back to `claudeCode` for any blob that bypassed normalisation.
+fn agent_metadata_uses_claude_meta_resume(metadata: &AgentMetadata) -> bool {
+    if metadata.backend.as_deref() == Some("claude") {
+        return true;
+    }
+    metadata
+        .handshake
+        .agent_capabilities
+        .as_ref()
+        .and_then(|caps| caps.get("_meta"))
+        .and_then(|meta| meta.get("claude_code").or_else(|| meta.get("claudeCode")))
+        .is_some()
+}
+
 /// Extract the `current_value` string from a `SessionConfigKind` —
 /// currently only the Select kind has a string value we can replay
 /// through `session/set_session_config_option`. Boolean toggles and
@@ -837,8 +860,7 @@ impl AcpAgentManager {
                 claude_code.insert("options".into(), Value::Object(options));
                 meta.insert("claudeCode".into(), Value::Object(claude_code));
 
-                let req = build_new_session_request(&self.workspace, &self.config)
-                    .meta(meta);
+                let req = build_new_session_request(&self.workspace, &self.config).meta(meta);
 
                 info!(
                     session_id = %sid,
@@ -1048,16 +1070,7 @@ impl AcpAgentManager {
     /// `_meta.claudeCode.options.resume`) instead of session/load.
     /// Matches AionUi frontend: `useClaudeMetaResume = backend === 'claude' || !!caps?._meta?.claudeCode`
     fn uses_claude_meta_resume(&self) -> bool {
-        if self.metadata.backend.as_deref() == Some("claude") {
-            return true;
-        }
-        self.metadata
-            .handshake
-            .agent_capabilities
-            .as_ref()
-            .and_then(|caps| caps.get("_meta"))
-            .and_then(|meta| meta.get("claude_code").or_else(|| meta.get("claudeCode")))
-            .is_some()
+        agent_metadata_uses_claude_meta_resume(&self.metadata)
     }
 
     fn supports_session_load(&self) -> bool {
@@ -1389,6 +1402,69 @@ mod tests {
         assert_eq!(normalize_requested_mode(&other, "autoEdit"), "autoEdit");
     }
 
+    /// Claude backend must take the `session/new` + `_meta.claudeCode.options.resume`
+    /// path so `mcpServers` are re-injected on resume. `backend == "claude"`
+    /// alone is enough — we don't need the handshake to advertise `_meta`.
+    #[test]
+    fn uses_claude_meta_resume_true_for_claude_backend() {
+        let mut meta = metadata_with_yolo_id(None);
+        meta.backend = Some("claude".into());
+        assert!(agent_metadata_uses_claude_meta_resume(&meta));
+    }
+
+    /// A non-Claude-labelled backend that still advertises
+    /// `agent_capabilities._meta.claudeCode` (snake_case, as persisted by
+    /// `sdk_to_snake_value`) must also follow the Claude resume path —
+    /// this matches the frontend's `!!caps?._meta?.claudeCode` check.
+    #[test]
+    fn uses_claude_meta_resume_true_for_meta_claude_code() {
+        let mut meta = metadata_with_yolo_id(None);
+        meta.backend = Some("custom-claude-wrapper".into());
+        meta.handshake.agent_capabilities = Some(json!({
+            "_meta": {
+                "claude_code": { "some": "flag" }
+            }
+        }));
+        assert!(agent_metadata_uses_claude_meta_resume(&meta));
+
+        // A handshake that bypassed snake_case normalisation (camelCase
+        // `claudeCode`) must still be recognised.
+        let mut camel_meta = metadata_with_yolo_id(None);
+        camel_meta.backend = Some("custom-claude-wrapper".into());
+        camel_meta.handshake.agent_capabilities = Some(json!({
+            "_meta": {
+                "claudeCode": { "some": "flag" }
+            }
+        }));
+        assert!(agent_metadata_uses_claude_meta_resume(&camel_meta));
+    }
+
+    /// Codex (and any non-Claude backend without the `_meta.claudeCode`
+    /// marker) must fall through to the `session/load` branch.
+    #[test]
+    fn uses_claude_meta_resume_false_for_codex() {
+        let mut meta = metadata_with_yolo_id(Some("full-access"));
+        meta.backend = Some("codex".into());
+        assert!(!agent_metadata_uses_claude_meta_resume(&meta));
+
+        // Codex with unrelated capability keys must still be false.
+        meta.handshake.agent_capabilities = Some(json!({
+            "load_session": true,
+            "_meta": { "codex": { "whatever": true } }
+        }));
+        assert!(!agent_metadata_uses_claude_meta_resume(&meta));
+    }
+
+    /// Metadata with no `backend` label and no handshake capabilities
+    /// must not opt into the Claude resume path.
+    #[test]
+    fn uses_claude_meta_resume_false_for_empty() {
+        let meta = metadata_with_yolo_id(None);
+        assert!(meta.backend.is_none());
+        assert!(meta.handshake.agent_capabilities.is_none());
+        assert!(!agent_metadata_uses_claude_meta_resume(&meta));
+    }
+
     fn build_extra_without_team() -> AcpBuildExtra {
         serde_json::from_value(json!({ "backend": "claude" })).unwrap()
     }
@@ -1463,27 +1539,34 @@ mod tests {
         );
     }
 
+    /// Team MCP injection uses the HTTP transport on the `agent-client-protocol`
+    /// schema (see `team_mcp_server`): `claude-agent-acp` actively connects to
+    /// HTTP servers whereas its stdio path has spawn/init timing issues. This
+    /// test pins the wire shape — name derived from `team_id`, URL pointing at
+    /// the loopback port, and both `Authorization: Bearer <token>` and
+    /// `X-Slot-Id` headers attached — so any accidental revert back to
+    /// `McpServer::Stdio` fails loud.
     #[test]
-    fn build_new_session_request_injects_team_stdio_server() {
+    fn build_new_session_request_injects_team_http_server() {
         let req = build_new_session_request("/workspace", &build_extra_with_team());
         assert_eq!(req.mcp_servers.len(), 1, "exactly one team MCP server");
 
         let server = req.mcp_servers.into_iter().next().unwrap();
-        let stdio = match server {
-            McpServer::Stdio(s) => s,
-            other => panic!("expected Stdio variant, got {other:?}"),
+        let http = match server {
+            McpServer::Http(h) => h,
+            other => panic!("expected Http variant, got {other:?}"),
         };
 
-        use std::path::PathBuf;
-        assert_eq!(stdio.name, "aionui-team-team-42");
-        assert_eq!(stdio.command, PathBuf::from("/usr/bin/aionui-backend"));
-        assert_eq!(stdio.args, vec!["mcp-bridge".to_owned()]);
+        assert_eq!(http.name, "aionui-team-team-42");
+        assert_eq!(http.url, "http://127.0.0.1:54321");
 
-        let env: std::collections::HashMap<_, _> =
-            stdio.env.iter().map(|v| (v.name.as_str(), v.value.as_str())).collect();
-        assert_eq!(env.get(TeamMcpStdioConfig::ENV_PORT), Some(&"54321"));
-        assert_eq!(env.get(TeamMcpStdioConfig::ENV_TOKEN), Some(&"tok-abc"));
-        assert_eq!(env.get(TeamMcpStdioConfig::ENV_SLOT_ID), Some(&"slot-lead"));
+        let headers: std::collections::HashMap<_, _> = http
+            .headers
+            .iter()
+            .map(|h| (h.name.as_str(), h.value.as_str()))
+            .collect();
+        assert_eq!(headers.get("Authorization"), Some(&"Bearer tok-abc"));
+        assert_eq!(headers.get("X-Slot-Id"), Some(&"slot-lead"));
     }
 
     #[test]
