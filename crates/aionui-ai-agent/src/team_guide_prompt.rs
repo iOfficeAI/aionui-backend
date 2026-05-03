@@ -67,11 +67,11 @@ If case 2 applies, ask at most once whether the user wants to bring in a Team. K
    | Tester | Write and run tests | {agent_type} | (model from list) |
 4. **Output the table as a normal text message and END YOUR TURN.** Do NOT call `aion_create_team` or any other tool (including ask_user) in this turn. Wait for the user to reply in their next message with explicit confirmation (e.g. \"ok\", \"go ahead\", \"确认\") before proceeding.
 5. After user confirms → call `aion_create_team`. The summary MUST include both the goal and the confirmed team configuration. (The system automatically sets the correct agent type — you do NOT need to pass agentType.)
-6. After `aion_create_team` returns → the system navigates to the team page **automatically**. Read the `next_step` in the response and follow it. End your turn immediately.
+6. After `aion_create_team` returns → you ARE now the team Leader. The system navigates to the team page automatically. **Immediately** use `team_spawn_agent` to create each teammate from the confirmed configuration table. Then use `team_send_message` to assign initial tasks to each spawned teammate. Do NOT end your turn until all teammates are spawned and tasked.
 7. User declines or wants changes → adjust or proceed solo. Do not mention Team again unless the user asks.
 
 ### Tool constraint
-Use **only** `aion_create_team` and `aion_list_models` for team operations. Do NOT use any built-in or other team/agent creation tools.";
+Before team creation: use **only** `aion_create_team` and `aion_list_models`. After `aion_create_team` succeeds: use team tools (`team_spawn_agent`, `team_send_message`, `team_members`, `team_task_create`, etc.) to manage your team.";
 
 /// Return `true` iff the given backend is a known team-capable backend. An
 /// empty or unrecognized backend returns `false`; solo agents with unknown
@@ -187,11 +187,11 @@ If case 2 applies, ask at most once whether the user wants to bring in a Team. K
 | Tester | Write and run tests | claude | (model from list) |\n\
 4. **Output the table as a normal text message and END YOUR TURN.** Do NOT call `aion_create_team` or any other tool (including ask_user) in this turn. Wait for the user to reply in their next message with explicit confirmation (e.g. \"ok\", \"go ahead\", \"确认\") before proceeding.\n\
 5. After user confirms → call `aion_create_team`. The summary MUST include both the goal and the confirmed team configuration. (The system automatically sets the correct agent type — you do NOT need to pass agentType.)\n\
-6. After `aion_create_team` returns → the system navigates to the team page **automatically**. Read the `next_step` in the response and follow it. End your turn immediately.\n\
+6. After `aion_create_team` returns → you ARE now the team Leader. The system navigates to the team page automatically. **Immediately** use `team_spawn_agent` to create each teammate from the confirmed configuration table. Then use `team_send_message` to assign initial tasks to each spawned teammate. Do NOT end your turn until all teammates are spawned and tasked.\n\
 7. User declines or wants changes → adjust or proceed solo. Do not mention Team again unless the user asks.\n\
 \n\
 ### Tool constraint\n\
-Use **only** `aion_create_team` and `aion_list_models` for team operations. Do NOT use any built-in or other team/agent creation tools.";
+Before team creation: use **only** `aion_create_team` and `aion_list_models`. After `aion_create_team` succeeds: use team tools (`team_spawn_agent`, `team_send_message`, `team_members`, `team_task_create`, etc.) to manage your team.";
         assert_eq!(prompt, expected);
     }
 }
