@@ -458,6 +458,20 @@ async fn exec_describe_assistant(args: &Value) -> Result<String, String> {
 // Individual tool handlers
 // ---------------------------------------------------------------------------
 
+async fn resolve_agent_target(scheduler: &TeammateManager, target: &str) -> Result<String, String> {
+    let agents = scheduler.list_agents().await;
+    if agents.iter().any(|a| a.slot_id == target) {
+        return Ok(target.to_owned());
+    }
+    let query = target.to_lowercase();
+    let hits: Vec<_> = agents.iter().filter(|a| a.name.to_lowercase() == query).collect();
+    match hits.len() {
+        0 => Err(format!("No agent matches '{target}'")),
+        1 => Ok(hits[0].slot_id.clone()),
+        _ => Err(format!("Multiple agents match '{target}'")),
+    }
+}
+
 async fn exec_send_message(
     args: &Value,
     scheduler: &TeammateManager,
@@ -501,9 +515,14 @@ async fn exec_send_message(
         return Ok(format!("shutdown_rejected: {reason}"));
     }
 
-    let to_target = input.to.clone();
+    let resolved_to = if input.to == "*" {
+        "*".to_owned()
+    } else {
+        resolve_agent_target(scheduler, &input.to).await?
+    };
+
     let action = crate::scheduler::SchedulerAction::SendMessage {
-        to: input.to.clone(),
+        to: resolved_to.clone(),
         message: input.message,
     };
     scheduler
@@ -513,7 +532,7 @@ async fn exec_send_message(
 
     // Wake target agent(s) so they process the new mailbox message.
     if let Some(svc) = service.upgrade() {
-        let targets = if input.to == "*" {
+        let targets = if resolved_to == "*" {
             scheduler
                 .list_agents()
                 .await
@@ -522,7 +541,7 @@ async fn exec_send_message(
                 .map(|a| a.slot_id.clone())
                 .collect::<Vec<_>>()
         } else {
-            vec![input.to]
+            vec![resolved_to.clone()]
         };
         for target in &targets {
             if let Err(e) = svc.wake_agent_in_session(team_id, target).await {
@@ -531,7 +550,7 @@ async fn exec_send_message(
         }
     }
 
-    Ok(format!("Message sent to {to_target}"))
+    Ok(format!("Message sent to {}", input.to))
 }
 
 async fn exec_spawn_agent(
@@ -671,8 +690,9 @@ async fn exec_members(scheduler: &TeammateManager) -> Result<String, String> {
 async fn exec_rename_agent(args: &Value, scheduler: &TeammateManager) -> Result<String, String> {
     let input: RenameAgentInput = serde_json::from_value(args.clone()).map_err(|e| format!("Invalid params: {e}"))?;
 
+    let resolved_slot = resolve_agent_target(scheduler, &input.slot_id).await?;
     scheduler
-        .rename_agent(&input.slot_id, &input.new_name)
+        .rename_agent(&resolved_slot, &input.new_name)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -692,7 +712,7 @@ async fn exec_shutdown_agent(
     }
     let input: ShutdownAgentInput = serde_json::from_value(args.clone()).map_err(|e| format!("Invalid params: {e}"))?;
 
-    let target_slot_id = input.slot_id.clone();
+    let target_slot_id = resolve_agent_target(scheduler, &input.slot_id).await?;
     let action = crate::scheduler::SchedulerAction::ShutdownAgent {
         slot_id: target_slot_id.clone(),
         reason: input.reason,
