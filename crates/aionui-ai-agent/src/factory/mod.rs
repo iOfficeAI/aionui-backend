@@ -171,7 +171,7 @@ async fn build_agent(deps: Arc<AgentFactoryDeps>, options: BuildTaskOptions) -> 
 
             let arc = Arc::new(agent);
             arc.start_permission_handler();
-            arc.start_runtime_snapshot_tracker();
+            arc.start_session_event_tracker();
             arc.start_catalog_sync();
             let handle: AgentManagerHandle = arc.clone();
 

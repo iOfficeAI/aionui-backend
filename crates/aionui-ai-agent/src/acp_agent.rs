@@ -1,12 +1,10 @@
 use crate::IAgentManager;
 use crate::acp_protocol::{AcpProtocol, PermissionDecision, PermissionRequest};
-use crate::acp_runtime_snapshot::AcpRuntimeSnapshot;
-use crate::acp_runtime_snapshot::PersistedSessionState;
 use crate::agent_registry::CatalogSender;
 use crate::cli_process::CliAgentProcess;
 use crate::factory::acp_assembler::AcpSessionParams;
 use crate::first_message_injector::{InjectionConfig, inject_first_message_prefix};
-use crate::manager::acp::AcpSession;
+use crate::manager::acp::{AcpSession, PersistedSessionState};
 use crate::skill_manager::AcpSkillManager;
 use crate::stream_event::{
     AgentStreamEvent, AvailableCommandsEventData, FinishEventData, SessionAssignedEventData, StartEventData,
@@ -101,27 +99,6 @@ fn confirm_option_id(data: &Value) -> Option<String> {
     }
 }
 
-/// Internal state that changes at runtime.
-struct AcpState {
-    /// Current conversation status.
-    status: Option<ConversationStatus>,
-    /// Active session ID (set after session/new or session/load).
-    session_id: Option<String>,
-    /// Whether **this `AcpAgentManager` instance** has opened the session with
-    /// the CLI — either through `session/new` (first turn) or through
-    /// `session/load` / claude-meta-resume (recovering a persisted id). Once
-    /// set, subsequent turns in the same process go through the short-path
-    /// `prompt_existing_session` instead of re-loading.
-    ///
-    /// This is NOT the same as "the conversation has prior messages in the
-    /// DB" — a task rebuild (idle cleanup, crash recovery, etc.) starts
-    /// with `session_opened = false` even when a persisted `session_id`
-    /// has already been restored, because the CLI child process is brand
-    /// new and still needs the load/resume handshake on its very first
-    /// prompt after rebuild.
-    session_opened: bool,
-}
-
 /// Serialize an external value (typically an ACP SDK struct that emits
 /// camelCase) and normalise every object key to snake_case before it
 /// leaves the backend. All handshake columns, WebSocket payloads, and
@@ -186,7 +163,13 @@ pub struct AcpAgentManager {
     /// catalog. The consumer task lives inside the registry.
     catalog_tx: CatalogSender,
     /// Session aggregate root — owns desired/observed/advertised state.
+    /// Single in-memory source of truth for session lifecycle, modes,
+    /// models, config, and all runtime data previously split across
+    /// `AcpRuntimeSnapshot` and `AcpState`.
     session: RwLock<AcpSession>,
+    /// Standalone conversation status (not part of the session aggregate
+    /// because it is a UI-level concern, not ACP protocol state).
+    status: RwLock<Option<ConversationStatus>>,
     /// Underlying CLI process (for lifecycle management: kill, is_running).
     process: Arc<CliAgentProcess>,
     /// ACP protocol handle (SDK connection).
@@ -198,8 +181,6 @@ pub struct AcpAgentManager {
     /// this channel exists from D25c-1 onward so `subscribe_stream` can
     /// hand out live receivers regardless of whether emitters are active.
     stream_tx: broadcast::Sender<AgentStreamChunk>,
-    /// Mutable runtime state.
-    state: RwLock<AcpState>,
     /// Timestamp of last activity (atomic for lock-free reads).
     last_activity: AtomicI64,
     /// Mutex for serializing session operations (new/load/send).
@@ -208,8 +189,6 @@ pub struct AcpAgentManager {
     permission_rx: Mutex<mpsc::Receiver<PermissionRequest>>,
     /// Pending ACP permission responders keyed by tool call ID.
     pending_permissions: StdMutex<HashMap<String, oneshot::Sender<PermissionDecision>>>,
-    /// Runtime ACP session snapshot used by getters.
-    runtime_snapshot: RwLock<AcpRuntimeSnapshot>,
     /// Whether a graceful shutdown is in progress.
     closing: std::sync::atomic::AtomicBool,
     /// Shared skill manager — used to discover skills for first-message injection.
@@ -217,11 +196,9 @@ pub struct AcpAgentManager {
 }
 
 impl AcpAgentManager {
-    /// Current session mode id. Falls back to the configured session mode,
-    /// then to `"default"`. Reading a cached snapshot is infallible.
+    /// Current session mode state. Reading a cached session is infallible.
     pub async fn modes(&self) -> Option<SessionModeState> {
-        let snapshot = self.runtime_snapshot.read().await;
-        snapshot.modes().cloned()
+        self.session.read().await.modes().cloned()
     }
 
     async fn desired_mode(&self) -> Option<String> {
@@ -234,10 +211,8 @@ impl AcpAgentManager {
     }
 
     async fn update_cached_mode(&self, mode: &str) {
-        let mut snapshot = self.runtime_snapshot.write().await;
-        if let Some(modes) = snapshot.modes().cloned() {
-            snapshot.set_modes(SessionModeState::new(mode.to_owned(), modes.available_modes));
-        }
+        let mut session = self.session.write().await;
+        session.apply_partial_mode_update(mode);
     }
 
     /// Execute reconcile actions produced by `AcpSession::plan_reconcile`.
@@ -305,8 +280,7 @@ impl AcpAgentManager {
 
     /// Cached model info from the ACP backend, if any has been received.
     pub async fn model_info(&self) -> Option<SessionModelState> {
-        let snapshot = self.runtime_snapshot.read().await;
-        snapshot.model_info().cloned()
+        self.session.read().await.model_info().cloned()
     }
 
     /// Set the model for the current session.
@@ -318,14 +292,11 @@ impl AcpAgentManager {
             .await
             .map_err(AppError::from)?;
 
-        // Update the snapshot immediately since SDK does not send a
+        // Update the session immediately since SDK does not send a
         // CurrentModelUpdate notification for model changes.
         {
-            let mut snapshot = self.runtime_snapshot.write().await;
-            if let Some(info) = snapshot.model_info().cloned() {
-                let updated = SessionModelState::new(model_id.to_owned(), info.available_models);
-                snapshot.set_model_info(updated);
-            }
+            let mut session = self.session.write().await;
+            session.update_current_model(model_id);
         }
 
         Ok(())
@@ -333,8 +304,9 @@ impl AcpAgentManager {
 
     /// Cached session configuration options.
     pub async fn config_options(&self) -> Vec<SessionConfigOption> {
-        let snapshot = self.runtime_snapshot.read().await;
-        snapshot
+        self.session
+            .read()
+            .await
             .config_options()
             .map(<[SessionConfigOption]>::to_vec)
             .unwrap_or_default()
@@ -357,20 +329,17 @@ impl AcpAgentManager {
 
     /// Cached context usage info from the ACP backend.
     pub async fn usage(&self) -> Option<UsageUpdate> {
-        let snapshot = self.runtime_snapshot.read().await;
-        snapshot.context_usage().cloned()
+        self.session.read().await.context_usage().cloned()
     }
 
     /// Agent capabilities captured during the ACP initialize handshake.
     pub async fn agent_capabilities(&self) -> Option<AgentCapabilities> {
-        let snapshot = self.runtime_snapshot.read().await;
-        snapshot.agent_capabilities().cloned()
+        self.session.read().await.agent_capabilities().cloned()
     }
 
     /// Cached available commands from the ACP backend.
     pub async fn available_commands(&self) -> Option<Vec<AvailableCommand>> {
-        let snapshot = self.runtime_snapshot.read().await;
-        snapshot.available_commands().map(|c| c.to_vec())
+        self.session.read().await.available_commands().map(|c| c.to_vec())
     }
 }
 
@@ -411,14 +380,6 @@ impl AcpAgentManager {
                 AppError::from(e)
             })?;
 
-        let mut runtime_snapshot = AcpRuntimeSnapshot::default();
-        if let Some(agent_capabilities) = protocol.agent_capabilities() {
-            runtime_snapshot.set_agent_capabilities(agent_capabilities);
-        }
-        if let Some(auth_methods) = protocol.auth_methods() {
-            runtime_snapshot.set_auth_methods(auth_methods);
-        }
-
         // Push the static handshake payloads (agent_capabilities +
         // auth_methods) through the catalog sync channel. Session-driven
         // fields — modes, models, config_options, commands — flow
@@ -438,26 +399,27 @@ impl AcpAgentManager {
             .as_ref()
             .map(|m| normalize_requested_mode(&params.metadata, m))
             .filter(|m| !m.is_empty());
-        let session = AcpSession::new(initial_mode, HashMap::new());
+        let mut session = AcpSession::new(initial_mode, HashMap::new());
+        if let Some(agent_capabilities) = protocol.agent_capabilities() {
+            session.apply_advertised_capabilities(agent_capabilities);
+        }
+        if let Some(auth_methods) = protocol.auth_methods() {
+            session.apply_advertised_auth_methods(auth_methods);
+        }
 
         let manager = Self {
             params,
             catalog_tx,
             session: RwLock::new(session),
+            status: RwLock::new(None),
             process: Arc::new(process),
             protocol,
             event_tx,
             stream_tx,
-            state: RwLock::new(AcpState {
-                status: None,
-                session_id: None,
-                session_opened: false,
-            }),
             last_activity: AtomicI64::new(now_ms()),
             session_lock: Mutex::new(()),
             permission_rx: Mutex::new(permission_rx),
             pending_permissions: StdMutex::new(HashMap::new()),
-            runtime_snapshot: RwLock::new(runtime_snapshot),
             closing: std::sync::atomic::AtomicBool::new(false),
             skill_manager,
         };
@@ -519,18 +481,14 @@ impl AcpAgentManager {
             .any(|prefix| title.starts_with(prefix))
     }
 
-    /// Start the runtime snapshot tracker loop.
-    pub fn start_runtime_snapshot_tracker(self: &Arc<Self>) {
+    /// Start the session event tracker loop.
+    pub fn start_session_event_tracker(self: &Arc<Self>) {
         let this = Arc::clone(self);
         tokio::spawn(async move {
             let mut rx = this.event_tx.subscribe();
             loop {
                 match rx.recv().await {
                     Ok(event) => {
-                        {
-                            let mut snapshot = this.runtime_snapshot.write().await;
-                            snapshot.apply_event(&event);
-                        }
                         Self::apply_event_to_session(&this.session, &event).await;
                     }
                     Err(broadcast::error::RecvError::Closed) => break,
@@ -599,27 +557,23 @@ impl AcpAgentManager {
         });
     }
 
-    /// Seed the runtime snapshot with the user's last choices. Called
+    /// Seed the session aggregate with the user's last choices. Called
     /// by `ConversationService` on resume paths, before dispatching
     /// `send_message`. `None` fields are ignored — the CLI's
     /// `session/load` response fills in whatever the preload omits.
     pub async fn preload_snapshot(&self, state: PersistedSessionState) {
-        // Seed the aggregate's desired state from persisted selections.
-        if state.current_mode_id.is_some() || !state.config_selections.is_empty() {
-            let mut session = self.session.write().await;
-            if let Some(mode_id) = &state.current_mode_id {
-                let normalized = normalize_requested_mode(&self.params.metadata, mode_id);
-                if !normalized.is_empty() {
-                    session.set_desired_mode(normalized);
-                }
+        let mut session = self.session.write().await;
+        session.preload_persisted(&state);
+        if let Some(mode_id) = &state.current_mode_id {
+            let normalized = normalize_requested_mode(&self.params.metadata, mode_id);
+            if !normalized.is_empty() {
+                session.set_desired_mode(normalized);
             }
-            for (config_id, value) in &state.config_selections {
-                session.set_desired_config(config_id.clone(), value.clone());
-            }
-            session.drain_events();
         }
-        let mut snapshot = self.runtime_snapshot.write().await;
-        snapshot.preload_persisted(state);
+        for (config_id, value) in &state.config_selections {
+            session.set_desired_config(config_id.clone(), value.clone());
+        }
+        session.drain_events();
     }
 
     /// Initialize or resume a session, then send the user message.
@@ -637,12 +591,12 @@ impl AcpAgentManager {
     async fn ensure_session_and_send(&self, data: &SendMessageData) -> Result<(), AppError> {
         let _lock = self.session_lock.lock().await;
 
-        let state = self.state.read().await;
-        let session_id = state.session_id.clone();
-        let session_opened = state.session_opened;
-        drop(state);
+        let (session_id, opened) = {
+            let s = self.session.read().await;
+            (s.session_id().map(ToOwned::to_owned), s.is_opened())
+        };
 
-        match (session_id.as_deref(), session_opened) {
+        match (session_id.as_deref(), opened) {
             (None, _) => {
                 // Path 1: first turn in a brand-new conversation.
                 self.session_new_and_prompt(data).await?;
@@ -659,9 +613,12 @@ impl AcpAgentManager {
             }
         }
 
-        let mut state = self.state.write().await;
-        state.session_opened = true;
-        state.status = Some(ConversationStatus::Running);
+        {
+            let mut s = self.session.write().await;
+            s.mark_opened();
+            s.drain_events();
+        }
+        *self.status.write().await = Some(ConversationStatus::Running);
 
         Ok(())
     }
@@ -685,24 +642,22 @@ impl AcpAgentManager {
 
         let sid = session_response.session_id.to_string();
 
-        // Populate the runtime snapshot from the session response
+        // Populate the session aggregate from the session response
         {
-            let mut snapshot = self.runtime_snapshot.write().await;
+            let mut session = self.session.write().await;
             if let Some(models) = session_response.models {
-                snapshot.set_model_info(models);
+                session.apply_advertised_models(models);
             }
             if let Some(modes) = session_response.modes {
-                snapshot.set_modes(modes);
+                session.apply_advertised_modes(modes);
             }
             if let Some(config_options) = session_response.config_options {
-                snapshot.set_config_options(config_options);
+                session.apply_advertised_config_options(config_options);
             }
+            session.assign_session_id(sid.clone());
+            session.drain_events();
         }
         self.emit_snapshot_events().await;
-        {
-            let mut state = self.state.write().await;
-            state.session_id = Some(sid.clone());
-        }
 
         // Notify subscribers (e.g. AcpAgentService) so the new id is
         // persisted into `acp_session.session_id` — resume can then
@@ -712,23 +667,6 @@ impl AcpAgentManager {
             .send(AgentStreamEvent::SessionAssigned(SessionAssignedEventData {
                 session_id: sid.clone(),
             }));
-
-        // Seed the session aggregate from the CLI's response.
-        {
-            let snapshot = self.runtime_snapshot.read().await;
-            let mut session = self.session.write().await;
-            if let Some(modes) = snapshot.modes().cloned() {
-                session.apply_advertised_modes(modes);
-            }
-            if let Some(models) = snapshot.model_info().cloned() {
-                session.apply_advertised_models(models);
-            }
-            if let Some(config_options) = snapshot.config_options() {
-                session.apply_advertised_config_options(config_options.to_vec());
-            }
-            session.assign_session_id(sid.clone());
-            session.drain_events();
-        }
 
         self.reconcile_session(&sid).await;
 
@@ -764,13 +702,13 @@ impl AcpAgentManager {
     /// Resume an existing session and send a message.
     ///
     /// Assumes `preload_snapshot` has already been called by the
-    /// caller (conversation service) on resume paths — the snapshot
-    /// may therefore already carry `current_mode_id` / `current_model_id`
+    /// caller (conversation service) on resume paths — the session
+    /// aggregate may therefore already carry `current_mode_id` / `current_model_id`
     /// from `acp_session.session_config.runtime`. When the CLI's
     /// `session/load` response arrives, we merge it in but keep the
     /// preloaded `current_*` values because they reflect the user's
     /// last explicit choice; the CLI's own `current_*` is only used
-    /// when the snapshot has nothing yet.
+    /// when the aggregate has nothing yet.
     async fn session_resume_and_send(&self, data: &SendMessageData, session_id: Option<&str>) -> Result<(), AppError> {
         if self.uses_claude_meta_resume() {
             // Claude backend: use session/new with _meta.claudeCode.options.resume
@@ -799,39 +737,21 @@ impl AcpAgentManager {
 
                 let new_sid = session_response.session_id.to_string();
                 {
-                    let mut snapshot = self.runtime_snapshot.write().await;
-                    if let Some(models) = session_response.models {
-                        snapshot.set_model_info(models);
-                    }
-                    if let Some(modes) = session_response.modes {
-                        snapshot.set_modes(modes);
-                    }
-                    if let Some(config_options) = session_response.config_options {
-                        snapshot.set_config_options(config_options);
-                    }
-                }
-                self.emit_snapshot_events().await;
-
-                let mut state = self.state.write().await;
-                state.session_id = Some(new_sid.clone());
-                drop(state);
-
-                // Seed the session aggregate from CLI response and reconcile.
-                {
-                    let snapshot = self.runtime_snapshot.read().await;
                     let mut session = self.session.write().await;
-                    if let Some(modes) = snapshot.modes().cloned() {
-                        session.apply_advertised_modes(modes);
-                    }
-                    if let Some(models) = snapshot.model_info().cloned() {
+                    if let Some(models) = session_response.models {
                         session.apply_advertised_models(models);
                     }
-                    if let Some(config_options) = snapshot.config_options() {
-                        session.apply_advertised_config_options(config_options.to_vec());
+                    if let Some(modes) = session_response.modes {
+                        session.apply_advertised_modes(modes);
+                    }
+                    if let Some(config_options) = session_response.config_options {
+                        session.apply_advertised_config_options(config_options);
                     }
                     session.assign_session_id(new_sid.clone());
                     session.drain_events();
                 }
+                self.emit_snapshot_events().await;
+
                 self.reconcile_session(&new_sid).await;
 
                 return self.prompt_existing_session(data, Some(&new_sid)).await;
@@ -841,10 +761,10 @@ impl AcpAgentManager {
         {
             // Non-Claude backends (e.g. Codex): use session/load
             let (preloaded_mode, preloaded_model) = {
-                let snapshot = self.runtime_snapshot.read().await;
+                let session = self.session.read().await;
                 (
-                    snapshot.modes().map(|m| m.current_mode_id.to_string()),
-                    snapshot.model_info().map(|m| m.current_model_id.to_string()),
+                    session.modes().map(|m| m.current_mode_id.to_string()),
+                    session.model_info().map(|m| m.current_model_id.to_string()),
                 )
             };
 
@@ -854,22 +774,23 @@ impl AcpAgentManager {
             }
             let resp = self.protocol.load_session(load_req).await.map_err(AppError::from)?;
 
-            let mut snapshot = self.runtime_snapshot.write().await;
+            let mut session = self.session.write().await;
             if let Some(mut models) = resp.models {
                 if let Some(db_current) = preloaded_model {
                     models.current_model_id = db_current.into();
                 }
-                snapshot.set_model_info(models);
+                session.apply_advertised_models(models);
             }
             if let Some(mut modes) = resp.modes {
                 if let Some(db_current) = preloaded_mode {
                     modes.current_mode_id = db_current.into();
                 }
-                snapshot.set_modes(modes);
+                session.apply_advertised_modes(modes);
             }
             if let Some(config_options) = resp.config_options {
-                snapshot.set_config_options(config_options);
+                session.apply_advertised_config_options(config_options);
             }
+            drop(session);
         }
 
         self.emit_snapshot_events().await;
@@ -877,17 +798,7 @@ impl AcpAgentManager {
         // Seed the session aggregate and reconcile.
         if let Some(sid) = session_id {
             {
-                let snapshot = self.runtime_snapshot.read().await;
                 let mut session = self.session.write().await;
-                if let Some(modes) = snapshot.modes().cloned() {
-                    session.apply_advertised_modes(modes);
-                }
-                if let Some(models) = snapshot.model_info().cloned() {
-                    session.apply_advertised_models(models);
-                }
-                if let Some(config_options) = snapshot.config_options() {
-                    session.apply_advertised_config_options(config_options.to_vec());
-                }
                 session.assign_session_id(sid.to_owned());
                 session.drain_events();
             }
@@ -922,14 +833,14 @@ impl AcpAgentManager {
         Ok(())
     }
 
-    /// Emit model/mode/config events from the current snapshot so the frontend
+    /// Emit model/mode/config events from the session aggregate so the frontend
     /// receives the initial session state via WebSocket immediately after
     /// session creation or load.
     async fn emit_snapshot_events(&self) {
         use aionui_api_types::{ModelInfoEntry, ModelInfoPayload};
 
-        let snapshot = self.runtime_snapshot.read().await;
-        if let Some(models) = snapshot.model_info() {
+        let session = self.session.read().await;
+        if let Some(models) = session.model_info() {
             let current_id = models.current_model_id.to_string();
             let available: Vec<ModelInfoEntry> = models
                 .available_models
@@ -955,12 +866,12 @@ impl AcpAgentManager {
                 let _ = self.event_tx.send(AgentStreamEvent::AcpModelInfo(v));
             }
         }
-        if let Some(modes) = snapshot.modes()
+        if let Some(modes) = session.modes()
             && let Some(v) = sdk_to_snake_value(&modes)
         {
             let _ = self.event_tx.send(AgentStreamEvent::AcpModeInfo(v));
         }
-        if let Some(config_options) = snapshot.config_options()
+        if let Some(config_options) = session.config_options()
             && let Some(v) = sdk_to_snake_value(&serde_json::json!({
                 "config_options": config_options,
             }))
@@ -971,7 +882,7 @@ impl AcpAgentManager {
             // structure regardless of origin.
             let _ = self.event_tx.send(AgentStreamEvent::AcpConfigOption(v));
         }
-        if let Some(cmds) = snapshot.available_commands() {
+        if let Some(cmds) = session.available_commands() {
             let _ = self
                 .event_tx
                 .send(AgentStreamEvent::AvailableCommands(AvailableCommandsEventData {
@@ -980,10 +891,10 @@ impl AcpAgentManager {
         }
     }
 
-    /// Return available slash commands from the cached runtime snapshot.
+    /// Return available slash commands from the session aggregate.
     pub async fn load_slash_commands(&self) -> Result<Vec<SlashCommandItem>, AppError> {
-        let snapshot = self.runtime_snapshot.read().await;
-        let items = snapshot
+        let session = self.session.read().await;
+        let items = session
             .available_commands()
             .map(|cmds| {
                 cmds.iter()
@@ -999,20 +910,21 @@ impl AcpAgentManager {
 
     /// Current ACP session ID, if a session has been established.
     pub async fn session_id(&self) -> Option<String> {
-        self.state.read().await.session_id.clone()
+        self.session.read().await.session_id().map(ToOwned::to_owned)
     }
 
     /// Restore a previously persisted session_id (e.g. from DB on task rebuild).
     /// Enables resume path on next send_message instead of creating a fresh session.
     ///
-    /// Deliberately leaves `session_opened = false`: the CLI child process is
+    /// Deliberately leaves `opened = false`: the CLI child process is
     /// brand new and still needs `session/load` (or claude-meta-resume) to
     /// re-attach to the persisted session before the next prompt. Subsequent
     /// turns — once the resume handshake has run — take the short path.
     pub async fn restore_session_id(&self, sid: String) {
-        let mut state = self.state.write().await;
-        state.session_id = Some(sid);
-        state.session_opened = false;
+        let mut session = self.session.write().await;
+        session.assign_session_id(sid);
+        session.drain_events();
+        // Note: opened stays false — new process needs load/resume
     }
 
     /// Vendor label this session was spawned as (e.g. "claude"), if any.
@@ -1066,11 +978,11 @@ impl AcpAgentManager {
 
     /// Return the active session id or a `BadRequest` error.
     async fn require_session_id(&self) -> Result<String, AppError> {
-        self.state
+        self.session
             .read()
             .await
-            .session_id
-            .clone()
+            .session_id()
+            .map(ToOwned::to_owned)
             .ok_or_else(|| AppError::BadRequest("No active session".into()))
     }
 }
@@ -1083,8 +995,8 @@ impl IAgentManager for AcpAgentManager {
 
     fn status(&self) -> Option<ConversationStatus> {
         // Use try_read to avoid blocking; fall back to None if locked
-        match self.state.try_read() {
-            Ok(guard) => guard.status,
+        match self.status.try_read() {
+            Ok(guard) => *guard,
             Err(_) => None,
         }
     }
@@ -1134,7 +1046,7 @@ impl IAgentManager for AcpAgentManager {
     }
 
     async fn stop(&self) -> Result<(), AppError> {
-        let session_id = self.state.read().await.session_id.clone();
+        let session_id = self.session.read().await.session_id().map(ToOwned::to_owned);
         if let Some(sid) = session_id {
             self.protocol.cancel(CancelNotification::new(SessionId::new(sid)));
         }
@@ -1189,11 +1101,10 @@ impl IAgentManager for AcpAgentManager {
         self.closing.store(true, std::sync::atomic::Ordering::Release);
 
         // Cancel the current session if active
-        if let Ok(state) = self.state.try_read()
-            && let Some(ref sid) = state.session_id
+        if let Ok(session) = self.session.try_read()
+            && let Some(sid) = session.session_id()
         {
-            self.protocol
-                .cancel(CancelNotification::new(SessionId::new(sid.as_str())));
+            self.protocol.cancel(CancelNotification::new(SessionId::new(sid)));
         }
 
         let process = Arc::clone(&self.process);
@@ -1234,7 +1145,7 @@ impl IAgentManager for AcpAgentManager {
         if normalized_mode.is_empty() {
             return Ok(());
         }
-        let session_id = self.state.read().await.session_id.clone();
+        let session_id = self.session.read().await.session_id().map(ToOwned::to_owned);
 
         if let Some(sid) = session_id {
             self.protocol

@@ -4,4 +4,4 @@ pub mod session;
 
 pub use events::AcpSessionEvent;
 pub use reconcile::ReconcileAction;
-pub use session::AcpSession;
+pub use session::{AcpSession, PersistedSessionState};

@@ -8,6 +8,19 @@ use agent_client_protocol::schema::{
 use super::events::AcpSessionEvent;
 use super::reconcile::ReconcileAction;
 
+/// Decoded per-session runtime state loaded from `acp_session.session_config.runtime`.
+///
+/// Only carries the user's last *choices* — the enumerations of what
+/// the agent supports (mode list, model list, config schema) come from
+/// the CLI's session response after initialization.
+#[derive(Debug, Clone, Default)]
+pub struct PersistedSessionState {
+    pub current_mode_id: Option<String>,
+    pub current_model_id: Option<String>,
+    pub config_selections: HashMap<String, String>,
+    pub context_usage: Option<UsageUpdate>,
+}
+
 /// What the user wants the session to be (intent).
 #[derive(Debug, Clone, Default)]
 struct Desired {
@@ -236,6 +249,46 @@ impl AcpSession {
 
     pub fn apply_context_usage(&mut self, usage: UsageUpdate) {
         self.advertised.context_usage = Some(usage);
+    }
+
+    /// Update the model's current_model_id in place without replacing
+    /// the available models list. Used after a successful `set_model` call.
+    pub fn update_current_model(&mut self, model_id: &str) {
+        if let Some(info) = &self.advertised.models {
+            let updated = SessionModelState::new(model_id.to_owned(), info.available_models.clone());
+            self.advertised.models = Some(updated);
+        }
+        self.observed.model_id = Some(model_id.to_owned());
+    }
+
+    /// Seed the aggregate with persisted user choices from DB.
+    /// Called on resume paths before the CLI session/load response arrives.
+    pub fn preload_persisted(&mut self, state: &PersistedSessionState) {
+        if let Some(mode_id) = &state.current_mode_id {
+            self.advertised.modes = Some(SessionModeState::new(mode_id.clone(), Vec::new()));
+            self.observed.mode_id = Some(mode_id.clone());
+        }
+        if let Some(model_id) = &state.current_model_id {
+            self.advertised.models = Some(SessionModelState::new(model_id.clone(), Vec::new()));
+            self.observed.model_id = Some(model_id.clone());
+        }
+        if !state.config_selections.is_empty() {
+            self.observed.config_current = state.config_selections.clone();
+        }
+        if let Some(usage) = &state.context_usage {
+            self.advertised.context_usage = Some(usage.clone());
+        }
+    }
+
+    /// Apply a partial mode update (only currentModeId changed, keep available_modes).
+    pub fn apply_partial_mode_update(&mut self, current_mode_id: &str) {
+        if let Some(existing) = &self.advertised.modes {
+            let available = existing.available_modes.clone();
+            self.advertised.modes = Some(SessionModeState::new(current_mode_id.to_owned(), available));
+        } else {
+            self.advertised.modes = Some(SessionModeState::new(current_mode_id.to_owned(), Vec::new()));
+        }
+        self.observed.mode_id = Some(current_mode_id.to_owned());
     }
 
     // ─── Reconcile ─────────────────────────────────────────────────────

@@ -41,9 +41,9 @@ use tokio::time::sleep_until;
 use tracing::{debug, warn};
 
 use crate::acp_agent::AcpAgentManager;
-use crate::acp_runtime_snapshot::PersistedSessionState as SnapshotPersistedState;
 use crate::agent_manager::AgentManagerHandle;
 use crate::agent_registry::AgentRegistry;
+use crate::manager::acp::PersistedSessionState as SnapshotPersistedState;
 use crate::stream_event::AgentStreamEvent;
 
 // ── Per-session state facade ────────────────────────────────────────
@@ -235,10 +235,10 @@ impl AcpAgentService {
     }
 
     /// Load and decode the `session_config.runtime` payload into the
-    /// shape `AcpRuntimeSnapshot::preload_persisted` expects. Errors
-    /// and malformed JSON are downgraded to `None` — preload is
+    /// shape `AcpSession::preload_persisted` expects. Errors and
+    /// malformed JSON are downgraded to `None` — preload is
     /// best-effort; the CLI's `session/load` reply still refills the
-    /// snapshot with its own values.
+    /// session with its own values.
     async fn load_snapshot_state(&self, conversation_id: &str) -> Option<SnapshotPersistedState> {
         let row = match self.repo.load_runtime_state(conversation_id).await {
             Ok(Some(row)) => row,
