@@ -1,6 +1,5 @@
 //! AI agent lifecycle, worker task dispatch, and skill management.
 pub mod acp_agent;
-pub mod acp_agent_service;
 pub mod acp_error;
 pub mod acp_protocol;
 pub mod acp_routes;
@@ -26,7 +25,6 @@ mod team_guide_prompt;
 pub mod types;
 
 pub use acp_agent::AcpAgentManager;
-pub use acp_agent_service::AcpAgentService;
 pub use acp_routes::{AcpRouterState, acp_routes};
 pub use agent_manager::{AgentManagerHandle, IAgentManager, approval_key};
 pub use agent_registry::AgentRegistry;
@@ -42,6 +40,7 @@ pub use backend_protocol_sink::BackendProtocolSink;
 pub use cli_process::CliAgentProcess;
 pub use factory::{AgentFactoryDeps, build_agent_factory};
 pub use idle_scanner::start_idle_scanner;
+pub use manager::acp::AcpSessionSyncService;
 pub use manager::remote::{
     RemoteAgentConfig, RemoteAgentManager, RemoteAgentRouterState, RemoteAgentService, remote_agent_routes,
 };

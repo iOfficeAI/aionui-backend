@@ -9,10 +9,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
-use crate::acp_agent_service::AcpAgentService;
 use crate::agent_manager::AgentManagerHandle;
 use crate::agent_registry::AgentRegistry;
 use crate::factory::acp_assembler::{WorkspaceInfo, assemble_acp_params};
+use crate::manager::acp::AcpSessionSyncService;
 use crate::manager::remote::RemoteAgentConfig;
 use crate::skill_manager::AcpSkillManager;
 use crate::task_manager::AgentFactory;
@@ -26,7 +26,7 @@ pub struct AgentFactoryDeps {
     pub provider_repo: Arc<dyn IProviderRepository>,
     pub encryption_key: [u8; 32],
     pub agent_registry: Arc<AgentRegistry>,
-    pub acp_agent_service: Arc<AcpAgentService>,
+    pub acp_agent_service: Arc<AcpSessionSyncService>,
     pub data_dir: PathBuf,
     /// Absolute path to the backend binary, reused as the `command` of the
     /// stdio MCP bridge injected into ACP `session/new` for team sessions.
@@ -167,7 +167,7 @@ async fn build_agent(deps: Arc<AgentFactoryDeps>, options: BuildTaskOptions) -> 
             let skill_mgr = deps.skill_manager.clone();
             let catalog_tx = deps.agent_registry.catalog_sender();
 
-            let agent = AcpAgentManager::new(params, skill_mgr, catalog_tx).await?;
+            let (agent, domain_rx) = AcpAgentManager::new(params, skill_mgr, catalog_tx).await?;
 
             let arc = Arc::new(agent);
             arc.start_permission_handler();
@@ -175,10 +175,12 @@ async fn build_agent(deps: Arc<AgentFactoryDeps>, options: BuildTaskOptions) -> 
             arc.start_catalog_sync();
             let handle: AgentManagerHandle = arc.clone();
 
-            // Hand the service a subscription to the manager's event
-            // bus so it can persist per-session runtime state. Ownership
-            // of the DB flows through the service, not the manager.
-            deps.acp_agent_service.attach(conversation_id, handle.clone()).await;
+            // Hand the service the domain event receiver so it can
+            // persist user intent changes without reverse-engineering
+            // them from CLI observations.
+            deps.acp_agent_service
+                .attach(conversation_id, handle.clone(), domain_rx)
+                .await;
 
             Ok(handle)
         }

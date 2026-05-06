@@ -4,7 +4,7 @@ use crate::agent_registry::CatalogSender;
 use crate::cli_process::CliAgentProcess;
 use crate::factory::acp_assembler::AcpSessionParams;
 use crate::first_message_injector::{InjectionConfig, inject_first_message_prefix};
-use crate::manager::acp::{AcpSession, PersistedSessionState};
+use crate::manager::acp::{AcpSession, AcpSessionEvent, PersistedSessionState};
 use crate::skill_manager::AcpSkillManager;
 use crate::stream_event::{
     AgentStreamEvent, AvailableCommandsEventData, FinishEventData, SessionAssignedEventData, StartEventData,
@@ -193,6 +193,9 @@ pub struct AcpAgentManager {
     closing: std::sync::atomic::AtomicBool,
     /// Shared skill manager — used to discover skills for first-message injection.
     skill_manager: Arc<AcpSkillManager>,
+    /// Domain event sender — session aggregate events are forwarded here
+    /// for the persistence consumer (`AcpSessionSyncService`).
+    domain_event_tx: mpsc::Sender<AcpSessionEvent>,
 }
 
 impl AcpAgentManager {
@@ -355,7 +358,7 @@ impl AcpAgentManager {
         params: Arc<AcpSessionParams>,
         skill_manager: Arc<AcpSkillManager>,
         catalog_tx: CatalogSender,
-    ) -> Result<Self, AppError> {
+    ) -> Result<(Self, mpsc::Receiver<AcpSessionEvent>), AppError> {
         let process = CliAgentProcess::spawn_for_sdk(params.command_spec.clone()).await?;
 
         // Take raw stdio for the SDK transport
@@ -367,6 +370,7 @@ impl AcpAgentManager {
         let (event_tx, _) = broadcast::channel(256);
         let (stream_tx, _) = broadcast::channel(256);
         let (permission_tx, permission_rx) = mpsc::channel(32);
+        let (domain_event_tx, domain_event_rx) = mpsc::channel(256);
 
         // Connect via ACP SDK — executes initialize handshake
         let protocol = AcpProtocol::connect(stdin, stdout, event_tx.clone(), stream_tx.clone(), permission_tx)
@@ -422,9 +426,10 @@ impl AcpAgentManager {
             pending_permissions: StdMutex::new(HashMap::new()),
             closing: std::sync::atomic::AtomicBool::new(false),
             skill_manager,
+            domain_event_tx,
         };
 
-        Ok(manager)
+        Ok((manager, domain_event_rx))
     }
 
     /// Start the permission handler loop. Must be called after the manager
@@ -489,7 +494,7 @@ impl AcpAgentManager {
             loop {
                 match rx.recv().await {
                     Ok(event) => {
-                        Self::apply_event_to_session(&this.session, &event).await;
+                        this.apply_event_to_session(&event).await;
                     }
                     Err(broadcast::error::RecvError::Closed) => break,
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
@@ -498,33 +503,38 @@ impl AcpAgentManager {
         });
     }
 
-    /// Mirror a stream event into the `AcpSession` aggregate's advertised layer.
-    async fn apply_event_to_session(session: &RwLock<AcpSession>, event: &AgentStreamEvent) {
+    /// Mirror a stream event into the `AcpSession` aggregate's observed/advertised
+    /// layer and forward any resulting domain events to the persistence consumer.
+    async fn apply_event_to_session(&self, event: &AgentStreamEvent) {
         match event {
             AgentStreamEvent::AcpModeInfo(value) => {
                 if let Ok(update) = serde_json::from_value::<SessionModeState>(value.clone()) {
-                    let mut s = session.write().await;
+                    let mut s = self.session.write().await;
                     s.apply_advertised_modes(update);
+                    self.commit_session_changes(&mut s).await;
                 } else if let Some(current_id) = value.get("currentModeId").and_then(|v: &Value| v.as_str()) {
-                    let mut s = session.write().await;
+                    let mut s = self.session.write().await;
                     s.apply_observed_mode(current_id);
+                    self.commit_session_changes(&mut s).await;
                 }
             }
             AgentStreamEvent::AcpModelInfo(value) => {
                 if let Ok(update) = serde_json::from_value::<SessionModelState>(value.clone()) {
-                    let mut s = session.write().await;
+                    let mut s = self.session.write().await;
                     s.apply_advertised_models(update);
+                    self.commit_session_changes(&mut s).await;
                 }
             }
             AgentStreamEvent::AcpConfigOption(value) => {
                 if let Ok(update) = serde_json::from_value::<Vec<SessionConfigOption>>(value.clone()) {
-                    let mut s = session.write().await;
+                    let mut s = self.session.write().await;
                     s.apply_advertised_config_options(update);
+                    self.commit_session_changes(&mut s).await;
                 }
             }
             AgentStreamEvent::AcpContextUsage(value) => {
                 if let Ok(update) = serde_json::from_value::<UsageUpdate>(value.clone()) {
-                    let mut s = session.write().await;
+                    let mut s = self.session.write().await;
                     s.apply_context_usage(update);
                 }
             }
@@ -557,6 +567,14 @@ impl AcpAgentManager {
         });
     }
 
+    /// Drain pending domain events from the session aggregate and
+    /// forward them to the persistence consumer via the mpsc channel.
+    async fn commit_session_changes(&self, session: &mut AcpSession) {
+        for event in session.drain_events() {
+            let _ = self.domain_event_tx.send(event).await;
+        }
+    }
+
     /// Seed the session aggregate with the user's last choices. Called
     /// by `ConversationService` on resume paths, before dispatching
     /// `send_message`. `None` fields are ignored — the CLI's
@@ -573,6 +591,7 @@ impl AcpAgentManager {
         for (config_id, value) in &state.config_selections {
             session.set_desired_config(config_id.clone(), value.clone());
         }
+        // Preload events are discarded — the DB already has these values.
         session.drain_events();
     }
 
@@ -616,7 +635,7 @@ impl AcpAgentManager {
         {
             let mut s = self.session.write().await;
             s.mark_opened();
-            s.drain_events();
+            self.commit_session_changes(&mut s).await;
         }
         *self.status.write().await = Some(ConversationStatus::Running);
 
@@ -655,11 +674,11 @@ impl AcpAgentManager {
                 session.apply_advertised_config_options(config_options);
             }
             session.assign_session_id(sid.clone());
-            session.drain_events();
+            self.commit_session_changes(&mut session).await;
         }
         self.emit_snapshot_events().await;
 
-        // Notify subscribers (e.g. AcpAgentService) so the new id is
+        // Notify subscribers (e.g. session_sync consumer) so the new id is
         // persisted into `acp_session.session_id` — resume can then
         // choose `session/load` instead of a fresh `session/new`.
         let _ = self
@@ -748,7 +767,7 @@ impl AcpAgentManager {
                         session.apply_advertised_config_options(config_options);
                     }
                     session.assign_session_id(new_sid.clone());
-                    session.drain_events();
+                    self.commit_session_changes(&mut session).await;
                 }
                 self.emit_snapshot_events().await;
 
@@ -800,7 +819,7 @@ impl AcpAgentManager {
             {
                 let mut session = self.session.write().await;
                 session.assign_session_id(sid.to_owned());
-                session.drain_events();
+                self.commit_session_changes(&mut session).await;
             }
             self.reconcile_session(sid).await;
         }
@@ -923,8 +942,8 @@ impl AcpAgentManager {
     pub async fn restore_session_id(&self, sid: String) {
         let mut session = self.session.write().await;
         session.assign_session_id(sid);
+        // Discarded — the session_id already came from DB, no need to re-persist.
         session.drain_events();
-        // Note: opened stays false — new process needs load/resume
     }
 
     /// Vendor label this session was spawned as (e.g. "claude"), if any.
@@ -1159,7 +1178,7 @@ impl IAgentManager for AcpAgentManager {
 
         let mut session = self.session.write().await;
         session.set_desired_mode(normalized_mode);
-        session.drain_events();
+        self.commit_session_changes(&mut session).await;
         Ok(())
     }
 

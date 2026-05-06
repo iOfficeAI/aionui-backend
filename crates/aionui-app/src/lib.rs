@@ -16,7 +16,7 @@ use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
 use aionui_ai_agent::{
-    AcpAgentService, AcpRouterState, AcpSkillManager, AgentFactoryDeps, AgentRegistry, AgentRouterState,
+    AcpRouterState, AcpSessionSyncService, AcpSkillManager, AgentFactoryDeps, AgentRegistry, AgentRouterState,
     AuxiliaryRouterState, IWorkerTaskManager, RemoteAgentRouterState, WorkerTaskManagerImpl, acp_routes, agent_routes,
     auxiliary_routes, build_agent_factory, remote_agent_routes,
 };
@@ -204,7 +204,7 @@ impl AppServices {
 
         let acp_session_repo: Arc<dyn IAcpSessionRepository> =
             Arc::new(SqliteAcpSessionRepository::new(database.pool().clone()));
-        let acp_agent_service = AcpAgentService::new(acp_session_repo.clone());
+        let acp_agent_service = AcpSessionSyncService::new(acp_session_repo.clone());
 
         // Skill paths need app resource dir (for builtin rules) + data dir
         // (for user skills + materialized views). AcpSkillManager uses these
