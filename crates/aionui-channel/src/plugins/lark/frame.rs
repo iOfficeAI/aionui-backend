@@ -212,4 +212,68 @@ mod tests {
         assert_eq!(get_header(&headers, "sum"), Some("3"));
         assert_eq!(get_header(&headers, "missing"), None);
     }
+
+    #[test]
+    fn build_ack_frame_retains_only_allowed_headers() {
+        let original = PbFrame {
+            seq_id: 5,
+            log_id: 10,
+            service: 1,
+            method: METHOD_DATA,
+            headers: vec![
+                PbHeader {
+                    key: "type".into(),
+                    value: "event".into(),
+                },
+                PbHeader {
+                    key: "message_id".into(),
+                    value: "msg_99".into(),
+                },
+                PbHeader {
+                    key: "trace_id".into(),
+                    value: "trace_abc".into(),
+                },
+                PbHeader {
+                    key: "sum".into(),
+                    value: "3".into(),
+                },
+                PbHeader {
+                    key: "seq".into(),
+                    value: "1".into(),
+                },
+            ],
+            payload_encoding: String::new(),
+            payload_type: String::new(),
+            payload: Vec::new(),
+            log_id_new: String::new(),
+        };
+        let ack = build_ack_frame(&original);
+        let keys: Vec<&str> = ack.headers.iter().map(|h| h.key.as_str()).collect();
+        assert!(keys.contains(&"type"));
+        assert!(keys.contains(&"message_id"));
+        assert!(keys.contains(&"trace_id"));
+        assert!(keys.contains(&"biz_rt"));
+        assert!(!keys.contains(&"sum"));
+        assert!(!keys.contains(&"seq"));
+    }
+
+    #[test]
+    fn build_ack_frame_echoes_seq_and_log_ids() {
+        let original = PbFrame {
+            seq_id: 77,
+            log_id: 88,
+            service: 3,
+            method: METHOD_DATA,
+            headers: vec![],
+            payload_encoding: String::new(),
+            payload_type: String::new(),
+            payload: Vec::new(),
+            log_id_new: "new_log_xyz".into(),
+        };
+        let ack = build_ack_frame(&original);
+        assert_eq!(ack.seq_id, 77);
+        assert_eq!(ack.log_id, 88);
+        assert_eq!(ack.service, 3);
+        assert_eq!(ack.log_id_new, "new_log_xyz");
+    }
 }

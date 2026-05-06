@@ -1014,6 +1014,203 @@ mod tests {
         assert_eq!(extract_service_id(url), 0);
     }
 
+    // -- handle_control_frame -------------------------------------------------
+
+    #[test]
+    fn control_frame_pong_with_config_returns_duration() {
+        use super::super::frame::PbFrame;
+        let frame = PbFrame {
+            seq_id: 0,
+            log_id: 0,
+            service: 1,
+            method: 0,
+            headers: vec![super::super::frame::PbHeader {
+                key: "type".into(),
+                value: "pong".into(),
+            }],
+            payload_encoding: String::new(),
+            payload_type: String::new(),
+            payload: br#"{"PingInterval":60,"ReconnectCount":5,"ReconnectInterval":30,"ReconnectNonce":10}"#.to_vec(),
+            log_id_new: String::new(),
+        };
+        let result = handle_control_frame(&frame);
+        assert_eq!(result, Some(Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn control_frame_pong_empty_payload_returns_none() {
+        use super::super::frame::PbFrame;
+        let frame = PbFrame {
+            seq_id: 0,
+            log_id: 0,
+            service: 1,
+            method: 0,
+            headers: vec![super::super::frame::PbHeader {
+                key: "type".into(),
+                value: "pong".into(),
+            }],
+            payload_encoding: String::new(),
+            payload_type: String::new(),
+            payload: Vec::new(),
+            log_id_new: String::new(),
+        };
+        let result = handle_control_frame(&frame);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn control_frame_ping_returns_none() {
+        use super::super::frame::PbFrame;
+        let frame = PbFrame {
+            seq_id: 0,
+            log_id: 0,
+            service: 1,
+            method: 0,
+            headers: vec![super::super::frame::PbHeader {
+                key: "type".into(),
+                value: "ping".into(),
+            }],
+            payload_encoding: String::new(),
+            payload_type: String::new(),
+            payload: Vec::new(),
+            log_id_new: String::new(),
+        };
+        let result = handle_control_frame(&frame);
+        assert_eq!(result, None);
+    }
+
+    // -- handle_ws_text integration -------------------------------------------
+
+    #[tokio::test]
+    async fn ws_text_event_dispatches_message() {
+        let (message_tx, mut message_rx) = mpsc::channel(16);
+        let (confirm_tx, _confirm_rx) = mpsc::channel(16);
+        let dedup_cache = Arc::new(Mutex::new(HashMap::new()));
+
+        let payload = r#"{
+            "header": {
+                "event_id": "ev_test_1",
+                "event_type": "im.message.receive_v1"
+            },
+            "event": {
+                "sender": {
+                    "sender_id": { "open_id": "ou_user1", "user_id": "", "union_id": "" },
+                    "sender_type": "user",
+                    "tenant_key": "t1"
+                },
+                "message": {
+                    "message_id": "msg_test_1",
+                    "chat_id": "oc_chat1",
+                    "chat_type": "p2p",
+                    "message_type": "text",
+                    "content": "{\"text\":\"Hello bot\"}"
+                }
+            }
+        }"#;
+
+        handle_ws_text(payload, "event", &message_tx, &confirm_tx, &dedup_cache).await;
+
+        let msg = message_rx.try_recv().unwrap();
+        assert_eq!(msg.id, "msg_test_1");
+        assert_eq!(msg.chat_id, "oc_chat1");
+        assert_eq!(msg.content.text, "Hello bot");
+        assert_eq!(msg.user.id, "ou_user1");
+        assert_eq!(msg.platform, PluginType::Lark);
+    }
+
+    #[tokio::test]
+    async fn ws_text_event_deduplicates() {
+        let (message_tx, mut message_rx) = mpsc::channel(16);
+        let (confirm_tx, _confirm_rx) = mpsc::channel(16);
+        let dedup_cache = Arc::new(Mutex::new(HashMap::new()));
+
+        let payload = r#"{
+            "header": {
+                "event_id": "ev_dup_1",
+                "event_type": "im.message.receive_v1"
+            },
+            "event": {
+                "sender": {
+                    "sender_id": { "open_id": "ou_x", "user_id": "", "union_id": "" },
+                    "sender_type": "user",
+                    "tenant_key": "t1"
+                },
+                "message": {
+                    "message_id": "msg_dup",
+                    "chat_id": "oc_1",
+                    "chat_type": "p2p",
+                    "message_type": "text",
+                    "content": "{\"text\":\"hi\"}"
+                }
+            }
+        }"#;
+
+        handle_ws_text(payload, "event", &message_tx, &confirm_tx, &dedup_cache).await;
+        handle_ws_text(payload, "event", &message_tx, &confirm_tx, &dedup_cache).await;
+
+        assert!(message_rx.try_recv().is_ok());
+        assert!(message_rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn ws_text_card_dispatches_action() {
+        let (message_tx, mut message_rx) = mpsc::channel(16);
+        let (confirm_tx, _confirm_rx) = mpsc::channel(16);
+        let dedup_cache = Arc::new(Mutex::new(HashMap::new()));
+
+        let payload = r#"{
+            "operator": { "open_id": "ou_actor", "user_id": null },
+            "action": { "tag": "button", "value": {"action": "chat:help.show"} },
+            "open_message_id": "om_card1",
+            "open_chat_id": "oc_chat2"
+        }"#;
+
+        handle_ws_text(payload, "card", &message_tx, &confirm_tx, &dedup_cache).await;
+
+        let msg = message_rx.try_recv().unwrap();
+        assert_eq!(msg.chat_id, "oc_chat2");
+        assert_eq!(msg.user.id, "ou_actor");
+        assert!(msg.action.is_some());
+        let action = msg.action.unwrap();
+        assert_eq!(action.action, "help.show");
+    }
+
+    #[tokio::test]
+    async fn ws_text_card_confirm_sends_to_confirm_channel() {
+        let (message_tx, _message_rx) = mpsc::channel(16);
+        let (confirm_tx, mut confirm_rx) = mpsc::channel(16);
+        let dedup_cache = Arc::new(Mutex::new(HashMap::new()));
+
+        // NOTE: handle_card_action checks `action == "system.confirm"` but
+        // parse_lark_callback splits "system:confirm:..." into category="system",
+        // action="confirm". This means the confirm path requires the action field
+        // to literally contain "system.confirm" as a dotted string within the
+        // "system" category. The format "system:system.confirm:k=v" satisfies this.
+        let payload = r#"{
+            "operator": { "open_id": "ou_actor" },
+            "action": { "tag": "button", "value": {"action": "system:system.confirm:callId=call_123,value=approve"} },
+            "open_message_id": "om_1",
+            "open_chat_id": "oc_1"
+        }"#;
+
+        handle_ws_text(payload, "card", &message_tx, &confirm_tx, &dedup_cache).await;
+
+        let (call_id, value) = confirm_rx.try_recv().unwrap();
+        assert_eq!(call_id, "call_123");
+        assert_eq!(value, "approve");
+    }
+
+    #[tokio::test]
+    async fn ws_text_unknown_type_does_not_dispatch() {
+        let (message_tx, mut message_rx) = mpsc::channel(16);
+        let (confirm_tx, _confirm_rx) = mpsc::channel(16);
+        let dedup_cache = Arc::new(Mutex::new(HashMap::new()));
+
+        handle_ws_text("{}", "unknown_type", &message_tx, &confirm_tx, &dedup_cache).await;
+
+        assert!(message_rx.try_recv().is_err());
+    }
+
     // -- LarkPlugin constructor ---------------------------------------------
 
     #[test]
