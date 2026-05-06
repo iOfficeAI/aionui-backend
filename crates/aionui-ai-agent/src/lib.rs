@@ -1,4 +1,4 @@
-//! AI agent lifecycle, LLM API clients, worker task dispatch, and skill management.
+//! AI agent lifecycle, worker task dispatch, and skill management.
 pub mod acp_agent;
 pub mod acp_agent_service;
 pub mod acp_error;
@@ -9,7 +9,6 @@ pub mod agent_manager;
 pub mod agent_registry;
 pub mod agent_routes;
 pub mod aionrs_agent;
-pub mod api_client;
 pub mod auxiliary_routes;
 pub mod backend_output_sink;
 pub mod backend_protocol_sink;
@@ -38,11 +37,6 @@ pub use agent_manager::{AgentManagerHandle, IAgentManager, approval_key};
 pub use agent_registry::AgentRegistry;
 pub use agent_routes::{AgentRouterState, agent_routes};
 pub use aionrs_agent::AionrsAgentManager;
-pub use api_client::{
-    AnthropicRotatingClient, ApiClientError, ApiKeyManager, ApiKeyStatus, ClientOptions, GeminiRotatingClient,
-    LlmClient, OpenAIRotatingClient, RotatingClient, clean_function_name, create_rotating_client, is_retryable_status,
-    normalize_base_url,
-};
 pub use auxiliary_routes::{AuxiliaryRouterState, auxiliary_routes};
 pub use backend_output_sink::BackendOutputSink;
 pub use backend_protocol_sink::BackendProtocolSink;
