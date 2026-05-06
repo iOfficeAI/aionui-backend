@@ -5,6 +5,7 @@ use crate::cli_process::CliAgentProcess;
 use crate::factory::acp_assembler::AcpSessionParams;
 use crate::first_message_injector::{InjectionConfig, inject_first_message_prefix};
 use crate::manager::acp::{AcpSession, AcpSessionEvent, PermissionRouter, PersistedSessionState};
+use crate::shared_kernel::{ModeId, ModelId, SessionId as DomainSessionId};
 use crate::skill_manager::AcpSkillManager;
 use crate::stream_event::{
     AgentStreamEvent, AvailableCommandsEventData, FinishEventData, SessionAssignedEventData, StartEventData,
@@ -209,7 +210,7 @@ impl AcpAgentManager {
 
     async fn update_cached_mode(&self, mode: &str) {
         let mut session = self.session.write().await;
-        session.apply_partial_mode_update(mode);
+        session.apply_partial_mode_update(ModeId::new(mode));
     }
 
     /// Execute reconcile actions produced by `AcpSession::plan_reconcile`.
@@ -228,8 +229,8 @@ impl AcpAgentManager {
 
         for action in actions {
             match action {
-                ReconcileAction::SetMode { mode_id } => {
-                    let normalized = normalize_requested_mode(&self.params.metadata, mode_id.as_str());
+                ReconcileAction::SetMode { mode } => {
+                    let normalized = normalize_requested_mode(&self.params.metadata, mode.as_str());
                     if normalized.is_empty() {
                         continue;
                     }
@@ -251,23 +252,21 @@ impl AcpAgentManager {
                     }
                     self.update_cached_mode(&normalized).await;
                     let mut session = self.session.write().await;
-                    session.apply_observed_mode(&normalized);
+                    session.apply_observed_mode(ModeId::new(normalized));
                 }
-                ReconcileAction::SetConfigOption { config_id, value } => {
-                    let cid_str = config_id.into_inner();
-                    let val_str = value.into_inner();
+                ReconcileAction::SetConfigOption { key, value } => {
                     if let Err(err) = self
                         .protocol
                         .set_config_option(SetSessionConfigOptionRequest::new(
                             SessionId::new(session_id),
-                            cid_str.clone(),
-                            val_str.clone(),
+                            key.as_str().to_owned(),
+                            value.as_str().to_owned(),
                         ))
                         .await
                     {
                         info!(
-                            config_id = %cid_str,
-                            desired = %val_str,
+                            config_id = %key,
+                            desired = %value,
                             error = %err,
                             "reconcile_session: set_config_option failed; skipping"
                         );
@@ -295,7 +294,7 @@ impl AcpAgentManager {
         // CurrentModelUpdate notification for model changes.
         {
             let mut session = self.session.write().await;
-            session.update_current_model(model_id);
+            session.update_current_model(ModelId::new(model_id));
         }
 
         Ok(())
@@ -399,7 +398,8 @@ impl AcpAgentManager {
             .session_mode
             .as_ref()
             .map(|m| normalize_requested_mode(&params.metadata, m))
-            .filter(|m| !m.is_empty());
+            .filter(|m| !m.is_empty())
+            .map(ModeId::new);
         let mut session = AcpSession::new(initial_mode, HashMap::new());
         if let Some(agent_capabilities) = protocol.agent_capabilities() {
             session.apply_advertised_capabilities(agent_capabilities);
@@ -463,7 +463,7 @@ impl AcpAgentManager {
                     self.commit_session_changes(&mut s).await;
                 } else if let Some(current_id) = value.get("currentModeId").and_then(|v: &Value| v.as_str()) {
                     let mut s = self.session.write().await;
-                    s.apply_observed_mode(current_id);
+                    s.apply_observed_mode(ModeId::new(current_id));
                     self.commit_session_changes(&mut s).await;
                 }
             }
@@ -533,14 +533,14 @@ impl AcpAgentManager {
     pub async fn preload_snapshot(&self, state: PersistedSessionState) {
         let mut session = self.session.write().await;
         session.preload_persisted(&state);
-        if let Some(mode_id) = &state.current_mode_id {
-            let normalized = normalize_requested_mode(&self.params.metadata, mode_id);
+        if let Some(mode) = &state.current_mode_id {
+            let normalized = normalize_requested_mode(&self.params.metadata, mode.as_str());
             if !normalized.is_empty() {
-                session.set_desired_mode(normalized);
+                session.set_desired_mode(ModeId::new(normalized));
             }
         }
-        for (config_id, value) in &state.config_selections {
-            session.set_desired_config(config_id.clone(), value.clone());
+        for (key, value) in &state.config_selections {
+            session.set_desired_config(key.clone(), value.clone());
         }
         // Preload events are discarded — the DB already has these values.
         session.drain_events();
@@ -624,7 +624,7 @@ impl AcpAgentManager {
             if let Some(config_options) = session_response.config_options {
                 session.apply_advertised_config_options(config_options);
             }
-            session.assign_session_id(sid.clone());
+            session.assign_session_id(DomainSessionId::new(sid.clone()));
             self.commit_session_changes(&mut session).await;
         }
         self.emit_snapshot_events().await;
@@ -717,7 +717,7 @@ impl AcpAgentManager {
                     if let Some(config_options) = session_response.config_options {
                         session.apply_advertised_config_options(config_options);
                     }
-                    session.assign_session_id(new_sid.clone());
+                    session.assign_session_id(DomainSessionId::new(new_sid.clone()));
                     self.commit_session_changes(&mut session).await;
                 }
                 self.emit_snapshot_events().await;
@@ -769,7 +769,7 @@ impl AcpAgentManager {
         if let Some(sid) = session_id {
             {
                 let mut session = self.session.write().await;
-                session.assign_session_id(sid.to_owned());
+                session.assign_session_id(DomainSessionId::new(sid));
                 self.commit_session_changes(&mut session).await;
             }
             self.reconcile_session(sid).await;
@@ -892,7 +892,7 @@ impl AcpAgentManager {
     /// turns — once the resume handshake has run — take the short path.
     pub async fn restore_session_id(&self, sid: String) {
         let mut session = self.session.write().await;
-        session.assign_session_id(sid);
+        session.assign_session_id(DomainSessionId::new(sid));
         // Discarded — the session_id already came from DB, no need to re-persist.
         session.drain_events();
     }
@@ -1109,11 +1109,11 @@ impl IAgentManager for AcpAgentManager {
                 .map_err(AppError::from)?;
             self.update_cached_mode(&normalized_mode).await;
             let mut session = self.session.write().await;
-            session.apply_observed_mode(&normalized_mode);
+            session.apply_observed_mode(ModeId::new(&normalized_mode));
         }
 
         let mut session = self.session.write().await;
-        session.set_desired_mode(normalized_mode);
+        session.set_desired_mode(ModeId::new(normalized_mode));
         self.commit_session_changes(&mut session).await;
         Ok(())
     }

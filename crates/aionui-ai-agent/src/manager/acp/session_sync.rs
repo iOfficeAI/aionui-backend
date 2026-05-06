@@ -19,6 +19,7 @@ use crate::acp_agent::AcpAgentManager;
 use crate::agent_manager::AgentManagerHandle;
 use crate::manager::acp::PersistedSessionState as SnapshotPersistedState;
 use crate::manager::acp::events::AcpSessionEvent;
+use crate::shared_kernel::{ConfigKey, ConfigValue, ModeId, ModelId};
 use crate::stream_event::AgentStreamEvent;
 
 const DEBOUNCE_WINDOW: Duration = Duration::from_millis(500);
@@ -109,14 +110,17 @@ impl AcpSessionSyncService {
         };
 
         let mut state = SnapshotPersistedState {
-            current_mode_id: row.current_mode_id,
-            current_model_id: row.current_model_id,
+            current_mode_id: row.current_mode_id.map(ModeId::new),
+            current_model_id: row.current_model_id.map(ModelId::new),
             ..Default::default()
         };
         if let Some(raw) = row.config_selections_json
-            && let Ok(map) = serde_json::from_str(&raw)
+            && let Ok(map) = serde_json::from_str::<HashMap<String, String>>(&raw)
         {
-            state.config_selections = map;
+            state.config_selections = map
+                .into_iter()
+                .map(|(k, v)| (ConfigKey::new(k), ConfigValue::new(v)))
+                .collect();
         }
         if let Some(raw) = row.context_usage_json
             && let Ok(usage) = serde_json::from_str(&raw)
@@ -155,8 +159,8 @@ impl PendingUpdate {
 
     fn merge_from_domain_event(&mut self, event: &AcpSessionEvent) -> bool {
         match event {
-            AcpSessionEvent::DesiredModeChanged { mode_id } => {
-                self.current_mode_id = Some(Some(mode_id.as_str().to_owned()));
+            AcpSessionEvent::DesiredModeChanged { mode } => {
+                self.current_mode_id = Some(Some(mode.as_str().to_owned()));
                 true
             }
             AcpSessionEvent::DesiredConfigChanged { selections } => {
@@ -168,8 +172,8 @@ impl PendingUpdate {
                 self.config_selections_json = Some(Some(json));
                 true
             }
-            AcpSessionEvent::ObservedModelSynced { model_id } => {
-                self.current_model_id = Some(Some(model_id.as_str().to_owned()));
+            AcpSessionEvent::ObservedModelSynced { model } => {
+                self.current_model_id = Some(Some(model.as_str().to_owned()));
                 true
             }
             _ => false,
@@ -321,7 +325,7 @@ mod tests {
         let cid = "conv-1".to_owned();
         tokio::spawn(domain_event_consumer(cid, rx, repo.clone()));
 
-        tx.send(AcpSessionEvent::DesiredModeChanged { mode_id: "plan".into() })
+        tx.send(AcpSessionEvent::DesiredModeChanged { mode: "plan".into() })
             .await
             .unwrap();
 
@@ -344,7 +348,7 @@ mod tests {
         tokio::spawn(domain_event_consumer(cid, rx, repo.clone()));
 
         for label in ["code", "plan", "ask"] {
-            tx.send(AcpSessionEvent::DesiredModeChanged { mode_id: label.into() })
+            tx.send(AcpSessionEvent::DesiredModeChanged { mode: label.into() })
                 .await
                 .unwrap();
             sleep(Duration::from_millis(100)).await;
@@ -380,7 +384,7 @@ mod tests {
         let cid = "conv-1".to_owned();
         tokio::spawn(domain_event_consumer(cid, rx, repo.clone()));
 
-        tx.send(AcpSessionEvent::DesiredModeChanged { mode_id: "plan".into() })
+        tx.send(AcpSessionEvent::DesiredModeChanged { mode: "plan".into() })
             .await
             .unwrap();
         drop(tx);

@@ -14,16 +14,16 @@ pub enum AcpSessionEvent {
     },
     SessionOpened,
     DesiredModeChanged {
-        mode_id: ModeId,
+        mode: ModeId,
     },
     DesiredConfigChanged {
         selections: HashMap<ConfigKey, ConfigValue>,
     },
     ObservedModeSynced {
-        mode_id: ModeId,
+        mode: ModeId,
     },
     ObservedModelSynced {
-        model_id: ModelId,
+        model: ModelId,
     },
 }
 
@@ -45,7 +45,7 @@ mod tests {
     #[test]
     fn event_debug_format() {
         let e = AcpSessionEvent::DesiredModeChanged {
-            mode_id: ModeId::new("plan"),
+            mode: ModeId::new("plan"),
         };
         let dbg = format!("{e:?}");
         assert!(dbg.contains("plan"));
