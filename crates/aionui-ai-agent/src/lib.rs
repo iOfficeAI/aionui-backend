@@ -6,6 +6,7 @@ pub mod acp_routes;
 pub mod agent_manager;
 pub mod agent_registry;
 pub mod agent_routes;
+pub mod agent_task;
 pub mod aionrs_agent;
 pub mod auxiliary_routes;
 pub mod backend_output_sink;
@@ -29,6 +30,13 @@ pub use acp_agent::AcpAgentManager;
 pub use acp_routes::{AcpRouterState, acp_routes};
 pub use agent_manager::{AgentManagerHandle, IAgentManager, approval_key};
 pub use agent_registry::AgentRegistry;
+// NOTE (PR #8a): `IAgentTask` / `AgentInstance` are defined but intentionally
+// not added to the crate-level prelude yet — the old `IAgentManager` trait
+// is still the primary surface exposed via `pub use agent_manager::*`. Re-
+// exporting both would cause glob-importing consumers (integration tests)
+// to see ambiguous method resolution for `agent_type`/`status`/etc. PR #8b
+// switches consumers over, and PR #8c removes `IAgentManager` entirely and
+// re-exports `agent_task::*` here.
 pub use agent_routes::{AgentRouterState, agent_routes};
 pub use aionrs_agent::AionrsAgentManager;
 pub use aionui_api_types::{

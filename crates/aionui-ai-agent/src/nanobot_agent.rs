@@ -248,6 +248,38 @@ impl IAgentManager for NanobotAgentManager {
     }
 }
 
+/// PR #8a: `IAgentTask` delegates to `IAgentManager` during the transition.
+#[async_trait::async_trait]
+impl crate::agent_task::IAgentTask for NanobotAgentManager {
+    fn agent_type(&self) -> AgentType {
+        <Self as IAgentManager>::agent_type(self)
+    }
+    fn conversation_id(&self) -> &str {
+        <Self as IAgentManager>::conversation_id(self)
+    }
+    fn workspace(&self) -> &str {
+        <Self as IAgentManager>::workspace(self)
+    }
+    fn status(&self) -> Option<ConversationStatus> {
+        <Self as IAgentManager>::status(self)
+    }
+    fn last_activity_at(&self) -> TimestampMs {
+        <Self as IAgentManager>::last_activity_at(self)
+    }
+    fn subscribe(&self) -> broadcast::Receiver<AgentStreamEvent> {
+        <Self as IAgentManager>::subscribe(self)
+    }
+    async fn send_message(&self, data: SendMessageData) -> Result<(), AppError> {
+        <Self as IAgentManager>::send_message(self, data).await
+    }
+    async fn stop(&self) -> Result<(), AppError> {
+        <Self as IAgentManager>::stop(self).await
+    }
+    fn kill(&self, reason: Option<AgentKillReason>) -> Result<(), AppError> {
+        <Self as IAgentManager>::kill(self, reason)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

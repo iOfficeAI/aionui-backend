@@ -1057,6 +1057,43 @@ impl IAgentManager for AcpAgentManager {
     }
 }
 
+/// PR #8a: the new, slim `IAgentTask` surface delegates to the existing
+/// `IAgentManager` methods. Once PR #8c deletes `IAgentManager`, these
+/// bodies will absorb the underlying implementations directly.
+#[async_trait::async_trait]
+impl crate::agent_task::IAgentTask for AcpAgentManager {
+    fn agent_type(&self) -> AgentType {
+        <Self as IAgentManager>::agent_type(self)
+    }
+    fn conversation_id(&self) -> &str {
+        <Self as IAgentManager>::conversation_id(self)
+    }
+    fn workspace(&self) -> &str {
+        <Self as IAgentManager>::workspace(self)
+    }
+    fn status(&self) -> Option<ConversationStatus> {
+        <Self as IAgentManager>::status(self)
+    }
+    fn last_activity_at(&self) -> TimestampMs {
+        <Self as IAgentManager>::last_activity_at(self)
+    }
+    fn subscribe(&self) -> broadcast::Receiver<AgentStreamEvent> {
+        <Self as IAgentManager>::subscribe(self)
+    }
+    fn subscribe_stream(&self) -> broadcast::Receiver<AgentStreamChunk> {
+        <Self as IAgentManager>::subscribe_stream(self)
+    }
+    async fn send_message(&self, data: SendMessageData) -> Result<(), AppError> {
+        <Self as IAgentManager>::send_message(self, data).await
+    }
+    async fn stop(&self) -> Result<(), AppError> {
+        <Self as IAgentManager>::stop(self).await
+    }
+    fn kill(&self, reason: Option<AgentKillReason>) -> Result<(), AppError> {
+        <Self as IAgentManager>::kill(self, reason)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
