@@ -15,12 +15,9 @@ use tokio::task::JoinHandle;
 use tokio::time::sleep_until;
 use tracing::{debug, warn};
 
-use crate::acp_agent::AcpAgentManager;
-use crate::agent_manager::AgentManagerHandle;
 use crate::manager::acp::PersistedSessionState as SnapshotPersistedState;
 use crate::manager::acp::events::AcpSessionEvent;
 use crate::shared_kernel::{ConfigKey, ConfigValue, ModeId, ModelId};
-use crate::stream_event::AgentStreamEvent;
 
 const DEBOUNCE_WINDOW: Duration = Duration::from_millis(500);
 
@@ -55,47 +52,11 @@ impl AcpSessionSyncService {
         }
     }
 
-    /// Wire a newly-constructed manager into the service:
-    ///
-    /// 1. Load persisted runtime state and seed the manager's session.
-    /// 2. Spawn a per-conversation consumer task that subscribes to the
-    ///    manager's domain event channel and writes intent changes to DB.
-    pub async fn attach(
-        &self,
-        conversation_id: String,
-        handle: AgentManagerHandle,
-        domain_rx: mpsc::Receiver<AcpSessionEvent>,
-    ) {
-        if let Some(acp) = handle.as_any().downcast_ref::<AcpAgentManager>() {
-            if let Some(state) = self.load_snapshot_state(&conversation_id).await {
-                acp.preload_snapshot(state).await;
-            }
-            if let Ok(Some(row)) = self.repo.get(&conversation_id).await
-                && let Some(sid) = row.session_id
-            {
-                acp.restore_session_id(sid).await;
-            }
-        }
-
-        // Spawn domain-event consumer (replaces broadcast-based consumer).
-        let repo = self.repo.clone();
-        let cid = conversation_id.clone();
-        let task = tokio::spawn(domain_event_consumer(cid, domain_rx, repo));
-
-        // Also spawn broadcast consumer for session_id assignment which
-        // fires through the existing AgentStreamEvent::SessionAssigned path.
-        let rx = handle.subscribe();
-        let repo2 = self.repo.clone();
-        let cid2 = conversation_id.clone();
-        tokio::spawn(session_id_consumer(cid2, rx, repo2));
-
-        let mut guard = self.active.write().await;
-        if let Some(prev) = guard.insert(conversation_id, task) {
-            prev.abort();
-        }
-    }
-
-    async fn load_snapshot_state(&self, conversation_id: &str) -> Option<SnapshotPersistedState> {
+    /// Read the decoded per-session runtime state, mapped into the
+    /// aggregate's value-object shape. Returns `None` when the row does
+    /// not exist or the JSON payload is empty. Errors are logged and
+    /// swallowed so the caller can proceed with a fresh session.
+    pub async fn load_snapshot_state(&self, conversation_id: &str) -> Option<SnapshotPersistedState> {
         let row = match self.repo.load_runtime_state(conversation_id).await {
             Ok(Some(row)) => row,
             Ok(None) => return None,
@@ -128,6 +89,39 @@ impl AcpSessionSyncService {
             state.context_usage = Some(usage);
         }
         Some(state)
+    }
+
+    /// Read the persisted CLI-assigned session id, if any.
+    /// Used by the factory on resume paths to seed the aggregate before
+    /// the first prompt.
+    pub async fn load_session_id(&self, conversation_id: &str) -> Option<String> {
+        match self.repo.get(conversation_id).await {
+            Ok(Some(row)) => row.session_id,
+            Ok(None) => None,
+            Err(err) => {
+                warn!(
+                    conversation_id,
+                    error = %err,
+                    "load_session_id: repository failed"
+                );
+                None
+            }
+        }
+    }
+
+    /// Take ownership of the manager's domain event receiver and spawn
+    /// the per-conversation persistence consumer. Lifetime of the
+    /// spawned task is tied to the sender being dropped when the manager
+    /// is destroyed.
+    pub async fn attach(&self, conversation_id: String, domain_rx: mpsc::Receiver<AcpSessionEvent>) {
+        let repo = self.repo.clone();
+        let cid = conversation_id.clone();
+        let task = tokio::spawn(domain_event_consumer(cid, domain_rx, repo));
+
+        let mut guard = self.active.write().await;
+        if let Some(prev) = guard.insert(conversation_id, task) {
+            prev.abort();
+        }
     }
 }
 
@@ -183,6 +177,10 @@ impl PendingUpdate {
 
 /// Consume domain events from the session aggregate and persist user
 /// intent changes with a debounce window.
+///
+/// `SessionAssigned` bypasses the debounce: the CLI-issued id must be
+/// written immediately so the next turn can take the resume path even
+/// if the process crashes before any other event fires.
 async fn domain_event_consumer(
     conversation_id: String,
     mut rx: mpsc::Receiver<AcpSessionEvent>,
@@ -209,6 +207,21 @@ async fn domain_event_consumer(
 
         match recv {
             Some(event) => {
+                if let AcpSessionEvent::SessionAssigned { session_id } = &event {
+                    match repo.update_session_id(&conversation_id, session_id.as_str()).await {
+                        Ok(true) => {}
+                        Ok(false) => debug!(
+                            conversation_id,
+                            "session-sync: acp_session row missing; session_id not written"
+                        ),
+                        Err(err) => warn!(
+                            conversation_id,
+                            error = %err,
+                            "session-sync: update_session_id failed"
+                        ),
+                    }
+                    continue;
+                }
                 if pending.merge_from_domain_event(&event) {
                     flush_at = Some(Instant::now() + DEBOUNCE_WINDOW);
                 }
@@ -218,41 +231,6 @@ async fn domain_event_consumer(
                 debug!(conversation_id, "session-sync domain consumer exiting");
                 return;
             }
-        }
-    }
-}
-
-/// Lightweight consumer that only handles session_id assignment from the
-/// broadcast stream. This event fires exactly once per conversation when
-/// the CLI responds to `session/new`.
-async fn session_id_consumer(
-    conversation_id: String,
-    mut rx: tokio::sync::broadcast::Receiver<AgentStreamEvent>,
-    repo: Arc<dyn IAcpSessionRepository>,
-) {
-    loop {
-        match rx.recv().await {
-            Ok(AgentStreamEvent::SessionAssigned(data)) => {
-                match repo.update_session_id(&conversation_id, &data.session_id).await {
-                    Ok(true) => {}
-                    Ok(false) => {
-                        debug!(
-                            conversation_id,
-                            "session-sync: acp_session row missing; session_id not written"
-                        );
-                    }
-                    Err(err) => {
-                        warn!(
-                            conversation_id,
-                            error = %err,
-                            "session-sync: update_session_id failed"
-                        );
-                    }
-                }
-            }
-            Ok(_) => continue,
-            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-            Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
         }
     }
 }
@@ -281,6 +259,7 @@ async fn flush(repo: &Arc<dyn IAcpSessionRepository>, conversation_id: &str, pen
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shared_kernel::SessionId;
     use aionui_db::{CreateAcpSessionParams, SqliteAcpSessionRepository, init_database_memory};
     use tokio::time::sleep;
 
@@ -396,5 +375,28 @@ mod tests {
             Some("plan"),
             "pending update must flush on channel close"
         );
+    }
+
+    /// SessionAssigned must write the session_id immediately, bypassing
+    /// the debounce window used for desired-state updates.
+    #[tokio::test(flavor = "current_thread")]
+    async fn session_assigned_writes_session_id_immediately() {
+        let (_svc, repo) = setup().await;
+        let (tx, rx) = mpsc::channel(64);
+
+        let cid = "conv-1".to_owned();
+        tokio::spawn(domain_event_consumer(cid, rx, repo.clone()));
+
+        tx.send(AcpSessionEvent::SessionAssigned {
+            session_id: SessionId::new("sess-42"),
+        })
+        .await
+        .unwrap();
+
+        // Well under the debounce window — the event must have already
+        // been written.
+        sleep(Duration::from_millis(100)).await;
+        let row = repo.get("conv-1").await.unwrap().unwrap();
+        assert_eq!(row.session_id.as_deref(), Some("sess-42"));
     }
 }
