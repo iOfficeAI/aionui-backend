@@ -109,46 +109,6 @@ fn sdk_to_snake_value<T: serde::Serialize>(value: &T) -> Option<Value> {
     Some(v)
 }
 
-/// Project an `AgentStreamEvent` onto the subset of `AgentHandshake`
-/// fields the catalog cares about. Returns `None` for unrelated
-/// events — the forwarder filters on that.
-///
-/// Event payloads may arrive here either already snake_case (from
-/// `emit_snapshot_events`) or camelCase (from `SessionUpdate::*`
-/// translation in `stream_event.rs`). We re-normalise unconditionally
-/// so the persisted handshake blob is uniform; `camel_to_snake` is
-/// idempotent on snake_case input.
-fn catalog_partial_from_event(event: &AgentStreamEvent) -> Option<AgentHandshake> {
-    fn snake(mut v: Value) -> Value {
-        normalize_keys_to_snake_case(&mut v);
-        v
-    }
-    match event {
-        AgentStreamEvent::AcpModeInfo(v) => Some(AgentHandshake {
-            available_modes: Some(snake(v.clone())),
-            ..Default::default()
-        }),
-        AgentStreamEvent::AcpModelInfo(v) => Some(AgentHandshake {
-            available_models: Some(snake(v.clone())),
-            ..Default::default()
-        }),
-        AgentStreamEvent::AcpConfigOption(v) => Some(AgentHandshake {
-            config_options: Some(snake(v.clone())),
-            ..Default::default()
-        }),
-        AgentStreamEvent::AvailableCommands(data) => {
-            // `AvailableCommand` is an ACP SDK struct — normalise on
-            // the way into the catalog so the stored blob is snake_case.
-            let cmds = sdk_to_snake_value(&data.commands)?;
-            Some(AgentHandshake {
-                available_commands: Some(cmds),
-                ..Default::default()
-            })
-        }
-        _ => None,
-    }
-}
-
 /// Manages a single ACP Agent instance.
 ///
 /// ACP is the most complex agent type, supporting 20+ CLI sub-backends
@@ -348,8 +308,8 @@ impl AcpAgentManager {
     /// `params` is the pre-computed, immutable session bundle assembled by
     /// `assemble_acp_params` in the factory layer. `catalog_tx` is the
     /// MPSC sender used for the one-shot initialize handshake write;
-    /// session-driven fields flow through the forwarder started via
-    /// `start_catalog_sync`.
+    /// session-driven fields flow through the `CatalogForwarder` the
+    /// factory spawns after construction.
     pub async fn new(
         params: Arc<AcpSessionParams>,
         skill_manager: Arc<AcpSkillManager>,
@@ -383,7 +343,8 @@ impl AcpAgentManager {
         // Push the static handshake payloads (agent_capabilities +
         // auth_methods) through the catalog sync channel. Session-driven
         // fields — modes, models, config_options, commands — flow
-        // through the forwarder started in `start_catalog_sync`.
+        // through the `CatalogForwarder` the factory spawns after
+        // construction.
         let init_handshake = AgentHandshake {
             agent_capabilities: protocol.agent_capabilities().and_then(|c| sdk_to_snake_value(&c)),
             auth_methods: protocol.auth_methods().and_then(|m| sdk_to_snake_value(&m)),
@@ -489,33 +450,6 @@ impl AcpAgentManager {
             }
             _ => {}
         }
-    }
-
-    /// Forward session-driven ACP events into the catalog sync channel
-    /// so the `agent_metadata` row stays in sync with what the CLI is
-    /// actually reporting. Runs as a subscriber on this manager's
-    /// broadcast bus; the registry owns the single consumer that drains
-    /// the resulting MPSC.
-    ///
-    /// `catalog_tx` is passed in rather than stored on the manager — the
-    /// spawned task is the sole consumer of the sender for session-driven
-    /// updates after initialization.
-    pub fn start_catalog_sync(self: &Arc<Self>, catalog_tx: CatalogSender) {
-        let id = self.params.metadata.id.clone();
-        let mut rx = self.event_tx.subscribe();
-        tokio::spawn(async move {
-            loop {
-                match rx.recv().await {
-                    Ok(event) => {
-                        if let Some(partial) = catalog_partial_from_event(&event) {
-                            catalog_tx.send_partial(id.clone(), partial);
-                        }
-                    }
-                    Err(broadcast::error::RecvError::Closed) => break,
-                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                }
-            }
-        });
     }
 
     /// Drain pending domain events from the session aggregate and
@@ -1316,29 +1250,5 @@ mod tests {
     fn normalize_requested_mode_trims_and_returns_empty_for_blank() {
         let meta = metadata_with_yolo_id(Some("full-access"));
         assert_eq!(normalize_requested_mode(&meta, "   "), "");
-    }
-
-    /// Each session-driven event projects onto exactly one handshake
-    /// field. Unrelated events produce `None` so the forwarder sends
-    /// nothing for them.
-    #[test]
-    fn catalog_partial_covers_session_fields() {
-        let modes = catalog_partial_from_event(&AgentStreamEvent::AcpModeInfo(json!({"x": 1})))
-            .expect("mode event must project");
-        assert_eq!(modes.available_modes, Some(json!({"x": 1})));
-        assert!(modes.available_models.is_none());
-
-        let models =
-            catalog_partial_from_event(&AgentStreamEvent::AcpModelInfo(json!([1]))).expect("model event must project");
-        assert_eq!(models.available_models, Some(json!([1])));
-
-        let cfg = catalog_partial_from_event(&AgentStreamEvent::AcpConfigOption(json!([
-            {"id":"mode"}
-        ])))
-        .expect("config event must project");
-        assert_eq!(cfg.config_options, Some(json!([{"id":"mode"}])));
-
-        // An unrelated event emits no update.
-        assert!(catalog_partial_from_event(&AgentStreamEvent::Start(StartEventData { session_id: None })).is_none());
     }
 }

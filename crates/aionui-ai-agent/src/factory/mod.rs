@@ -12,7 +12,7 @@ use tracing::{debug, info, warn};
 use crate::agent_manager::AgentManagerHandle;
 use crate::agent_registry::AgentRegistry;
 use crate::factory::acp_assembler::{WorkspaceInfo, assemble_acp_params};
-use crate::manager::acp::AcpSessionSyncService;
+use crate::manager::acp::{AcpSessionSyncService, CatalogForwarder};
 use crate::manager::remote::RemoteAgentConfig;
 use crate::skill_manager::AcpSkillManager;
 use crate::task_manager::AgentFactory;
@@ -172,7 +172,11 @@ async fn build_agent(deps: Arc<AgentFactoryDeps>, options: BuildTaskOptions) -> 
             let arc = Arc::new(agent);
             arc.start_permission_handler();
             arc.start_session_event_tracker();
-            arc.start_catalog_sync(catalog_tx);
+            CatalogForwarder::spawn(
+                arc.agent_metadata_id().to_owned(),
+                crate::IAgentManager::subscribe(arc.as_ref()),
+                catalog_tx,
+            );
 
             // Seed the aggregate with persisted runtime choices and
             // (if present) the CLI-assigned session id, so the first
