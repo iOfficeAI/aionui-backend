@@ -94,7 +94,7 @@ pub enum AgentStreamChunk {
 mod tests {
     use super::*;
     use aionui_api_types::{
-        AcpBuildExtra, AcpModelInfo, AcpSessionConfigOption, OpenClawGatewayConfig, SlashCommandItem,
+        AcpBuildExtra, AcpModelInfo, AcpSessionConfigOption, AionrsBuildExtra, OpenClawGatewayConfig, SlashCommandItem,
     };
     use serde_json::json;
 
@@ -127,7 +127,8 @@ mod tests {
                 "team_id":"team-42",
                 "port":54321,
                 "token":"tok-abc",
-                "slot_id":"slot-lead"
+                "slot_id":"slot-lead",
+                "binary_path":"/bin/backend"
             }
         }"#;
         let parsed: AcpBuildExtra = serde_json::from_str(with_cfg).unwrap();

@@ -1,3 +1,5 @@
+pub mod acp_assembler;
+
 use aion_agent::session::SessionManager;
 use aionui_api_types::{AcpBuildExtra, AionrsBuildExtra, GuideMcpConfig, OpenClawBuildExtra, RemoteBuildExtra};
 use aionui_common::{AgentType, AppError, CommandSpec};
@@ -10,6 +12,7 @@ use tracing::{debug, info, warn};
 use crate::acp_agent_service::AcpAgentService;
 use crate::agent_manager::AgentManagerHandle;
 use crate::agent_registry::AgentRegistry;
+use crate::factory::acp_assembler::{WorkspaceInfo, assemble_acp_params};
 use crate::manager::remote::RemoteAgentConfig;
 use crate::skill_manager::AcpSkillManager;
 use crate::task_manager::AgentFactory;
@@ -130,40 +133,41 @@ async fn build_agent(deps: Arc<AgentFactoryDeps>, options: BuildTaskOptions) -> 
             // never had a command (e.g. remote-only). Either way the
             // caller needs to see a BadRequest, not a confusing
             // spawn-time error.
-            let (command, args, env) = {
-                (
-                    meta.resolved_command
-                        .clone()
-                        .ok_or_else(|| AppError::BadRequest(format!("Agent '{}' CLI not found in PATH", meta.name)))?,
-                    meta.args.clone(),
-                    meta.env
-                        .iter()
-                        .map(|e| aionui_common::EnvVar {
-                            name: e.name.clone(),
-                            value: e.value.clone(),
-                        })
-                        .collect(),
-                )
+            let command = meta
+                .resolved_command
+                .clone()
+                .ok_or_else(|| AppError::BadRequest(format!("Agent '{}' CLI not found in PATH", meta.name)))?;
+            let args = meta.args.clone();
+            let env = meta
+                .env
+                .iter()
+                .map(|e| aionui_common::EnvVar {
+                    name: e.name.clone(),
+                    value: e.value.clone(),
+                })
+                .collect();
+            let command_spec = CommandSpec {
+                command,
+                args,
+                env,
+                cwd: Some(workspace.clone()),
             };
+
+            let params = Arc::new(assemble_acp_params(
+                conversation_id.clone(),
+                WorkspaceInfo {
+                    path: workspace,
+                    is_custom: is_custom_workspace,
+                },
+                meta,
+                command_spec,
+                config,
+            ));
+
             let skill_mgr = deps.skill_manager.clone();
             let catalog_tx = deps.agent_registry.catalog_sender();
 
-            let agent = AcpAgentManager::new(
-                conversation_id.clone(),
-                meta,
-                workspace.clone(),
-                is_custom_workspace,
-                CommandSpec {
-                    command,
-                    args,
-                    env,
-                    cwd: Some(workspace),
-                },
-                config,
-                skill_mgr,
-                catalog_tx,
-            )
-            .await?;
+            let agent = AcpAgentManager::new(params, skill_mgr, catalog_tx).await?;
 
             let arc = Arc::new(agent);
             arc.start_permission_handler();

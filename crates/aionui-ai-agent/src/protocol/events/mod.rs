@@ -106,6 +106,7 @@ pub struct ErrorEventData {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::AgentStreamChunk;
     use agent_client_protocol::schema::{
         ContentBlock, ContentChunk, PermissionOption, PermissionOptionKind as SdkPermissionOptionKind,
         RequestPermissionRequest, SessionNotification, SessionUpdate, ToolCall as SdkToolCall,

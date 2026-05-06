@@ -4,26 +4,23 @@ use crate::acp_runtime_snapshot::AcpRuntimeSnapshot;
 use crate::acp_runtime_snapshot::PersistedSessionState;
 use crate::agent_registry::CatalogSender;
 use crate::cli_process::CliAgentProcess;
+use crate::factory::acp_assembler::AcpSessionParams;
 use crate::first_message_injector::{InjectionConfig, inject_first_message_prefix};
 use crate::skill_manager::AcpSkillManager;
 use crate::stream_event::{
     AgentStreamEvent, AvailableCommandsEventData, FinishEventData, SessionAssignedEventData, StartEventData,
     permission_request_to_event_data,
 };
-use crate::team_guide_prompt;
 use crate::types::{AgentStreamChunk, SendMessageData};
 use agent_client_protocol::schema::{
-    AgentCapabilities, AvailableCommand, CancelNotification, ContentBlock, EnvVariable, LoadSessionRequest, McpServer,
-    McpServerStdio, NewSessionRequest, PromptRequest, SessionConfigKind, SessionConfigOption, SessionId,
-    SessionModeState, SessionModelState, SetSessionConfigOptionRequest, SetSessionModeRequest, SetSessionModelRequest,
-    UsageUpdate,
+    AgentCapabilities, AvailableCommand, CancelNotification, ContentBlock, LoadSessionRequest, PromptRequest,
+    SessionConfigKind, SessionConfigOption, SessionId, SessionModeState, SessionModelState,
+    SetSessionConfigOptionRequest, SetSessionModeRequest, SetSessionModelRequest, UsageUpdate,
 };
-use aionui_api_types::{AcpBuildExtra, SlashCommandItem};
-use aionui_api_types::{AgentHandshake, AgentMetadata};
-use aionui_api_types::{GuideMcpConfig, TeamMcpStdioConfig};
+use aionui_api_types::{AgentHandshake, AgentMetadata, SlashCommandItem};
 use aionui_common::{
-    AgentKillReason, AgentType, AppError, CommandSpec, Confirmation, ConversationStatus, TimestampMs,
-    normalize_keys_to_snake_case, now_ms,
+    AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, TimestampMs, normalize_keys_to_snake_case,
+    now_ms,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -115,127 +112,6 @@ fn confirm_option_id(data: &Value) -> Option<String> {
     }
 }
 
-/// Compose the first-message preset context for a solo ACP agent, optionally
-/// prepending the Team Guide prompt (W5-D28b).
-///
-/// The guide is injected iff **both** conditions hold:
-/// 1. The session is not already part of a team (`team_mcp_stdio_config`
-///    absent on [`AcpBuildExtra`]) — in-team agents receive a different
-///    coordination prompt via their team MCP bridge, and must not be told to
-///    propose a fresh team from inside one.
-/// 2. The backend is on the solo-guide whitelist (see
-///    [`team_guide_prompt::is_solo_team_guide_backend`]). Unknown backends
-///    receive no guide, matching AionUi's `opts.backend`-gated solo
-///    injection.
-///
-/// When the guide is added it is appended after any pre-existing
-/// `preset_context` so user-configured rules still take precedence at the
-/// top of the `[Assistant Rules]` block assembled by
-/// [`crate::first_message_injector::inject_first_message_prefix`].
-fn compose_preset_context_with_team_guide(
-    base_preset_context: Option<&str>,
-    backend: Option<&str>,
-    has_team_session: bool,
-) -> Option<String> {
-    let base = base_preset_context
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_owned);
-
-    if has_team_session {
-        return base;
-    }
-    let backend_key = backend.unwrap_or_default();
-    if !team_guide_prompt::is_solo_team_guide_backend(backend_key) {
-        return base;
-    }
-
-    let guide = team_guide_prompt::build_solo_team_guide_prompt(backend_key);
-    match base {
-        Some(ctx) => Some(format!("{ctx}\n\n{guide}")),
-        None => Some(guide),
-    }
-}
-
-/// Backends for which solo conversations receive the Guide MCP server
-/// (W5 team-capable whitelist). Duplicated locally rather than imported
-/// from `aionui_team::guide::capability` because `aionui-team` already
-/// depends on this crate (see `team_mcp_server` below for the same
-/// rationale). The two lists must stay in sync until one side is hoisted
-/// into a shared crate.
-const TEAM_CAPABLE_BACKENDS: &[&str] = &["claude", "codex", "gemini", "aionrs"];
-
-/// Build a `NewSessionRequest` for `session/new`, injecting the team MCP
-/// stdio server when `config.team_mcp_stdio_config` is present, or the
-/// Guide MCP server when the conversation is solo but the backend is
-/// team-capable.
-///
-/// The two injections are mutually exclusive: a team session already has
-/// its own MCP server and does not need the Guide. A solo session on a
-/// non-team-capable backend gets neither, matching the legacy single-chat
-/// payload byte-for-byte.
-///
-/// The team MCP server injected here uses HTTP transport (see
-/// `team_mcp_server` below) — the `backend_binary_path` / `mcp-bridge`
-/// stdio shape described in phase1 interface-contracts §3 is used only
-/// by the bridge subprocess in `aionui-team`, not by this path.
-///
-/// W5-D28c ships the guard only — the Guide MCP server itself (config
-/// type, port/token resolution) lands with D26a/D27, after which the
-/// `// TODO(D26a)` branch here will push an `McpServer::Http` onto
-/// `mcp_servers` instead of falling through.
-fn build_new_session_request(workspace: &str, config: &AcpBuildExtra, conversation_id: &str) -> NewSessionRequest {
-    let req = NewSessionRequest::new(workspace);
-    if let Some(cfg) = config.team_mcp_stdio_config.as_ref() {
-        return req.mcp_servers(vec![team_mcp_server(cfg)]);
-    }
-    // Solo: inject Guide MCP stdio server for team-capable backends
-    if let Some(guide_cfg) = config.guide_mcp_config.as_ref()
-        && config
-            .backend
-            .as_deref()
-            .is_some_and(|b| TEAM_CAPABLE_BACKENDS.contains(&b))
-    {
-        return req.mcp_servers(vec![guide_mcp_server(guide_cfg, config, conversation_id)]);
-    }
-    req
-}
-
-/// Translate a `TeamMcpStdioConfig` into the ACP SDK wire type expected by
-/// `NewSessionRequest::mcp_servers`.
-///
-/// Field shapes must stay byte-for-byte identical to
-/// `aionui_team::mcp::bridge::TeamMcpStdioServerSpec::into_sdk` — the
-/// logic is inlined here rather than reused because `aionui-team` already
-/// depends on this crate, so importing the spec would cycle. Both sides
-/// derive `name` from `cfg.team_id` (phase1 interface-contracts §3).
-fn team_mcp_server(cfg: &TeamMcpStdioConfig) -> McpServer {
-    let env = vec![
-        EnvVariable::new(TeamMcpStdioConfig::ENV_PORT.to_owned(), cfg.port.to_string()),
-        EnvVariable::new(TeamMcpStdioConfig::ENV_TOKEN.to_owned(), cfg.token.clone()),
-        EnvVariable::new(TeamMcpStdioConfig::ENV_SLOT_ID.to_owned(), cfg.slot_id.clone()),
-    ];
-    let stdio = McpServerStdio::new(format!("aionui-team-{}", cfg.team_id), &cfg.binary_path)
-        .args(vec!["mcp-team-stdio".to_owned()])
-        .env(env);
-    McpServer::Stdio(stdio)
-}
-
-/// Build a stdio `McpServer` for the Guide MCP server in solo team-capable sessions.
-fn guide_mcp_server(cfg: &GuideMcpConfig, extra: &AcpBuildExtra, conversation_id: &str) -> McpServer {
-    let env = vec![
-        EnvVariable::new("AION_MCP_PORT".to_owned(), cfg.port.to_string()),
-        EnvVariable::new("AION_MCP_TOKEN".to_owned(), cfg.token.clone()),
-        EnvVariable::new("AION_MCP_BACKEND".to_owned(), extra.backend.clone().unwrap_or_default()),
-        EnvVariable::new("AION_MCP_CONVERSATION_ID".to_owned(), conversation_id.to_owned()),
-        EnvVariable::new("AION_MCP_USER_ID".to_owned(), extra.user_id.clone().unwrap_or_default()),
-    ];
-    let stdio = McpServerStdio::new("aionui-team-guide", &cfg.binary_path)
-        .args(vec!["mcp-guide-stdio".to_owned()])
-        .env(env);
-    McpServer::Stdio(stdio)
-}
-
 /// Internal state that changes at runtime.
 struct AcpState {
     /// Current conversation status.
@@ -315,27 +191,11 @@ fn catalog_partial_from_event(event: &AgentStreamEvent) -> Option<AgentHandshake
 /// the `agent-client-protocol` SDK's JSON-RPC transport, replacing the
 /// previous hand-crafted JSON-over-stdin/stdout approach.
 pub struct AcpAgentManager {
-    /// Conversation this agent is bound to.
-    conversation_id: String,
-    /// Working directory.
-    workspace: String,
-    /// Whether the workspace was explicitly chosen by the user rather
-    /// than auto-provisioned (e.g. the default
-    /// `{data_dir}/conversations/{id}/` path). Determined at agent
-    /// construction time — do NOT re-derive from the workspace string,
-    /// which is fragile (user paths may happen to contain
-    /// `"conversations"` or `"-temp-"`).
-    is_custom_workspace: bool,
-    /// Snapshot of the `agent_metadata` row this session was spawned
-    /// from. Captured once at construction — the catalog row does not
-    /// change during a session's lifetime, so we read it locally
-    /// instead of round-tripping through the registry on every call.
-    metadata: AgentMetadata,
+    /// Pre-computed, immutable session parameters assembled by the factory.
+    params: Arc<AcpSessionParams>,
     /// Handle used to push partial handshake updates back into the
     /// catalog. The consumer task lives inside the registry.
     catalog_tx: CatalogSender,
-    /// Build configuration (preset context, enabled/excluded skills, session mode, …).
-    config: AcpBuildExtra,
     /// Preferred session mode to apply on the next session initialization.
     preferred_mode: RwLock<Option<String>>,
     /// Underlying CLI process (for lifecycle management: kill, is_running).
@@ -447,7 +307,7 @@ impl AcpAgentManager {
         let Some(mode) = self.preferred_mode().await else {
             return Ok(());
         };
-        let normalized_mode = normalize_requested_mode(&self.metadata, &mode);
+        let normalized_mode = normalize_requested_mode(&self.params.metadata, &mode);
         if normalized_mode.is_empty() {
             return Ok(());
         }
@@ -559,24 +419,16 @@ impl AcpAgentManager {
     /// Create a new ACP agent manager by spawning a CLI subprocess and
     /// establishing an ACP protocol connection.
     ///
-    /// `command_spec` already points at the resolved binary — the factory
-    /// reads it off `metadata` and passes it in here. `metadata` is a
-    /// snapshot of the `agent_metadata` row captured by the factory; it
-    /// never changes over this session's lifetime. `catalog_tx` is the
+    /// `params` is the pre-computed, immutable session bundle assembled by
+    /// `assemble_acp_params` in the factory layer. `catalog_tx` is the
     /// MPSC sender the manager uses for both the one-shot initialize
     /// handshake write and the session-driven forwarder.
-    #[allow(clippy::too_many_arguments)]
     pub async fn new(
-        conversation_id: String,
-        metadata: AgentMetadata,
-        workspace: String,
-        is_custom_workspace: bool,
-        command_spec: CommandSpec,
-        config: AcpBuildExtra,
+        params: Arc<AcpSessionParams>,
         skill_manager: Arc<AcpSkillManager>,
         catalog_tx: CatalogSender,
     ) -> Result<Self, AppError> {
-        let process = CliAgentProcess::spawn_for_sdk(command_spec).await?;
+        let process = CliAgentProcess::spawn_for_sdk(params.command_spec.clone()).await?;
 
         // Take raw stdio for the SDK transport
         let (stdin, stdout) = process
@@ -593,7 +445,7 @@ impl AcpAgentManager {
             .await
             .map_err(|e| {
                 error!(
-                    conversation_id = %conversation_id,
+                    conversation_id = %params.conversation_id,
                     error = %e,
                     "Failed to establish ACP protocol connection"
                 );
@@ -618,17 +470,15 @@ impl AcpAgentManager {
             ..Default::default()
         };
         if init_handshake.agent_capabilities.is_some() || init_handshake.auth_methods.is_some() {
-            catalog_tx.send_partial(metadata.id.clone(), init_handshake);
+            catalog_tx.send_partial(params.metadata.id.clone(), init_handshake);
         }
 
+        let preferred_mode = params.config.session_mode.clone();
+
         let manager = Self {
-            conversation_id,
-            workspace,
-            is_custom_workspace,
-            metadata,
+            params,
             catalog_tx,
-            preferred_mode: RwLock::new(config.session_mode.clone()),
-            config,
+            preferred_mode: RwLock::new(preferred_mode),
             process: Arc::new(process),
             protocol,
             event_tx,
@@ -728,7 +578,7 @@ impl AcpAgentManager {
     /// broadcast bus; the registry owns the single consumer that drains
     /// the resulting MPSC.
     pub fn start_catalog_sync(self: &Arc<Self>) {
-        let id = self.metadata.id.clone();
+        let id = self.params.metadata.id.clone();
         let sender = self.catalog_tx.clone();
         let this = Arc::clone(self);
         tokio::spawn(async move {
@@ -807,11 +657,11 @@ impl AcpAgentManager {
             .event_tx
             .send(AgentStreamEvent::Start(StartEventData { session_id: None }));
 
-        let req = build_new_session_request(&self.workspace, &self.config, &self.conversation_id);
+        let req = self.params.new_session_request();
         tracing::info!(
-            has_team_mcp = self.config.team_mcp_stdio_config.is_some(),
-            has_guide_mcp = self.config.guide_mcp_config.is_some(),
-            guide_mcp_port = self.config.guide_mcp_config.as_ref().map(|c| c.port),
+            has_team_mcp = self.params.config.team_mcp_stdio_config.is_some(),
+            has_guide_mcp = self.params.config.guide_mcp_config.is_some(),
+            guide_mcp_port = self.params.config.guide_mcp_config.as_ref().map(|c| c.port),
             mcp_servers_count = req.mcp_servers.len(),
             "session_new_and_prompt: sending session/new"
         );
@@ -849,42 +699,21 @@ impl AcpAgentManager {
 
         if let Err(e) = self.apply_preferred_mode(&sid).await {
             tracing::error!(
-                conversation_id = %self.conversation_id,
+                conversation_id = %self.params.conversation_id,
                 error = %e,
                 "failed to apply preferred mode, continuing with default"
             );
         }
         self.apply_preferred_config_selections(&sid).await;
 
-        // Inject first-message prefix (preset context + skills index).
-        // Backends with native skill discovery (e.g. Claude via .claude/skills/)
-        // only need preset_context here; others get the full [Assistant Rules]
-        // block with a skills index.
-        //
-        // Before handing off, (W5-D28b) prepend the solo Team Guide prompt to
-        // `preset_context` when this agent is *not* part of a team and the
-        // backend is on the solo-guide whitelist. Agents inside a team
-        // (non-empty `team_mcp_stdio_config`) are deliberately excluded —
-        // they coordinate through the team MCP bridge and must not receive
-        // the "propose a team" prompt.
-        let composed_preset_context = compose_preset_context_with_team_guide(
-            self.config.preset_context.as_deref(),
-            self.backend(),
-            self.config.team_mcp_stdio_config.is_some(),
-        );
         let injected_content = inject_first_message_prefix(
             &data.content,
             &self.skill_manager,
             InjectionConfig {
-                preset_context: composed_preset_context.as_deref(),
-                skills: &self.config.skills,
+                preset_context: self.params.preset_context.as_deref(),
+                skills: &self.params.config.skills,
                 native_skill_support: self.native_skill_support(),
-                // Whether the user chose this workspace — determined at
-                // factory-time and stored on the manager. Do NOT derive
-                // from `self.workspace`; path heuristics are fragile
-                // (user paths may incidentally contain "conversations"
-                // or "-temp-").
-                custom_workspace: self.is_custom_workspace,
+                custom_workspace: self.params.workspace.is_custom,
             },
         )
         .await;
@@ -929,13 +758,13 @@ impl AcpAgentManager {
                 claude_code.insert("options".into(), Value::Object(options));
                 meta.insert("claudeCode".into(), Value::Object(claude_code));
 
-                let req = build_new_session_request(&self.workspace, &self.config, &self.conversation_id).meta(meta);
+                let req = self.params.new_session_request().meta(meta);
 
                 info!(
                     session_id = %sid,
-                    has_team_mcp = self.config.team_mcp_stdio_config.is_some(),
-                    has_guide_mcp = self.config.guide_mcp_config.is_some(),
-                    guide_mcp_port = self.config.guide_mcp_config.as_ref().map(|c| c.port),
+                    has_team_mcp = self.params.config.team_mcp_stdio_config.is_some(),
+                    has_guide_mcp = self.params.config.guide_mcp_config.is_some(),
+                    guide_mcp_port = self.params.config.guide_mcp_config.as_ref().map(|c| c.port),
                     mcp_servers_count = req.mcp_servers.len(),
                     "session_resume: using session/new with claudeCode.options.resume"
                 );
@@ -969,7 +798,7 @@ impl AcpAgentManager {
                 // and the CLI starts prompting for permissions again.
                 if let Err(e) = self.apply_preferred_mode(&new_sid).await {
                     tracing::error!(
-                        conversation_id = %self.conversation_id,
+                        conversation_id = %self.params.conversation_id,
                         error = %e,
                         "failed to re-apply preferred mode after meta-resume"
                     );
@@ -989,9 +818,9 @@ impl AcpAgentManager {
                 )
             };
 
-            let mut load_req = LoadSessionRequest::new(SessionId::new(sid), &self.workspace);
-            if let Some(cfg) = self.config.team_mcp_stdio_config.as_ref() {
-                load_req = load_req.mcp_servers(vec![team_mcp_server(cfg)]);
+            let mut load_req = LoadSessionRequest::new(SessionId::new(sid), &self.params.workspace.path);
+            if !self.params.mcp_servers.is_empty() {
+                load_req = load_req.mcp_servers(self.params.mcp_servers.clone());
             }
             let resp = self.protocol.load_session(load_req).await.map_err(AppError::from)?;
 
@@ -1022,7 +851,7 @@ impl AcpAgentManager {
             // mode before prompting.
             if let Err(e) = self.apply_preferred_mode(sid).await {
                 tracing::error!(
-                    conversation_id = %self.conversation_id,
+                    conversation_id = %self.params.conversation_id,
                     error = %e,
                     "failed to re-apply preferred mode after session/load"
                 );
@@ -1153,17 +982,17 @@ impl AcpAgentManager {
 
     /// Vendor label this session was spawned as (e.g. "claude"), if any.
     pub fn backend(&self) -> Option<&str> {
-        self.metadata.backend.as_deref()
+        self.params.metadata.backend.as_deref()
     }
 
     /// Agent metadata id this session was spawned from.
     pub fn agent_metadata_id(&self) -> &str {
-        &self.metadata.id
+        &self.params.metadata.id
     }
 
     /// Whether the configured agent supports side questions.
     pub fn supports_side_question(&self) -> bool {
-        self.metadata.behavior_policy.supports_side_question
+        self.params.metadata.behavior_policy.supports_side_question
     }
 
     /// Whether the agent supports `session/load` — read from the ACP
@@ -1178,21 +1007,26 @@ impl AcpAgentManager {
     /// `_meta.claudeCode.options.resume`) instead of session/load.
     /// Matches AionUi frontend: `useClaudeMetaResume = backend === 'claude' || !!caps?._meta?.claudeCode`
     fn uses_claude_meta_resume(&self) -> bool {
-        agent_metadata_uses_claude_meta_resume(&self.metadata)
+        agent_metadata_uses_claude_meta_resume(&self.params.metadata)
     }
 
     fn supports_session_load(&self) -> bool {
-        self.metadata
+        self.params
+            .metadata
             .handshake
             .agent_capabilities
             .as_ref()
-            .and_then(|caps| caps.get("load_session"))
-            .and_then(|v| v.as_bool())
+            .and_then(|caps: &Value| caps.get("load_session"))
+            .and_then(|v: &Value| v.as_bool())
             .unwrap_or(false)
     }
 
     fn native_skill_support(&self) -> bool {
-        self.metadata.native_skills_dirs.as_ref().is_some_and(|v| !v.is_empty())
+        self.params
+            .metadata
+            .native_skills_dirs
+            .as_ref()
+            .is_some_and(|v: &Vec<String>| !v.is_empty())
     }
 
     /// Return the active session id or a `BadRequest` error.
@@ -1221,11 +1055,11 @@ impl IAgentManager for AcpAgentManager {
     }
 
     fn workspace(&self) -> &str {
-        &self.workspace
+        &self.params.workspace.path
     }
 
     fn conversation_id(&self) -> &str {
-        &self.conversation_id
+        &self.params.conversation_id
     }
 
     fn last_activity_at(&self) -> TimestampMs {
@@ -1297,7 +1131,7 @@ impl IAgentManager for AcpAgentManager {
             .send(PermissionDecision::Selected { option_id })
             .map_err(|_| AppError::BadRequest(format!("Pending ACP permission expired: {call_id}")))?;
 
-        debug!(conversation_id = %self.conversation_id, call_id, "ACP permission response forwarded");
+        debug!(conversation_id = %self.params.conversation_id, call_id, "ACP permission response forwarded");
         Ok(())
     }
 
@@ -1311,7 +1145,7 @@ impl IAgentManager for AcpAgentManager {
 
     fn kill(&self, reason: Option<AgentKillReason>) -> Result<(), AppError> {
         info!(
-            conversation_id = %self.conversation_id,
+            conversation_id = %self.params.conversation_id,
             ?reason,
             "Killing ACP agent"
         );
@@ -1347,7 +1181,7 @@ impl IAgentManager for AcpAgentManager {
         let preferred_mode = self
             .preferred_mode()
             .await
-            .map(|mode| normalize_requested_mode(&self.metadata, &mode))
+            .map(|mode| normalize_requested_mode(&self.params.metadata, &mode))
             .filter(|mode| !mode.is_empty());
         Ok(aionui_api_types::AgentModeResponse {
             mode: self
@@ -1355,13 +1189,13 @@ impl IAgentManager for AcpAgentManager {
                 .await
                 .map(|modes| modes.current_mode_id.to_string())
                 .or(preferred_mode)
-                .unwrap_or_else(|| normalize_requested_mode(&self.metadata, "default")),
+                .unwrap_or_else(|| normalize_requested_mode(&self.params.metadata, "default")),
             initialized: self.session_id().await.is_some(),
         })
     }
 
     async fn set_mode(&self, mode: &str) -> Result<(), AppError> {
-        let normalized_mode = normalize_requested_mode(&self.metadata, mode);
+        let normalized_mode = normalize_requested_mode(&self.params.metadata, mode);
         if normalized_mode.is_empty() {
             return Ok(());
         }
@@ -1574,175 +1408,10 @@ mod tests {
         assert!(!agent_metadata_uses_claude_meta_resume(&meta));
     }
 
-    fn build_extra_without_team() -> AcpBuildExtra {
-        serde_json::from_value(json!({ "backend": "claude" })).unwrap()
-    }
-
-    fn build_extra_with_team() -> AcpBuildExtra {
-        serde_json::from_value(json!({
-            "backend": "claude",
-            "team_mcp_stdio_config": {
-                "team_id": "team-42",
-                "port": 54321,
-                "token": "tok-abc",
-                "slot_id": "slot-lead",
-            },
-        }))
-        .unwrap()
-    }
-
-    #[test]
-    fn build_new_session_request_skips_mcp_servers_without_team_config() {
-        // Solo-chat path on a team-capable backend: no
-        // `team_mcp_stdio_config` and Guide injection is still pending
-        // D26a, so `mcp_servers` remains empty (matches the legacy
-        // single-chat payload byte-for-byte).
-        let req = build_new_session_request("/workspace", &build_extra_without_team(), "conv-test");
-        assert!(
-            req.mcp_servers.is_empty(),
-            "solo chat must not inject any MCP servers, got {:?}",
-            req.mcp_servers
-        );
-    }
-
-    #[test]
-    fn build_new_session_request_solo_non_capable_backend_yields_empty_mcp_servers() {
-        // Non-whitelisted backend: Guide must not be injected even once
-        // D26a lands. This test pins the guard shape — it becomes
-        // load-bearing when the D26a follow-up starts pushing
-        // `McpServer::Http` onto the list.
-        let extra: AcpBuildExtra = serde_json::from_value(json!({ "backend": "custom" })).unwrap();
-        let req = build_new_session_request("/workspace", &extra, "conv-test");
-        assert!(
-            req.mcp_servers.is_empty(),
-            "non-capable backend must not inject Guide MCP, got {:?}",
-            req.mcp_servers
-        );
-    }
-
-    #[test]
-    fn build_new_session_request_solo_missing_backend_yields_empty_mcp_servers() {
-        // Defensive: `extra.backend` is optional and historically may be
-        // absent on legacy conversations. Guard must handle `None`.
-        let extra: AcpBuildExtra = serde_json::from_value(json!({})).unwrap();
-        let req = build_new_session_request("/workspace", &extra, "conv-test");
-        assert!(
-            req.mcp_servers.is_empty(),
-            "missing backend must not inject Guide MCP, got {:?}",
-            req.mcp_servers
-        );
-    }
-
-    #[test]
-    fn build_new_session_request_team_session_takes_priority_over_guide() {
-        // Mutual exclusion: a team session injects the team MCP server
-        // and must not also receive the Guide server once D26a lands.
-        // Today this reduces to "team path still yields exactly one
-        // server" — the assertion will tighten when the Guide branch
-        // starts pushing servers.
-        let req = build_new_session_request("/workspace", &build_extra_with_team(), "conv-test");
-        assert_eq!(
-            req.mcp_servers.len(),
-            1,
-            "team session must inject exactly the team MCP server, not the Guide",
-        );
-    }
-
-    /// Team MCP injection uses the HTTP transport on the `agent-client-protocol`
-    /// schema (see `team_mcp_server`): `claude-agent-acp` actively connects to
-    /// HTTP servers whereas its stdio path has spawn/init timing issues. This
-    /// test pins the wire shape — name derived from `team_id`, URL pointing at
-    /// the loopback port, and both `Authorization: Bearer <token>` and
-    /// `X-Slot-Id` headers attached — so any accidental revert back to
-    /// `McpServer::Stdio` fails loud.
-    #[test]
-    fn build_new_session_request_injects_team_http_server() {
-        let req = build_new_session_request("/workspace", &build_extra_with_team(), "conv-test");
-        assert_eq!(req.mcp_servers.len(), 1, "exactly one team MCP server");
-
-        let server = req.mcp_servers.into_iter().next().unwrap();
-        let http = match server {
-            McpServer::Http(h) => h,
-            other => panic!("expected Http variant, got {other:?}"),
-        };
-
-        assert_eq!(http.name, "aionui-team-team-42");
-        assert_eq!(http.url, "http://127.0.0.1:54321");
-
-        let headers: std::collections::HashMap<_, _> = http
-            .headers
-            .iter()
-            .map(|h| (h.name.as_str(), h.value.as_str()))
-            .collect();
-        assert_eq!(headers.get("Authorization"), Some(&"Bearer tok-abc"));
-        assert_eq!(headers.get("X-Slot-Id"), Some(&"slot-lead"));
-    }
-
     #[test]
     fn normalize_requested_mode_trims_and_returns_empty_for_blank() {
         let meta = metadata_with_yolo_id(Some("full-access"));
         assert_eq!(normalize_requested_mode(&meta, "   "), "");
-    }
-
-    const TEAM_GUIDE_MARKER: &str = "## Team Mode";
-
-    #[test]
-    fn compose_preset_context_injects_team_guide_for_solo_whitelisted_backend() {
-        let out = compose_preset_context_with_team_guide(None, Some("claude"), false).expect("guide must be injected");
-        assert!(
-            out.contains(TEAM_GUIDE_MARKER),
-            "solo whitelisted backend must receive Team Guide prompt, got: {out}"
-        );
-    }
-
-    #[test]
-    fn compose_preset_context_preserves_base_context_before_team_guide() {
-        let base = "User rule: always respond in English.";
-        let out =
-            compose_preset_context_with_team_guide(Some(base), Some("gemini"), false).expect("guide must be injected");
-        let guide_idx = out.find(TEAM_GUIDE_MARKER).expect("team guide present");
-        let base_idx = out.find(base).expect("base rule present");
-        assert!(
-            base_idx < guide_idx,
-            "base preset_context must come before the Team Guide so user rules stay at the top of [Assistant Rules]"
-        );
-    }
-
-    #[test]
-    fn compose_preset_context_skips_team_guide_when_already_in_team() {
-        // Agent bound to a team: `team_mcp_stdio_config` present ⇒
-        // `has_team_session = true`. Must NOT inject the Team Guide prompt.
-        let out = compose_preset_context_with_team_guide(None, Some("claude"), true);
-        assert!(out.is_none(), "in-team agent must not receive Team Guide, got: {out:?}");
-
-        let with_base = compose_preset_context_with_team_guide(Some("Keep responses short."), Some("claude"), true)
-            .expect("base context must pass through");
-        assert!(
-            !with_base.contains(TEAM_GUIDE_MARKER),
-            "in-team agent must not receive Team Guide even when base context exists"
-        );
-        assert!(with_base.contains("Keep responses short."));
-    }
-
-    #[test]
-    fn compose_preset_context_skips_team_guide_for_unknown_backend() {
-        // Solo agent, but backend not on the whitelist: pass base context
-        // through (possibly `None`) without adding the Team Guide.
-        assert!(compose_preset_context_with_team_guide(None, Some("qwen"), false).is_none());
-        assert!(compose_preset_context_with_team_guide(None, None, false).is_none());
-
-        let with_base = compose_preset_context_with_team_guide(Some("Existing rule."), Some("qwen"), false)
-            .expect("base context must pass through unchanged");
-        assert_eq!(with_base, "Existing rule.");
-    }
-
-    #[test]
-    fn compose_preset_context_treats_blank_base_as_absent() {
-        // Whitespace-only base context should be treated as "none" so we
-        // don't leak "\n\n" prefixes into the injected Team Guide.
-        let out = compose_preset_context_with_team_guide(Some("   \n\t"), Some("claude"), false)
-            .expect("guide must still be injected");
-        assert!(out.starts_with("## Team Mode"));
     }
 
     /// Each session-driven event projects onto exactly one handshake
