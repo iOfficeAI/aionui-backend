@@ -7,13 +7,10 @@ pub mod agent_manager;
 pub mod agent_registry;
 pub mod agent_routes;
 pub mod agent_task;
-pub mod aionrs_agent;
 pub mod capability;
 pub mod factory;
 pub mod idle_scanner;
 pub mod manager;
-pub mod nanobot_agent;
-pub mod openclaw;
 pub mod protocol;
 pub mod routes;
 pub mod shared_kernel;
@@ -29,7 +26,6 @@ pub use agent_routes::{AgentRouterState, agent_routes};
 #[cfg(any(test, feature = "test-support"))]
 pub use agent_task::IMockAgent;
 pub use agent_task::{AgentInstance, IAgentTask};
-pub use aionrs_agent::AionrsAgentManager;
 pub use aionui_api_types::{
     AcpBuildExtra, AcpModelInfo, AcpSessionConfigOption, AionrsBuildExtra, OpenClawBuildExtra, OpenClawGatewayConfig,
     RemoteBuildExtra, SlashCommandItem,
@@ -45,11 +41,12 @@ pub use capability::skill_manager::{
 pub use factory::{AgentFactoryDeps, build_agent_factory};
 pub use idle_scanner::start_idle_scanner;
 pub use manager::acp::AcpSessionSyncService;
+pub use manager::aionrs::AionrsAgentManager;
+pub use manager::nanobot::NanobotAgentManager;
+pub use manager::openclaw::OpenClawAgentManager;
 pub use manager::remote::{
     RemoteAgentConfig, RemoteAgentManager, RemoteAgentRouterState, RemoteAgentService, remote_agent_routes,
 };
-pub use nanobot_agent::NanobotAgentManager;
-pub use openclaw::OpenClawAgentManager;
 pub use routes::{SessionRouterState, session_routes};
 pub use stream_event::AgentStreamEvent;
 pub use task_manager::{AgentFactory, IWorkerTaskManager, WorkerTaskManagerImpl};
