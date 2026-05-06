@@ -17,8 +17,8 @@ use tower_http::trace::TraceLayer;
 
 use aionui_ai_agent::{
     AcpRouterState, AcpSessionSyncService, AcpSkillManager, AgentFactoryDeps, AgentRegistry, AgentRouterState,
-    AuxiliaryRouterState, IWorkerTaskManager, RemoteAgentRouterState, WorkerTaskManagerImpl, acp_routes, agent_routes,
-    auxiliary_routes, build_agent_factory, remote_agent_routes,
+    IWorkerTaskManager, RemoteAgentRouterState, SessionRouterState, WorkerTaskManagerImpl, acp_routes, agent_routes,
+    build_agent_factory, remote_agent_routes, session_routes,
 };
 use aionui_api_types::GuideMcpConfig;
 use aionui_assets::{AssetRouterState, asset_routes};
@@ -339,7 +339,7 @@ pub struct ModuleStates {
     pub remote_agent: RemoteAgentRouterState,
     pub acp: AcpRouterState,
     pub connection_test: ConnectionTestRouterState,
-    pub auxiliary: AuxiliaryRouterState,
+    pub session: SessionRouterState,
     pub file: FileRouterState,
     pub mcp: McpRouterState,
     pub extension: ExtensionRouterState,
@@ -492,9 +492,10 @@ pub fn create_router_with_all_state(services: &AppServices, states: ModuleStates
     let connection_test_authenticated = connection_test_routes(states.connection_test)
         .route_layer(from_fn_with_state(auth_mw_state.clone(), auth_middleware));
 
-    // Auxiliary routes (workspace, side-question, reload-context, slash-commands, openclaw runtime)
-    let auxiliary_authenticated =
-        auxiliary_routes(states.auxiliary).route_layer(from_fn_with_state(auth_mw_state.clone(), auth_middleware));
+    // Session routes (workspace, side-question, reload-context, slash-commands,
+    // mode/model/config/usage/agent-capabilities, openclaw runtime)
+    let session_authenticated =
+        session_routes(states.session).route_layer(from_fn_with_state(auth_mw_state.clone(), auth_middleware));
 
     // File routes protected by auth middleware
     let file_authenticated =
@@ -567,7 +568,7 @@ pub fn create_router_with_all_state(services: &AppServices, states: ModuleStates
         .merge(acp_authenticated)
         .merge(agent_authenticated)
         .merge(connection_test_authenticated)
-        .merge(auxiliary_authenticated)
+        .merge(session_authenticated)
         .merge(file_authenticated)
         .merge(mcp_authenticated)
         .merge(extension_authenticated)

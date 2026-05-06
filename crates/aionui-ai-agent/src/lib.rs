@@ -8,7 +8,6 @@ pub mod agent_registry;
 pub mod agent_routes;
 pub mod agent_task;
 pub mod aionrs_agent;
-pub mod auxiliary_routes;
 pub mod backend_output_sink;
 pub mod backend_protocol_sink;
 pub mod cli_process;
@@ -19,6 +18,7 @@ pub mod manager;
 pub mod nanobot_agent;
 pub mod openclaw;
 pub mod protocol;
+pub mod routes;
 pub mod shared_kernel;
 pub mod skill_manager;
 pub mod stream_event;
@@ -39,7 +39,6 @@ pub use aionui_api_types::{
     AcpBuildExtra, AcpModelInfo, AcpSessionConfigOption, AionrsBuildExtra, OpenClawBuildExtra, OpenClawGatewayConfig,
     RemoteBuildExtra, SlashCommandItem,
 };
-pub use auxiliary_routes::{AuxiliaryRouterState, auxiliary_routes};
 pub use backend_output_sink::BackendOutputSink;
 pub use backend_protocol_sink::BackendProtocolSink;
 pub use cli_process::CliAgentProcess;
@@ -51,6 +50,7 @@ pub use manager::remote::{
 };
 pub use nanobot_agent::NanobotAgentManager;
 pub use openclaw::OpenClawAgentManager;
+pub use routes::{SessionRouterState, session_routes};
 pub use skill_manager::{
     AcpSkillManager, SkillDefinition, SkillIndex, build_skills_index_text, build_system_instructions,
     build_system_instructions_with_skills_index, detect_skill_load_request, prepare_first_message,

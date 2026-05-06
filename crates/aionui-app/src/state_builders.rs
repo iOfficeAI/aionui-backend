@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use aionui_ai_agent::{
-    AcpRouterState, AgentRouterState, AuxiliaryRouterState, RemoteAgentRouterState, RemoteAgentService,
+    AcpRouterState, AgentRouterState, RemoteAgentRouterState, RemoteAgentService, SessionRouterState,
 };
 use aionui_assistant::{AssistantRouterState, AssistantService, BuiltinAssistantRegistry};
 use aionui_auth::extract_token_from_ws_headers;
@@ -91,7 +91,7 @@ pub async fn build_module_states(services: &AppServices) -> (ModuleStates, Chann
         remote_agent: build_remote_agent_state(services),
         acp: build_acp_state(services),
         connection_test: build_connection_test_state(),
-        auxiliary: build_auxiliary_state(services),
+        session: build_session_state(services),
         file: build_file_state(services),
         mcp: build_mcp_state(services),
         extension: ext_state,
@@ -198,11 +198,12 @@ pub fn build_connection_test_state() -> ConnectionTestRouterState {
     }
 }
 
-/// Build the default `AuxiliaryRouterState` from application services.
-pub fn build_auxiliary_state(services: &AppServices) -> AuxiliaryRouterState {
+/// Build the default `SessionRouterState` (formerly `AuxiliaryRouterState`)
+/// from application services.
+pub fn build_session_state(services: &AppServices) -> SessionRouterState {
     let pool = services.database.pool().clone();
     let conversation_repo = Arc::new(SqliteConversationRepository::new(pool));
-    AuxiliaryRouterState {
+    SessionRouterState {
         worker_task_manager: services.worker_task_manager.clone(),
         conversation_repo,
     }
