@@ -6,6 +6,7 @@ use crate::agent_registry::CatalogSender;
 use crate::cli_process::CliAgentProcess;
 use crate::factory::acp_assembler::AcpSessionParams;
 use crate::first_message_injector::{InjectionConfig, inject_first_message_prefix};
+use crate::manager::acp::AcpSession;
 use crate::skill_manager::AcpSkillManager;
 use crate::stream_event::{
     AgentStreamEvent, AvailableCommandsEventData, FinishEventData, SessionAssignedEventData, StartEventData,
@@ -14,8 +15,8 @@ use crate::stream_event::{
 use crate::types::{AgentStreamChunk, SendMessageData};
 use agent_client_protocol::schema::{
     AgentCapabilities, AvailableCommand, CancelNotification, ContentBlock, LoadSessionRequest, PromptRequest,
-    SessionConfigKind, SessionConfigOption, SessionId, SessionModeState, SessionModelState,
-    SetSessionConfigOptionRequest, SetSessionModeRequest, SetSessionModelRequest, UsageUpdate,
+    SessionConfigOption, SessionId, SessionModeState, SessionModelState, SetSessionConfigOptionRequest,
+    SetSessionModeRequest, SetSessionModelRequest, UsageUpdate,
 };
 use aionui_api_types::{AgentHandshake, AgentMetadata, SlashCommandItem};
 use aionui_common::{
@@ -85,18 +86,6 @@ fn agent_metadata_uses_claude_meta_resume(metadata: &AgentMetadata) -> bool {
         .and_then(|caps| caps.get("_meta"))
         .and_then(|meta| meta.get("claude_code").or_else(|| meta.get("claudeCode")))
         .is_some()
-}
-
-/// Extract the `current_value` string from a `SessionConfigKind` —
-/// currently only the Select kind has a string value we can replay
-/// through `session/set_session_config_option`. Boolean toggles and
-/// other future kinds return `None` and are skipped by the replay
-/// path.
-fn extract_config_current_value(kind: &SessionConfigKind) -> Option<String> {
-    match kind {
-        SessionConfigKind::Select(sel) => Some(sel.current_value.to_string()),
-        _ => None,
-    }
 }
 
 fn confirm_option_id(data: &Value) -> Option<String> {
@@ -196,8 +185,8 @@ pub struct AcpAgentManager {
     /// Handle used to push partial handshake updates back into the
     /// catalog. The consumer task lives inside the registry.
     catalog_tx: CatalogSender,
-    /// Preferred session mode to apply on the next session initialization.
-    preferred_mode: RwLock<Option<String>>,
+    /// Session aggregate root — owns desired/observed/advertised state.
+    session: RwLock<AcpSession>,
     /// Underlying CLI process (for lifecycle management: kill, is_running).
     process: Arc<CliAgentProcess>,
     /// ACP protocol handle (SDK connection).
@@ -235,8 +224,13 @@ impl AcpAgentManager {
         snapshot.modes().cloned()
     }
 
-    async fn preferred_mode(&self) -> Option<String> {
-        self.preferred_mode.read().await.clone().filter(|mode| !mode.is_empty())
+    async fn desired_mode(&self) -> Option<String> {
+        self.session
+            .read()
+            .await
+            .desired_mode()
+            .map(ToOwned::to_owned)
+            .filter(|mode| !mode.is_empty())
     }
 
     async fn update_cached_mode(&self, mode: &str) {
@@ -246,102 +240,67 @@ impl AcpAgentManager {
         }
     }
 
-    /// Restore user-chosen config option values on top of the CLI's
-    /// freshly returned defaults.
+    /// Execute reconcile actions produced by `AcpSession::plan_reconcile`.
     ///
-    /// The CLI treats every `session/new` and `session/load` reply as a
-    /// source of truth for the `config_options` schema (labels, enum
-    /// values, ordering), but it does not remember the user's previous
-    /// selection in AionUi. We persist those selections in
-    /// `acp_session.session_config.runtime.config_selections`, preload
-    /// them into the snapshot, and here — once a session id is live —
-    /// replay any that diverge from the CLI's current value through
-    /// `session/set_session_config_option`.
-    ///
-    /// Best-effort: a per-option failure is logged and skipped so the
-    /// user still gets a usable session instead of a hard error.
-    async fn apply_preferred_config_selections(&self, session_id: &str) {
-        let (selections, cli_options) = {
-            let snapshot = self.runtime_snapshot.read().await;
-            (
-                snapshot.config_selections().clone(),
-                snapshot
-                    .config_options()
-                    .map(<[SessionConfigOption]>::to_vec)
-                    .unwrap_or_default(),
-            )
-        };
-        if selections.is_empty() {
-            return;
-        }
+    /// Compares the aggregate's desired state against what the CLI has
+    /// reported as current, then issues the minimal set of SDK calls
+    /// (set_mode, set_config_option) to bring the CLI into alignment.
+    /// Best-effort: individual failures are logged but do not abort.
+    async fn reconcile_session(&self, session_id: &str) {
+        use crate::manager::acp::ReconcileAction;
 
-        for option in &cli_options {
-            let cid = option.id.to_string();
-            let Some(desired) = selections.get(&cid) else {
-                continue;
-            };
-            let current = extract_config_current_value(&option.kind);
-            if current.as_deref() == Some(desired.as_str()) {
-                continue;
+        let actions = {
+            let session = self.session.read().await;
+            session.plan_reconcile()
+        };
+
+        for action in actions {
+            match action {
+                ReconcileAction::SetMode { mode_id } => {
+                    let normalized = normalize_requested_mode(&self.params.metadata, &mode_id);
+                    if normalized.is_empty() {
+                        continue;
+                    }
+                    if let Err(e) = self
+                        .protocol
+                        .set_mode(SetSessionModeRequest::new(
+                            SessionId::new(session_id),
+                            normalized.clone(),
+                        ))
+                        .await
+                    {
+                        error!(
+                            conversation_id = %self.params.conversation_id,
+                            mode_id = %normalized,
+                            error = %e,
+                            "reconcile_session: set_mode failed"
+                        );
+                        continue;
+                    }
+                    self.update_cached_mode(&normalized).await;
+                    let mut session = self.session.write().await;
+                    session.apply_observed_mode(&normalized);
+                }
+                ReconcileAction::SetConfigOption { config_id, value } => {
+                    if let Err(err) = self
+                        .protocol
+                        .set_config_option(SetSessionConfigOptionRequest::new(
+                            SessionId::new(session_id),
+                            config_id.clone(),
+                            value.clone(),
+                        ))
+                        .await
+                    {
+                        info!(
+                            config_id = %config_id,
+                            desired = %value,
+                            error = %err,
+                            "reconcile_session: set_config_option failed; skipping"
+                        );
+                    }
+                }
             }
-            if let Err(err) = self
-                .protocol
-                .set_config_option(SetSessionConfigOptionRequest::new(
-                    SessionId::new(session_id),
-                    cid.clone(),
-                    desired.clone(),
-                ))
-                .await
-            {
-                info!(
-                    config_id = %cid,
-                    desired = %desired,
-                    error = %err,
-                    "apply_preferred_config_selections: set_config_option failed; skipping"
-                );
-            }
         }
-    }
-
-    async fn apply_preferred_mode(&self, session_id: &str) -> Result<(), AppError> {
-        let Some(mode) = self.preferred_mode().await else {
-            return Ok(());
-        };
-        let normalized_mode = normalize_requested_mode(&self.params.metadata, &mode);
-        if normalized_mode.is_empty() {
-            return Ok(());
-        }
-
-        let current_mode = {
-            let snapshot = self.runtime_snapshot.read().await;
-            snapshot.current_mode_id()
-        };
-
-        if current_mode.as_deref() == Some(normalized_mode.as_str()) {
-            return Ok(());
-        }
-
-        self.protocol
-            .set_mode(SetSessionModeRequest::new(
-                SessionId::new(session_id),
-                normalized_mode.clone(),
-            ))
-            .await
-            .map_err(AppError::from)?;
-
-        self.update_cached_mode(&normalized_mode).await;
-        let mut preferred_mode = self.preferred_mode.write().await;
-        *preferred_mode = Some(normalized_mode);
-        Ok(())
-    }
-
-    async fn _set_modes(&self, mode: &str) -> Result<(), AppError> {
-        let sid = self.require_session_id().await?;
-        self.protocol
-            .set_mode(SetSessionModeRequest::new(SessionId::new(sid), mode.to_owned()))
-            .await
-            .map_err(AppError::from)
-            .map(|_| ())
     }
 
     /// Cached model info from the ACP backend, if any has been received.
@@ -473,12 +432,18 @@ impl AcpAgentManager {
             catalog_tx.send_partial(params.metadata.id.clone(), init_handshake);
         }
 
-        let preferred_mode = params.config.session_mode.clone();
+        let initial_mode = params
+            .config
+            .session_mode
+            .as_ref()
+            .map(|m| normalize_requested_mode(&params.metadata, m))
+            .filter(|m| !m.is_empty());
+        let session = AcpSession::new(initial_mode, HashMap::new());
 
         let manager = Self {
             params,
             catalog_tx,
-            preferred_mode: RwLock::new(preferred_mode),
+            session: RwLock::new(session),
             process: Arc::new(process),
             protocol,
             event_tx,
@@ -562,14 +527,51 @@ impl AcpAgentManager {
             loop {
                 match rx.recv().await {
                     Ok(event) => {
-                        let mut snapshot = this.runtime_snapshot.write().await;
-                        snapshot.apply_event(&event);
+                        {
+                            let mut snapshot = this.runtime_snapshot.write().await;
+                            snapshot.apply_event(&event);
+                        }
+                        Self::apply_event_to_session(&this.session, &event).await;
                     }
                     Err(broadcast::error::RecvError::Closed) => break,
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
                 }
             }
         });
+    }
+
+    /// Mirror a stream event into the `AcpSession` aggregate's advertised layer.
+    async fn apply_event_to_session(session: &RwLock<AcpSession>, event: &AgentStreamEvent) {
+        match event {
+            AgentStreamEvent::AcpModeInfo(value) => {
+                if let Ok(update) = serde_json::from_value::<SessionModeState>(value.clone()) {
+                    let mut s = session.write().await;
+                    s.apply_advertised_modes(update);
+                } else if let Some(current_id) = value.get("currentModeId").and_then(|v: &Value| v.as_str()) {
+                    let mut s = session.write().await;
+                    s.apply_observed_mode(current_id);
+                }
+            }
+            AgentStreamEvent::AcpModelInfo(value) => {
+                if let Ok(update) = serde_json::from_value::<SessionModelState>(value.clone()) {
+                    let mut s = session.write().await;
+                    s.apply_advertised_models(update);
+                }
+            }
+            AgentStreamEvent::AcpConfigOption(value) => {
+                if let Ok(update) = serde_json::from_value::<Vec<SessionConfigOption>>(value.clone()) {
+                    let mut s = session.write().await;
+                    s.apply_advertised_config_options(update);
+                }
+            }
+            AgentStreamEvent::AcpContextUsage(value) => {
+                if let Ok(update) = serde_json::from_value::<UsageUpdate>(value.clone()) {
+                    let mut s = session.write().await;
+                    s.apply_context_usage(update);
+                }
+            }
+            _ => {}
+        }
     }
 
     /// Forward session-driven ACP events into the catalog sync channel
@@ -602,6 +604,20 @@ impl AcpAgentManager {
     /// `send_message`. `None` fields are ignored — the CLI's
     /// `session/load` response fills in whatever the preload omits.
     pub async fn preload_snapshot(&self, state: PersistedSessionState) {
+        // Seed the aggregate's desired state from persisted selections.
+        if state.current_mode_id.is_some() || !state.config_selections.is_empty() {
+            let mut session = self.session.write().await;
+            if let Some(mode_id) = &state.current_mode_id {
+                let normalized = normalize_requested_mode(&self.params.metadata, mode_id);
+                if !normalized.is_empty() {
+                    session.set_desired_mode(normalized);
+                }
+            }
+            for (config_id, value) in &state.config_selections {
+                session.set_desired_config(config_id.clone(), value.clone());
+            }
+            session.drain_events();
+        }
         let mut snapshot = self.runtime_snapshot.write().await;
         snapshot.preload_persisted(state);
     }
@@ -697,14 +713,24 @@ impl AcpAgentManager {
                 session_id: sid.clone(),
             }));
 
-        if let Err(e) = self.apply_preferred_mode(&sid).await {
-            tracing::error!(
-                conversation_id = %self.params.conversation_id,
-                error = %e,
-                "failed to apply preferred mode, continuing with default"
-            );
+        // Seed the session aggregate from the CLI's response.
+        {
+            let snapshot = self.runtime_snapshot.read().await;
+            let mut session = self.session.write().await;
+            if let Some(modes) = snapshot.modes().cloned() {
+                session.apply_advertised_modes(modes);
+            }
+            if let Some(models) = snapshot.model_info().cloned() {
+                session.apply_advertised_models(models);
+            }
+            if let Some(config_options) = snapshot.config_options() {
+                session.apply_advertised_config_options(config_options.to_vec());
+            }
+            session.assign_session_id(sid.clone());
+            session.drain_events();
         }
-        self.apply_preferred_config_selections(&sid).await;
+
+        self.reconcile_session(&sid).await;
 
         let injected_content = inject_first_message_prefix(
             &data.content,
@@ -790,20 +816,24 @@ impl AcpAgentManager {
                 state.session_id = Some(new_sid.clone());
                 drop(state);
 
-                // Re-apply the user's preferred mode: the CLI resets
-                // `currentModeId` to its own default on every resume
-                // handshake (Claude meta-resume rebuilds the session), so
-                // without this the mode the user had set (e.g.
-                // `bypassPermissions`) silently downgrades to `default`
-                // and the CLI starts prompting for permissions again.
-                if let Err(e) = self.apply_preferred_mode(&new_sid).await {
-                    tracing::error!(
-                        conversation_id = %self.params.conversation_id,
-                        error = %e,
-                        "failed to re-apply preferred mode after meta-resume"
-                    );
+                // Seed the session aggregate from CLI response and reconcile.
+                {
+                    let snapshot = self.runtime_snapshot.read().await;
+                    let mut session = self.session.write().await;
+                    if let Some(modes) = snapshot.modes().cloned() {
+                        session.apply_advertised_modes(modes);
+                    }
+                    if let Some(models) = snapshot.model_info().cloned() {
+                        session.apply_advertised_models(models);
+                    }
+                    if let Some(config_options) = snapshot.config_options() {
+                        session.apply_advertised_config_options(config_options.to_vec());
+                    }
+                    session.assign_session_id(new_sid.clone());
+                    session.drain_events();
                 }
-                self.apply_preferred_config_selections(&new_sid).await;
+                self.reconcile_session(&new_sid).await;
+
                 return self.prompt_existing_session(data, Some(&new_sid)).await;
             }
         } else if self.supports_session_load()
@@ -844,19 +874,24 @@ impl AcpAgentManager {
 
         self.emit_snapshot_events().await;
 
+        // Seed the session aggregate and reconcile.
         if let Some(sid) = session_id {
-            // Same reasoning as the Claude meta-resume branch above:
-            // `session/load` returns the CLI's own `currentModeId`
-            // (usually `default`), so re-apply the user's preferred
-            // mode before prompting.
-            if let Err(e) = self.apply_preferred_mode(sid).await {
-                tracing::error!(
-                    conversation_id = %self.params.conversation_id,
-                    error = %e,
-                    "failed to re-apply preferred mode after session/load"
-                );
+            {
+                let snapshot = self.runtime_snapshot.read().await;
+                let mut session = self.session.write().await;
+                if let Some(modes) = snapshot.modes().cloned() {
+                    session.apply_advertised_modes(modes);
+                }
+                if let Some(models) = snapshot.model_info().cloned() {
+                    session.apply_advertised_models(models);
+                }
+                if let Some(config_options) = snapshot.config_options() {
+                    session.apply_advertised_config_options(config_options.to_vec());
+                }
+                session.assign_session_id(sid.to_owned());
+                session.drain_events();
             }
-            self.apply_preferred_config_selections(sid).await;
+            self.reconcile_session(sid).await;
         }
 
         self.prompt_existing_session(data, session_id).await
@@ -1178,8 +1213,8 @@ impl IAgentManager for AcpAgentManager {
     }
 
     async fn get_mode(&self) -> Result<aionui_api_types::AgentModeResponse, AppError> {
-        let preferred_mode = self
-            .preferred_mode()
+        let desired = self
+            .desired_mode()
             .await
             .map(|mode| normalize_requested_mode(&self.params.metadata, &mode))
             .filter(|mode| !mode.is_empty());
@@ -1188,7 +1223,7 @@ impl IAgentManager for AcpAgentManager {
                 .modes()
                 .await
                 .map(|modes| modes.current_mode_id.to_string())
-                .or(preferred_mode)
+                .or(desired)
                 .unwrap_or_else(|| normalize_requested_mode(&self.params.metadata, "default")),
             initialized: self.session_id().await.is_some(),
         })
@@ -1207,10 +1242,13 @@ impl IAgentManager for AcpAgentManager {
                 .await
                 .map_err(AppError::from)?;
             self.update_cached_mode(&normalized_mode).await;
+            let mut session = self.session.write().await;
+            session.apply_observed_mode(&normalized_mode);
         }
 
-        let mut preferred_mode = self.preferred_mode.write().await;
-        *preferred_mode = Some(normalized_mode);
+        let mut session = self.session.write().await;
+        session.set_desired_mode(normalized_mode);
+        session.drain_events();
         Ok(())
     }
 
