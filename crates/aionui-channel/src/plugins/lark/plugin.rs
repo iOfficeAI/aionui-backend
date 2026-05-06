@@ -17,7 +17,7 @@ use crate::types::{
 
 use super::api::LarkApi;
 use super::frame::{
-    build_ack_frame, build_ping_frame, decode_frame, encode_frame, get_header, METHOD_CONTROL, METHOD_DATA,
+    METHOD_CONTROL, METHOD_DATA, build_ack_frame, build_ping_frame, decode_frame, encode_frame, get_header,
 };
 use super::types::{BotMenuEvent, CardActionEvent, MessageEvent, build_interactive_card, parse_lark_callback};
 use super::ws_session::{FragmentCache, parse_pong_config};
@@ -285,7 +285,16 @@ async fn ws_loop(
         let service_id = extract_service_id(&ws_url);
         debug!(url = %ws_url, service_id, "Connecting to Lark WebSocket");
 
-        match connect_and_listen(&ws_url, service_id, &message_tx, &confirm_tx, &dedup_cache, &mut shutdown_rx).await {
+        match connect_and_listen(
+            &ws_url,
+            service_id,
+            &message_tx,
+            &confirm_tx,
+            &dedup_cache,
+            &mut shutdown_rx,
+        )
+        .await
+        {
             Ok(()) => {
                 debug!("Lark WS connection closed cleanly");
                 break;
@@ -430,7 +439,10 @@ fn handle_control_frame(frame: &super::frame::PbFrame) -> Option<Duration> {
             if !frame.payload.is_empty()
                 && let Some(config) = parse_pong_config(&frame.payload)
             {
-                debug!(interval_secs = config.ping_interval_secs, "Lark ping interval updated from pong");
+                debug!(
+                    interval_secs = config.ping_interval_secs,
+                    "Lark ping interval updated from pong"
+                );
                 return Some(Duration::from_secs(config.ping_interval_secs));
             }
             None
@@ -828,11 +840,7 @@ fn extract_service_id(url: &str) -> i32 {
         .split('&')
         .find_map(|param| {
             let (k, v) = param.split_once('=')?;
-            if k == "service_id" {
-                v.parse().ok()
-            } else {
-                None
-            }
+            if k == "service_id" { v.parse().ok() } else { None }
         })
         .unwrap_or(0)
 }

@@ -123,10 +123,22 @@ mod tests {
             service: 1,
             method: METHOD_DATA,
             headers: vec![
-                PbHeader { key: "type".into(), value: "event".into() },
-                PbHeader { key: "message_id".into(), value: "msg_001".into() },
-                PbHeader { key: "sum".into(), value: "1".into() },
-                PbHeader { key: "seq".into(), value: "0".into() },
+                PbHeader {
+                    key: "type".into(),
+                    value: "event".into(),
+                },
+                PbHeader {
+                    key: "message_id".into(),
+                    value: "msg_001".into(),
+                },
+                PbHeader {
+                    key: "sum".into(),
+                    value: "1".into(),
+                },
+                PbHeader {
+                    key: "seq".into(),
+                    value: "0".into(),
+                },
             ],
             payload_encoding: String::new(),
             payload_type: String::new(),
@@ -164,8 +176,14 @@ mod tests {
             service: 1,
             method: METHOD_DATA,
             headers: vec![
-                PbHeader { key: "type".into(), value: "event".into() },
-                PbHeader { key: "message_id".into(), value: "msg_x".into() },
+                PbHeader {
+                    key: "type".into(),
+                    value: "event".into(),
+                },
+                PbHeader {
+                    key: "message_id".into(),
+                    value: "msg_x".into(),
+                },
             ],
             payload_encoding: String::new(),
             payload_type: String::new(),
@@ -181,8 +199,14 @@ mod tests {
     #[test]
     fn get_header_finds_existing_key() {
         let headers = vec![
-            PbHeader { key: "type".into(), value: "event".into() },
-            PbHeader { key: "sum".into(), value: "3".into() },
+            PbHeader {
+                key: "type".into(),
+                value: "event".into(),
+            },
+            PbHeader {
+                key: "sum".into(),
+                value: "3".into(),
+            },
         ];
         assert_eq!(get_header(&headers, "type"), Some("event"));
         assert_eq!(get_header(&headers, "sum"), Some("3"));

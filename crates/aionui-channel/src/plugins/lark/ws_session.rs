@@ -21,11 +21,14 @@ impl FragmentCache {
     }
 
     pub fn push(&mut self, message_id: &str, sum: usize, seq: usize, data: &[u8]) -> Option<Vec<u8>> {
-        let entry = self.entries.entry(message_id.to_owned()).or_insert_with(|| FragmentEntry {
-            sum,
-            fragments: vec![None; sum],
-            created_at: Instant::now(),
-        });
+        let entry = self
+            .entries
+            .entry(message_id.to_owned())
+            .or_insert_with(|| FragmentEntry {
+                sum,
+                fragments: vec![None; sum],
+                created_at: Instant::now(),
+            });
 
         if seq < entry.sum {
             entry.fragments[seq] = Some(data.to_vec());
@@ -50,6 +53,7 @@ impl FragmentCache {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct PongConfig {
     pub ping_interval_secs: u64,
     pub reconnect_count: i32,
