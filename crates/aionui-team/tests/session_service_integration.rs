@@ -4,7 +4,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use aionui_ai_agent::{AgentFactory, BuildTaskOptions, IWorkerTaskManager, WorkerTaskManagerImpl};
+use aionui_ai_agent::task_manager::AgentFactory;
+use aionui_ai_agent::types::BuildTaskOptions;
+use aionui_ai_agent::{IWorkerTaskManager, WorkerTaskManagerImpl};
 use aionui_api_types::{AddAgentRequest, CreateTeamRequest, TeamAgentInput, WebSocketMessage};
 use aionui_common::{AgentKillReason, AppError, PaginatedResult};
 use aionui_db::models::{

@@ -1,5 +1,7 @@
 //! HTTP routes for the ai-agent crate, grouped by capability.
 //!
+//! - [`agent`] — agent-registry endpoints (`/api/agents*`).
+//! - [`acp_probe`] — ACP CLI probe endpoints (`/api/acp/*`).
 //! - [`session_ops`] — endpoints that dispatch on the concrete
 //!   [`AgentInstance`](crate::agent_task::AgentInstance) variant
 //!   (mode / model / config / usage / agent-capabilities /
@@ -7,13 +9,8 @@
 //! - [`conversation_ops`] — endpoints that do **not** need agent-type
 //!   dispatch (workspace / reload-context).
 //!
-//! Both sub-routers share the same [`SessionRouterState`] so the caller
-//! only has to construct one state object.
-//!
-//! Note: this replaces the previous monolithic `auxiliary_routes.rs`
-//! (~500 LOC). ACP-probe routes (`/api/acp/*`) and agent-registry routes
-//! (`/api/agents*`) still live in the top-level `acp_routes.rs` and
-//! `agent_routes.rs`.
+//! The conversation-scoped routers share [`SessionRouterState`] so the
+//! caller only has to construct one state object.
 
 use std::sync::Arc;
 
@@ -23,9 +20,13 @@ use aionui_db::IConversationRepository;
 
 use crate::task_manager::IWorkerTaskManager;
 
+pub mod acp_probe;
+pub mod agent;
 pub mod conversation_ops;
 pub mod session_ops;
 
+pub use acp_probe::{AcpRouterState, acp_routes};
+pub use agent::{AgentRouterState, agent_routes};
 pub use conversation_ops::conversation_ops_routes;
 pub use session_ops::session_ops_routes;
 

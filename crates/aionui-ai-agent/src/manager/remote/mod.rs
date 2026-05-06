@@ -257,7 +257,7 @@ impl RemoteAgentManager {
     }
 }
 
-use crate::agent_manager::approval_key;
+use crate::shared_kernel::approval_key;
 
 #[async_trait::async_trait]
 impl crate::agent_task::IAgentTask for RemoteAgentManager {

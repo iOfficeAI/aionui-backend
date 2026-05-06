@@ -16,7 +16,7 @@ use std::sync::Arc;
 use aionui_common::{AgentKillReason, AgentType, AppError, ConversationStatus, TimestampMs};
 use tokio::sync::broadcast;
 
-use crate::acp_agent::AcpAgentManager;
+use crate::manager::acp::AcpAgentManager;
 use crate::manager::aionrs::AionrsAgentManager;
 use crate::manager::nanobot::NanobotAgentManager;
 use crate::manager::openclaw::OpenClawAgentManager;

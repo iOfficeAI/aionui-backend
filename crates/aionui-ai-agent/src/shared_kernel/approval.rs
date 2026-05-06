@@ -1,17 +1,9 @@
-//! Helpers shared across agent managers.
+//! Approval-memory key construction shared across agent managers.
 //!
-//! Historically this module defined the fat `IAgentManager` trait, its
-//! `Arc<dyn IAgentManager>` handle alias, and the `as_any` downcast hook.
-//! Those are gone (see PR #8): the public agent surface is now the ten-
-//! method `IAgentTask` trait in [`crate::agent_task`], and type-specific
-//! operations are dispatched through the [`crate::agent_task::AgentInstance`]
-//! enum. What remains here is the small free function every concrete
-//! manager uses to build the session-level approval-memory key.
+//! Keeps the `always_allow` memory key format identical between agents
+//! so the session-level approval cache stays source-of-truth-unique.
 
 /// Build the approval memory key from action and optional command_type.
-///
-/// Used by agent implementations to key their session-level approval memory
-/// when handling `always_allow` confirmations.
 pub fn approval_key(action: Option<&str>, command_type: Option<&str>) -> String {
     match (action, command_type) {
         (Some(a), Some(ct)) => format!("{a}:{ct}"),

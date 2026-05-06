@@ -8,8 +8,8 @@ use serde_json::{Value, json};
 use tokio::sync::{Mutex, RwLock, broadcast};
 use tracing::{debug, error, info, warn};
 
-use crate::agent_manager::approval_key;
 use crate::capability::cli_process::CliAgentProcess;
+use crate::shared_kernel::approval_key;
 use crate::protocol::events::AgentStreamEvent;
 use crate::types::SendMessageData;
 use aionui_api_types::{OpenClawBuildExtra, OpenClawGatewayConfig};
