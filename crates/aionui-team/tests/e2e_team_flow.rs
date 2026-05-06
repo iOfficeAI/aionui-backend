@@ -19,9 +19,11 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, Weak};
 
-use aionui_ai_agent::agent_manager::{AgentManagerHandle, IAgentManager, approval_key};
+use aionui_ai_agent::agent_manager::approval_key;
+use aionui_ai_agent::agent_task::{AgentInstance, IAgentTask, IMockAgent};
 use aionui_ai_agent::stream_event::{AgentStreamEvent, FinishEventData};
 use aionui_ai_agent::types::{BuildTaskOptions, SendMessageData};
+use aionui_api_types::AgentModeResponse;
 use aionui_api_types::WebSocketMessage;
 use aionui_common::{AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, TimestampMs, now_ms};
 use aionui_db::ITeamRepository;
@@ -124,18 +126,18 @@ impl RecordingAgent {
 }
 
 #[async_trait::async_trait]
-impl IAgentManager for RecordingAgent {
+impl IAgentTask for RecordingAgent {
     fn agent_type(&self) -> AgentType {
         AgentType::Acp
     }
-    fn status(&self) -> Option<ConversationStatus> {
-        None
+    fn conversation_id(&self) -> &str {
+        &self.conversation_id
     }
     fn workspace(&self) -> &str {
         "/tmp/ws"
     }
-    fn conversation_id(&self) -> &str {
-        &self.conversation_id
+    fn status(&self) -> Option<ConversationStatus> {
+        None
     }
     fn last_activity_at(&self) -> TimestampMs {
         now_ms()
@@ -153,9 +155,13 @@ impl IAgentManager for RecordingAgent {
     async fn stop(&self) -> Result<(), AppError> {
         Ok(())
     }
-    fn confirm(&self, _: &str, _: &str, _: Value, _: bool) -> Result<(), AppError> {
+    fn kill(&self, _reason: Option<AgentKillReason>) -> Result<(), AppError> {
         Ok(())
     }
+}
+
+#[async_trait::async_trait]
+impl IMockAgent for RecordingAgent {
     fn get_confirmations(&self) -> Vec<Confirmation> {
         Vec::new()
     }
@@ -163,24 +169,21 @@ impl IAgentManager for RecordingAgent {
         let _ = approval_key(Some(action), command_type);
         false
     }
-    fn kill(&self, _reason: Option<AgentKillReason>) -> Result<(), AppError> {
+    fn confirm(&self, _: &str, _: &str, _: Value, _: bool) -> Result<(), AppError> {
         Ok(())
     }
-    async fn get_mode(&self) -> Result<aionui_api_types::AgentModeResponse, AppError> {
-        Ok(aionui_api_types::AgentModeResponse {
+    async fn get_mode(&self) -> Result<AgentModeResponse, AppError> {
+        Ok(AgentModeResponse {
             mode: "default".to_owned(),
             initialized: false,
         })
-    }
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
     }
 }
 
 /// StubTaskManager: allows pre-inserting RecordingAgent handles by conv_id.
 /// Also records kill calls.
 struct StubTaskManager {
-    tasks: Mutex<HashMap<String, AgentManagerHandle>>,
+    tasks: Mutex<HashMap<String, AgentInstance>>,
     kill_calls: Mutex<Vec<(String, Option<AgentKillReason>)>>,
 }
 
@@ -192,7 +195,7 @@ impl StubTaskManager {
         }
     }
 
-    fn insert(&self, conv_id: &str, handle: AgentManagerHandle) {
+    fn insert(&self, conv_id: &str, handle: AgentInstance) {
         self.tasks.lock().unwrap().insert(conv_id.to_owned(), handle);
     }
 
@@ -204,11 +207,11 @@ impl StubTaskManager {
 
 #[async_trait]
 impl aionui_ai_agent::IWorkerTaskManager for StubTaskManager {
-    fn get_task(&self, conversation_id: &str) -> Option<AgentManagerHandle> {
+    fn get_task(&self, conversation_id: &str) -> Option<AgentInstance> {
         self.tasks.lock().unwrap().get(conversation_id).cloned()
     }
 
-    async fn get_or_build_task(&self, _: &str, _: BuildTaskOptions) -> Result<AgentManagerHandle, AppError> {
+    async fn get_or_build_task(&self, _: &str, _: BuildTaskOptions) -> Result<AgentInstance, AppError> {
         Err(AppError::Internal(
             "StubTaskManager does not support get_or_build_task".into(),
         ))
@@ -363,7 +366,7 @@ async fn setup_session() -> (
     let task_manager = Arc::new(StubTaskManager::new());
 
     for agent in two_agents() {
-        let handle: AgentManagerHandle = Arc::new(RecordingAgent::new(&agent.conversation_id, sent.clone()));
+        let handle = AgentInstance::Mock(Arc::new(RecordingAgent::new(&agent.conversation_id, sent.clone())));
         task_manager.insert(&agent.conversation_id, handle);
     }
 
@@ -738,7 +741,7 @@ async fn s4_dynamic_agent_added_then_finish_propagates() {
     };
 
     // Insert a recording agent for the new conversation
-    let handle: AgentManagerHandle = Arc::new(RecordingAgent::new("conv-helper", sent.clone()));
+    let handle = AgentInstance::Mock(Arc::new(RecordingAgent::new("conv-helper", sent.clone())));
     task_manager.insert("conv-helper", handle);
 
     // Add the agent to the session's scheduler

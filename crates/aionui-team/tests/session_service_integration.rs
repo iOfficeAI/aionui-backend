@@ -455,14 +455,14 @@ impl CountingTaskManager {
 
 #[async_trait::async_trait]
 impl IWorkerTaskManager for CountingTaskManager {
-    fn get_task(&self, conversation_id: &str) -> Option<aionui_ai_agent::AgentManagerHandle> {
+    fn get_task(&self, conversation_id: &str) -> Option<aionui_ai_agent::AgentInstance> {
         self.inner.get_task(conversation_id)
     }
     async fn get_or_build_task(
         &self,
         conversation_id: &str,
         options: BuildTaskOptions,
-    ) -> Result<aionui_ai_agent::AgentManagerHandle, AppError> {
+    ) -> Result<aionui_ai_agent::AgentInstance, AppError> {
         self.calls.lock().unwrap().build.push(conversation_id.to_owned());
         self.inner.get_or_build_task(conversation_id, options).await
     }
@@ -489,10 +489,10 @@ impl IWorkerTaskManager for CountingTaskManager {
 // asks the task manager to kill + rebuild; the returned handle never has
 // `send_message` called on it.
 mod mock_agent {
-    use aionui_ai_agent::agent_manager::IAgentManager;
+    use aionui_ai_agent::agent_task::{IAgentTask, IMockAgent};
     use aionui_ai_agent::stream_event::AgentStreamEvent;
     use aionui_ai_agent::types::SendMessageData;
-    use aionui_common::{AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, TimestampMs};
+    use aionui_common::{AgentKillReason, AgentType, AppError, ConversationStatus, TimestampMs};
     use tokio::sync::broadcast;
 
     pub struct MockAgent {
@@ -513,18 +513,18 @@ mod mock_agent {
     }
 
     #[async_trait::async_trait]
-    impl IAgentManager for MockAgent {
+    impl IAgentTask for MockAgent {
         fn agent_type(&self) -> AgentType {
             AgentType::Acp
         }
-        fn status(&self) -> Option<ConversationStatus> {
-            None
+        fn conversation_id(&self) -> &str {
+            &self.conversation_id
         }
         fn workspace(&self) -> &str {
             &self.workspace
         }
-        fn conversation_id(&self) -> &str {
-            &self.conversation_id
+        fn status(&self) -> Option<ConversationStatus> {
+            None
         }
         fn last_activity_at(&self) -> TimestampMs {
             0
@@ -538,38 +538,21 @@ mod mock_agent {
         async fn stop(&self) -> Result<(), AppError> {
             Ok(())
         }
-        fn confirm(
-            &self,
-            _msg_id: &str,
-            _call_id: &str,
-            _data: serde_json::Value,
-            _always_allow: bool,
-        ) -> Result<(), AppError> {
-            Ok(())
-        }
-        fn get_confirmations(&self) -> Vec<Confirmation> {
-            vec![]
-        }
-        fn check_approval(&self, _action: &str, _command_type: Option<&str>) -> bool {
-            false
-        }
         fn kill(&self, _reason: Option<AgentKillReason>) -> Result<(), AppError> {
             Ok(())
         }
-        fn as_any(&self) -> &dyn std::any::Any {
-            self
-        }
     }
+
+    impl IMockAgent for MockAgent {}
 }
 
 fn success_factory() -> AgentFactory {
     use futures_util::FutureExt;
     Arc::new(|opts: BuildTaskOptions| {
         async move {
-            Ok(
-                Arc::new(mock_agent::MockAgent::new(opts.conversation_id, opts.workspace))
-                    as aionui_ai_agent::AgentManagerHandle,
-            )
+            Ok(aionui_ai_agent::AgentInstance::Mock(Arc::new(
+                mock_agent::MockAgent::new(opts.conversation_id, opts.workspace),
+            )))
         }
         .boxed()
     })
@@ -1469,10 +1452,9 @@ async fn d9_ensure_session_persists_team_mcp_stdio_config() {
                 "factory called without team_mcp_stdio_config in extra: {:?}",
                 opts.extra
             );
-            Ok(
-                Arc::new(mock_agent::MockAgent::new(opts.conversation_id, opts.workspace))
-                    as aionui_ai_agent::AgentManagerHandle,
-            )
+            Ok(aionui_ai_agent::AgentInstance::Mock(Arc::new(
+                mock_agent::MockAgent::new(opts.conversation_id, opts.workspace),
+            )))
         }
         .boxed()
     }));

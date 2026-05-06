@@ -7,17 +7,17 @@ use futures_util::future::BoxFuture;
 use tokio::sync::OnceCell;
 use tracing::info;
 
-use crate::agent_manager::AgentManagerHandle;
+use crate::agent_task::AgentInstance;
 use crate::types::BuildTaskOptions;
 
-/// Factory function that creates an [`AgentManagerHandle`] from build options.
+/// Factory function that creates an [`AgentInstance`] from build options.
 ///
 /// Async so the factory can do real I/O (spawn a CLI process, negotiate the
 /// ACP initialize handshake, etc.) without needing to `block_on` inside the
 /// `IWorkerTaskManager` call site. Returning `BoxFuture` keeps the trait
 /// object-safe for DI.
 pub type AgentFactory =
-    Arc<dyn Fn(BuildTaskOptions) -> BoxFuture<'static, Result<AgentManagerHandle, AppError>> + Send + Sync>;
+    Arc<dyn Fn(BuildTaskOptions) -> BoxFuture<'static, Result<AgentInstance, AppError>> + Send + Sync>;
 
 /// Manages the lifecycle of active Agent tasks.
 ///
@@ -26,7 +26,7 @@ pub type AgentFactory =
 #[async_trait]
 pub trait IWorkerTaskManager: Send + Sync {
     /// Get an existing task by conversation ID.
-    fn get_task(&self, conversation_id: &str) -> Option<AgentManagerHandle>;
+    fn get_task(&self, conversation_id: &str) -> Option<AgentInstance>;
 
     /// Get an existing task or build a new one if none exists.
     ///
@@ -39,7 +39,7 @@ pub trait IWorkerTaskManager: Send + Sync {
         &self,
         conversation_id: &str,
         options: BuildTaskOptions,
-    ) -> Result<AgentManagerHandle, AppError>;
+    ) -> Result<AgentInstance, AppError>;
 
     /// Kill and remove a task.
     fn kill(&self, conversation_id: &str, reason: Option<AgentKillReason>) -> Result<(), AppError>;
@@ -62,7 +62,7 @@ pub trait IWorkerTaskManager: Send + Sync {
 /// initialises by running the factory, and that every subsequent caller
 /// awaits. Failed initialisations leave the cell empty so the next caller
 /// may retry; the slot itself is only removed on `kill` / `clear`.
-type TaskSlot = Arc<OnceCell<AgentManagerHandle>>;
+type TaskSlot = Arc<OnceCell<AgentInstance>>;
 
 /// Default implementation of [`IWorkerTaskManager`] using a concurrent hash map.
 pub struct WorkerTaskManagerImpl {
@@ -78,23 +78,23 @@ impl WorkerTaskManagerImpl {
         }
     }
 
-    /// Look up a fully-initialised handle by conversation id.
-    fn initialised_handle(&self, conversation_id: &str) -> Option<AgentManagerHandle> {
+    /// Look up a fully-initialised instance by conversation id.
+    fn initialised_instance(&self, conversation_id: &str) -> Option<AgentInstance> {
         self.tasks.get(conversation_id).and_then(|slot| slot.get().cloned())
     }
 }
 
 #[async_trait]
 impl IWorkerTaskManager for WorkerTaskManagerImpl {
-    fn get_task(&self, conversation_id: &str) -> Option<AgentManagerHandle> {
-        self.initialised_handle(conversation_id)
+    fn get_task(&self, conversation_id: &str) -> Option<AgentInstance> {
+        self.initialised_instance(conversation_id)
     }
 
     async fn get_or_build_task(
         &self,
         conversation_id: &str,
         options: BuildTaskOptions,
-    ) -> Result<AgentManagerHandle, AppError> {
+    ) -> Result<AgentInstance, AppError> {
         // Atomically obtain the per-conversation slot. `DashMap::entry` is
         // synchronous and side-effect-free — only an empty OnceCell is
         // allocated on the miss path, so concurrent callers for the same id
@@ -107,11 +107,11 @@ impl IWorkerTaskManager for WorkerTaskManagerImpl {
 
         // `OnceCell::get_or_try_init` serialises concurrent initialisers:
         // the first caller to reach it runs the factory, every other caller
-        // awaits the same future and ends up with the same handle. On
+        // awaits the same future and ends up with the same instance. On
         // failure the cell stays empty so a later caller can retry.
         let factory = self.factory.clone();
-        let handle = slot.get_or_try_init(|| async move { factory(options).await }).await?;
-        Ok(Arc::clone(handle))
+        let instance = slot.get_or_try_init(|| async move { factory(options).await }).await?;
+        Ok(instance.clone())
     }
 
     fn kill(&self, conversation_id: &str, reason: Option<AgentKillReason>) -> Result<(), AppError> {
@@ -159,15 +159,18 @@ impl IWorkerTaskManager for WorkerTaskManagerImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent_manager::IAgentManager;
+    use crate::agent_task::{IAgentTask, IMockAgent};
     use crate::stream_event::AgentStreamEvent;
     use crate::types::SendMessageData;
-    use aionui_common::{AgentKillReason, AgentType, Confirmation, ConversationStatus, ProviderWithModel};
+    use aionui_common::{AgentKillReason, AgentType, ConversationStatus, ProviderWithModel};
     use futures_util::FutureExt;
     use std::sync::atomic::{AtomicI64, Ordering};
     use tokio::sync::broadcast;
 
-    /// A minimal mock agent for testing task manager logic.
+    /// A minimal mock agent for testing task manager logic. Lives behind
+    /// the `AgentInstance::Mock` trait-object variant so we don't have to
+    /// stand up a real `AcpAgentManager` just to exercise lifecycle
+    /// dispatch.
     struct MockAgent {
         agent_type: AgentType,
         conversation_id: String,
@@ -202,18 +205,18 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl IAgentManager for MockAgent {
+    impl IAgentTask for MockAgent {
         fn agent_type(&self) -> AgentType {
             self.agent_type
         }
-        fn status(&self) -> Option<ConversationStatus> {
-            self.status
+        fn conversation_id(&self) -> &str {
+            &self.conversation_id
         }
         fn workspace(&self) -> &str {
             &self.workspace
         }
-        fn conversation_id(&self) -> &str {
-            &self.conversation_id
+        fn status(&self) -> Option<ConversationStatus> {
+            self.status
         }
         fn last_activity_at(&self) -> TimestampMs {
             self.last_activity.load(Ordering::Relaxed)
@@ -227,28 +230,12 @@ mod tests {
         async fn stop(&self) -> Result<(), AppError> {
             Ok(())
         }
-        fn confirm(
-            &self,
-            _msg_id: &str,
-            _call_id: &str,
-            _data: serde_json::Value,
-            _always_allow: bool,
-        ) -> Result<(), AppError> {
-            Ok(())
-        }
-        fn get_confirmations(&self) -> Vec<Confirmation> {
-            vec![]
-        }
-        fn check_approval(&self, _action: &str, _command_type: Option<&str>) -> bool {
-            false
-        }
         fn kill(&self, _reason: Option<AgentKillReason>) -> Result<(), AppError> {
             Ok(())
         }
-        fn as_any(&self) -> &dyn std::any::Any {
-            self
-        }
     }
+
+    impl IMockAgent for MockAgent {}
 
     fn make_options(conversation_id: &str) -> BuildTaskOptions {
         BuildTaskOptions {
@@ -264,11 +251,24 @@ mod tests {
         }
     }
 
+    fn mock_instance(agent: MockAgent) -> AgentInstance {
+        AgentInstance::Mock(Arc::new(agent))
+    }
+
     fn make_manager() -> WorkerTaskManagerImpl {
         let factory: AgentFactory = Arc::new(|opts: BuildTaskOptions| {
-            async move { Ok(Arc::new(MockAgent::new(&opts.conversation_id, None)) as AgentManagerHandle) }.boxed()
+            async move { Ok(mock_instance(MockAgent::new(&opts.conversation_id, None))) }.boxed()
         });
         WorkerTaskManagerImpl::new(factory)
+    }
+
+    /// Two [`AgentInstance`]s point to the same underlying agent iff they
+    /// share an `Arc` — check by pointer identity on the inner trait object.
+    fn same_mock(a: &AgentInstance, b: &AgentInstance) -> bool {
+        match (a, b) {
+            (AgentInstance::Mock(x), AgentInstance::Mock(y)) => Arc::ptr_eq(x, y),
+            _ => false,
+        }
     }
 
     #[test]
@@ -280,8 +280,8 @@ mod tests {
     #[tokio::test]
     async fn get_or_build_creates_task() {
         let mgr = make_manager();
-        let handle = mgr.get_or_build_task("conv-1", make_options("conv-1")).await.unwrap();
-        assert_eq!(handle.conversation_id(), "conv-1");
+        let instance = mgr.get_or_build_task("conv-1", make_options("conv-1")).await.unwrap();
+        assert_eq!(instance.conversation_id(), "conv-1");
         assert_eq!(mgr.active_count(), 1);
     }
 
@@ -290,7 +290,7 @@ mod tests {
         let mgr = make_manager();
         let h1 = mgr.get_or_build_task("conv-1", make_options("conv-1")).await.unwrap();
         let h2 = mgr.get_or_build_task("conv-1", make_options("conv-1")).await.unwrap();
-        assert!(Arc::ptr_eq(&h1, &h2));
+        assert!(same_mock(&h1, &h2));
         assert_eq!(mgr.active_count(), 1);
     }
 
@@ -306,7 +306,7 @@ mod tests {
                 // Simulate a slow build (CLI spawn + initialize handshake).
                 tokio::time::sleep(std::time::Duration::from_millis(30)).await;
                 calls.fetch_add(1, Ordering::SeqCst);
-                Ok(Arc::new(MockAgent::new(&opts.conversation_id, None)) as AgentManagerHandle)
+                Ok(mock_instance(MockAgent::new(&opts.conversation_id, None)))
             }
             .boxed()
         });
@@ -329,7 +329,7 @@ mod tests {
         assert_eq!(calls.load(Ordering::SeqCst), 1, "factory must run only once");
         assert_eq!(mgr.active_count(), 1);
         for h in handles.iter().skip(1) {
-            assert!(Arc::ptr_eq(&handles[0], h), "all callers see the same handle");
+            assert!(same_mock(&handles[0], h), "all callers see the same handle");
         }
     }
 
@@ -345,7 +345,7 @@ mod tests {
                 if flag.swap(false, Ordering::SeqCst) {
                     Err(AppError::Internal("first call fails".into()))
                 } else {
-                    Ok(Arc::new(MockAgent::new(&opts.conversation_id, None)) as AgentManagerHandle)
+                    Ok(mock_instance(MockAgent::new(&opts.conversation_id, None)))
                 }
             }
             .boxed()
@@ -404,36 +404,46 @@ mod tests {
         let mgr = WorkerTaskManagerImpl::new(factory);
 
         // Helper: insert a pre-initialised slot bypassing the async factory path.
-        let insert = |id: &str, agent: Arc<dyn IAgentManager>| {
-            let cell: OnceCell<AgentManagerHandle> = OnceCell::new();
-            cell.set(agent).ok();
+        let insert = |id: &str, instance: AgentInstance| {
+            let cell: OnceCell<AgentInstance> = OnceCell::new();
+            cell.set(instance).ok();
             mgr.tasks.insert(id.into(), Arc::new(cell));
         };
 
         // ACP + Finished + old activity → should be collected
-        let stale = Arc::new(
-            MockAgent::new("conv-stale", Some(ConversationStatus::Finished)).with_last_activity(now_ms() - 600_000), // 10 min ago
+        insert(
+            "conv-stale",
+            mock_instance(
+                MockAgent::new("conv-stale", Some(ConversationStatus::Finished)).with_last_activity(now_ms() - 600_000),
+            ),
         );
-        insert("conv-stale", stale);
 
         // ACP + Finished + recent activity → should NOT be collected
-        let recent =
-            Arc::new(MockAgent::new("conv-recent", Some(ConversationStatus::Finished)).with_last_activity(now_ms()));
-        insert("conv-recent", recent);
+        insert(
+            "conv-recent",
+            mock_instance(
+                MockAgent::new("conv-recent", Some(ConversationStatus::Finished)).with_last_activity(now_ms()),
+            ),
+        );
 
         // ACP + Running + old activity → should NOT be collected
-        let running = Arc::new(
-            MockAgent::new("conv-running", Some(ConversationStatus::Running)).with_last_activity(now_ms() - 600_000),
+        insert(
+            "conv-running",
+            mock_instance(
+                MockAgent::new("conv-running", Some(ConversationStatus::Running))
+                    .with_last_activity(now_ms() - 600_000),
+            ),
         );
-        insert("conv-running", running);
 
         // Non-ACP (Nanobot) + Finished + old activity → should NOT be collected
-        let nanobot = Arc::new(
-            MockAgent::new("conv-nanobot", Some(ConversationStatus::Finished))
-                .with_agent_type(AgentType::Nanobot)
-                .with_last_activity(now_ms() - 600_000),
+        insert(
+            "conv-nanobot",
+            mock_instance(
+                MockAgent::new("conv-nanobot", Some(ConversationStatus::Finished))
+                    .with_agent_type(AgentType::Nanobot)
+                    .with_last_activity(now_ms() - 600_000),
+            ),
         );
-        insert("conv-nanobot", nanobot);
 
         let idle = mgr.collect_idle(300_000); // 5-min threshold
         assert_eq!(idle.len(), 1);

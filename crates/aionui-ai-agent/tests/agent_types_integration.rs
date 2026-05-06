@@ -1,7 +1,7 @@
 //! Integration tests for agent type implementations and auxiliary features.
 //!
 //! These tests validate:
-//! - Each agent manager implements IAgentManager correctly
+//! - Each agent manager implements IAgentTask correctly
 //! - Agent factory can build all agent types
 //! - Idle scanner finds eligible tasks
 //! - Workspace browsing works with real filesystem
@@ -9,10 +9,17 @@
 
 use std::sync::Arc;
 
-use aionui_ai_agent::*;
-use aionui_common::{
-    AgentKillReason, AgentType, Confirmation, ConversationStatus, ProviderWithModel, TimestampMs, now_ms,
+// Explicit imports (no glob) — `aionui_ai_agent::*` still re-exports the
+// legacy `IAgentManager`, so glob-importing it alongside `IAgentTask`
+// would cause ambiguous method resolution during the PR #8 migration.
+// PR #8c removes `IAgentManager` and restores the crate prelude.
+use aionui_ai_agent::IAgentManager;
+use aionui_ai_agent::agent_task::{AgentInstance, IAgentTask, IMockAgent};
+use aionui_ai_agent::{
+    AgentFactory, AgentStreamEvent, AionrsAgentManager, AionrsResolvedConfig, BuildTaskOptions, IWorkerTaskManager,
+    SendMessageData, SkillIndex, WorkerTaskManagerImpl, build_system_instructions_with_skills_index,
 };
+use aionui_common::{AgentKillReason, AgentType, ConversationStatus, ProviderWithModel, TimestampMs, now_ms};
 use serde_json::json;
 use std::sync::atomic::{AtomicI64, Ordering};
 use tokio::sync::broadcast;
@@ -50,18 +57,18 @@ impl TypedMockAgent {
 }
 
 #[async_trait::async_trait]
-impl IAgentManager for TypedMockAgent {
+impl IAgentTask for TypedMockAgent {
     fn agent_type(&self) -> AgentType {
         self.agent_type
     }
-    fn status(&self) -> Option<ConversationStatus> {
-        self.status
+    fn conversation_id(&self) -> &str {
+        &self.conversation_id
     }
     fn workspace(&self) -> &str {
         &self.workspace
     }
-    fn conversation_id(&self) -> &str {
-        &self.conversation_id
+    fn status(&self) -> Option<ConversationStatus> {
+        self.status
     }
     fn last_activity_at(&self) -> TimestampMs {
         self.last_activity.load(Ordering::Relaxed)
@@ -75,28 +82,12 @@ impl IAgentManager for TypedMockAgent {
     async fn stop(&self) -> Result<(), aionui_common::AppError> {
         Ok(())
     }
-    fn confirm(
-        &self,
-        _msg_id: &str,
-        _call_id: &str,
-        _data: serde_json::Value,
-        _always_allow: bool,
-    ) -> Result<(), aionui_common::AppError> {
-        Ok(())
-    }
-    fn get_confirmations(&self) -> Vec<Confirmation> {
-        vec![]
-    }
-    fn check_approval(&self, _action: &str, _command_type: Option<&str>) -> bool {
-        false
-    }
     fn kill(&self, _reason: Option<AgentKillReason>) -> Result<(), aionui_common::AppError> {
         Ok(())
     }
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
 }
+
+impl IMockAgent for TypedMockAgent {}
 
 // ---------------------------------------------------------------------------
 // Aionrs agent tests (real implementation with AgentEngine)
@@ -122,8 +113,8 @@ async fn aionrs_agent_kill_succeeds() {
     let agent = AionrsAgentManager::new("conv-1".into(), "/proj".into(), make_aionrs_config(), None)
         .await
         .unwrap();
-    assert!(agent.kill(None).is_ok());
-    assert!(agent.kill(Some(AgentKillReason::IdleTimeout)).is_ok());
+    assert!(IAgentTask::kill(&agent, None).is_ok());
+    assert!(IAgentTask::kill(&agent, Some(AgentKillReason::IdleTimeout)).is_ok());
 }
 
 #[tokio::test]
@@ -131,7 +122,7 @@ async fn aionrs_agent_confirm_succeeds() {
     let agent = AionrsAgentManager::new("conv-1".into(), "/proj".into(), make_aionrs_config(), None)
         .await
         .unwrap();
-    let result = agent.confirm("msg", "call", json!({}), false);
+    let result = IAgentManager::confirm(&agent, "msg", "call", json!({}), false);
     assert!(result.is_ok());
 }
 
@@ -140,12 +131,16 @@ async fn aionrs_agent_metadata() {
     let agent = AionrsAgentManager::new("conv-abc".into(), "/work".into(), make_aionrs_config(), None)
         .await
         .unwrap();
-    assert_eq!(agent.agent_type(), AgentType::Aionrs);
-    assert_eq!(agent.workspace(), "/work");
-    assert_eq!(agent.conversation_id(), "conv-abc");
-    assert_eq!(agent.status(), Some(ConversationStatus::Pending));
-    assert!(agent.get_confirmations().is_empty());
-    assert!(!agent.check_approval("any", None));
+    // UFCS because AionrsAgentManager currently implements BOTH `IAgentManager`
+    // (legacy, removed in PR #8c) and `IAgentTask` (new), so the short
+    // `agent.status()` etc. calls would be ambiguous. Once PR #8c deletes
+    // `IAgentManager` these can collapse back to method-call syntax.
+    assert_eq!(IAgentTask::agent_type(&agent), AgentType::Aionrs);
+    assert_eq!(IAgentTask::workspace(&agent), "/work");
+    assert_eq!(IAgentTask::conversation_id(&agent), "conv-abc");
+    assert_eq!(IAgentTask::status(&agent), Some(ConversationStatus::Pending));
+    assert!(IAgentManager::get_confirmations(&agent).is_empty());
+    assert!(!IAgentManager::check_approval(&agent, "any", None));
 }
 
 // ---------------------------------------------------------------------------
@@ -166,7 +161,7 @@ async fn collect_idle_ignores_non_acp_agent_types() {
                 Some(ConversationStatus::Finished),
             )
             .with_last_activity(old_ts);
-            Ok(Arc::new(mock) as AgentManagerHandle)
+            Ok(AgentInstance::Mock(Arc::new(mock)))
         }
         .boxed()
     });

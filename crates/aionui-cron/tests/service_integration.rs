@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use aionui_ai_agent::AgentRegistry;
-use aionui_ai_agent::agent_manager::AgentManagerHandle;
+use aionui_ai_agent::agent_task::AgentInstance;
 use aionui_ai_agent::types::BuildTaskOptions;
 use aionui_api_types::{
     CreateCronJobRequest, CronScheduleDto, ListCronJobsQuery, SaveCronSkillRequest, UpdateCronJobRequest,
@@ -64,14 +64,10 @@ struct StubTaskManager;
 
 #[async_trait::async_trait]
 impl aionui_ai_agent::task_manager::IWorkerTaskManager for StubTaskManager {
-    fn get_task(&self, _: &str) -> Option<AgentManagerHandle> {
+    fn get_task(&self, _: &str) -> Option<AgentInstance> {
         None
     }
-    async fn get_or_build_task(
-        &self,
-        _: &str,
-        _: BuildTaskOptions,
-    ) -> Result<AgentManagerHandle, aionui_common::AppError> {
+    async fn get_or_build_task(&self, _: &str, _: BuildTaskOptions) -> Result<AgentInstance, aionui_common::AppError> {
         Err(aionui_common::AppError::Internal("stub".into()))
     }
     fn kill(&self, _: &str, _: Option<aionui_common::AgentKillReason>) -> Result<(), aionui_common::AppError> {

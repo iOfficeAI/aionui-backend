@@ -9,8 +9,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
-use crate::agent_manager::AgentManagerHandle;
 use crate::agent_registry::AgentRegistry;
+use crate::agent_task::AgentInstance;
 use crate::factory::acp_assembler::{WorkspaceInfo, assemble_acp_params};
 use crate::manager::acp::{AcpSessionSyncService, CatalogForwarder};
 use crate::manager::remote::RemoteAgentConfig;
@@ -54,7 +54,7 @@ pub fn build_agent_factory(deps: AgentFactoryDeps) -> AgentFactory {
     })
 }
 
-async fn build_agent(deps: Arc<AgentFactoryDeps>, options: BuildTaskOptions) -> Result<AgentManagerHandle, AppError> {
+async fn build_agent(deps: Arc<AgentFactoryDeps>, options: BuildTaskOptions) -> Result<AgentInstance, AppError> {
     let conversation_id = options.conversation_id.clone();
     // `is_custom_workspace` is the authoritative signal for "user chose
     // this path" — determined here and plumbed down to the managers
@@ -188,14 +188,14 @@ async fn build_agent(deps: Arc<AgentFactoryDeps>, options: BuildTaskOptions) -> 
                 arc.restore_session_id(sid).await;
             }
 
-            let handle: AgentManagerHandle = arc.clone();
+            let instance = AgentInstance::Acp(Arc::clone(&arc));
 
             // Hand the service the domain event receiver so it can
             // persist user intent changes without reverse-engineering
             // them from CLI observations.
             deps.acp_agent_service.attach(conversation_id, domain_rx).await;
 
-            Ok(handle)
+            Ok(instance)
         }
         AgentType::OpenclawGateway => {
             let mut config: OpenClawBuildExtra = serde_json::from_value(options.extra)
@@ -219,7 +219,7 @@ async fn build_agent(deps: Arc<AgentFactoryDeps>, options: BuildTaskOptions) -> 
             let agent = OpenClawAgentManager::new(conversation_id, workspace, config, resume_session_key).await?;
             let arc = Arc::new(agent);
             arc.start_event_relay();
-            Ok(arc as AgentManagerHandle)
+            Ok(AgentInstance::OpenClaw(arc))
         }
         AgentType::Nanobot => {
             // Nanobot lives in the catalog as an internal row; reuse the
@@ -232,7 +232,7 @@ async fn build_agent(deps: Arc<AgentFactoryDeps>, options: BuildTaskOptions) -> 
                 .find_map(|m| m.resolved_command)
                 .ok_or_else(|| AppError::BadRequest("Nanobot CLI not found in PATH".into()))?;
             let agent = NanobotAgentManager::new(conversation_id, workspace, cli_path).await?;
-            Ok(Arc::new(agent) as AgentManagerHandle)
+            Ok(AgentInstance::Nanobot(Arc::new(agent)))
         }
         AgentType::Remote => {
             let extra: RemoteBuildExtra = serde_json::from_value(options.extra)
@@ -262,7 +262,7 @@ async fn build_agent(deps: Arc<AgentFactoryDeps>, options: BuildTaskOptions) -> 
                 allow_insecure: row.allow_insecure,
             };
             let agent = RemoteAgentManager::new(conversation_id, workspace, config).await?;
-            Ok(Arc::new(agent) as AgentManagerHandle)
+            Ok(AgentInstance::Remote(Arc::new(agent)))
         }
         AgentType::Aionrs => {
             let overrides: AionrsBuildExtra = serde_json::from_value(options.extra).unwrap_or_default();
@@ -328,7 +328,7 @@ async fn build_agent(deps: Arc<AgentFactoryDeps>, options: BuildTaskOptions) -> 
             };
 
             let agent = AionrsAgentManager::new(conversation_id, workspace, config, resume_session).await?;
-            Ok(Arc::new(agent) as AgentManagerHandle)
+            Ok(AgentInstance::Aionrs(Arc::new(agent)))
         }
     }
 }

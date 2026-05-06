@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use aionui_ai_agent::task_manager::IWorkerTaskManager;
 use aionui_ai_agent::types::{BuildTaskOptions, SendMessageData};
-use aionui_ai_agent::{AgentRegistry, AgentStreamEvent, IAgentManager};
+use aionui_ai_agent::{AgentRegistry, AgentStreamEvent};
 use aionui_api_types::{CreateConversationRequest, SendMessageRequest};
 use aionui_common::{AgentType, ProviderWithModel, now_ms};
 use aionui_conversation::ConversationService;
@@ -564,7 +564,7 @@ impl JobExecutor {
                 }
                 if saved_skill.is_none() && matches!(job.execution_mode, ExecutionMode::NewConversation) {
                     self.spawn_skill_suggest_flow(
-                        Arc::clone(&agent),
+                        agent.clone(),
                         terminal_rx,
                         SkillSuggestContext {
                             conversation_id: conversation_id.to_owned(),
@@ -665,7 +665,7 @@ impl JobExecutor {
 
     fn spawn_skill_suggest_flow(
         &self,
-        agent: Arc<dyn aionui_ai_agent::IAgentManager>,
+        agent: aionui_ai_agent::AgentInstance,
         main_rx: broadcast::Receiver<AgentStreamEvent>,
         ctx: SkillSuggestContext,
     ) {
@@ -774,7 +774,11 @@ impl JobExecutor {
         Ok(skills)
     }
 
-    async fn ensure_agent_session_mode(&self, job: &CronJob, agent: &Arc<dyn IAgentManager>) -> Result<(), CronError> {
+    async fn ensure_agent_session_mode(
+        &self,
+        job: &CronJob,
+        agent: &aionui_ai_agent::AgentInstance,
+    ) -> Result<(), CronError> {
         let Some(desired_mode) = job
             .agent_config
             .as_ref()
@@ -1116,10 +1120,10 @@ async fn persist_legacy_skill_file(data_dir: &Path, job: &CronJob, raw_content: 
 mod tests {
     use super::*;
     use crate::types::{CreatedBy, CronAgentConfig, CronSchedule};
-    use aionui_ai_agent::agent_manager::AgentManagerHandle;
+    use aionui_ai_agent::agent_task::{AgentInstance, IAgentTask, IMockAgent};
     use aionui_ai_agent::stream_event::FinishEventData;
     use aionui_api_types::{AgentModeResponse, WebSocketMessage};
-    use aionui_common::{AgentKillReason, Confirmation, ConversationStatus, PaginatedResult, TimestampMs};
+    use aionui_common::{AgentKillReason, ConversationStatus, PaginatedResult, TimestampMs};
     use aionui_db::{
         ConversationArtifactRow, ConversationFilters, ConversationRowUpdate, MessageRowUpdate, MessageSearchRow,
         SortOrder,
@@ -1517,7 +1521,7 @@ mod tests {
     #[tokio::test]
     async fn execute_inner_applies_desired_session_mode_before_sending() {
         let agent = Arc::new(RecordingAgent::new("conv_1", "default", true));
-        let executor = make_executor_with_agent(agent.clone() as AgentManagerHandle);
+        let executor = make_executor_with_agent(AgentInstance::Mock(agent.clone()));
         let mut job = sample_job();
         job.agent_config.as_mut().unwrap().mode = Some("yolo".into());
 
@@ -1538,7 +1542,7 @@ mod tests {
     #[tokio::test]
     async fn execute_inner_applies_mode_even_for_uninitialized_agent() {
         let agent = Arc::new(RecordingAgent::new("conv_1", "default", false));
-        let executor = make_executor_with_agent(agent.clone() as AgentManagerHandle);
+        let executor = make_executor_with_agent(AgentInstance::Mock(agent.clone()));
         let mut job = sample_job();
         job.agent_config.as_mut().unwrap().mode = Some("yolo".into());
 
@@ -1559,7 +1563,7 @@ mod tests {
     #[tokio::test]
     async fn execute_inner_skips_mode_update_when_already_matching() {
         let agent = Arc::new(RecordingAgent::new("conv_1", "yolo", true));
-        let executor = make_executor_with_agent(agent.clone() as AgentManagerHandle);
+        let executor = make_executor_with_agent(AgentInstance::Mock(agent.clone()));
         let mut job = sample_job();
         job.agent_config.as_mut().unwrap().mode = Some("yolo".into());
 
@@ -1580,7 +1584,7 @@ mod tests {
     #[tokio::test]
     async fn execute_inner_new_conversation_without_saved_skill_requests_skill_suggest() {
         let agent = Arc::new(RecordingAgent::new("conv_1", "default", true));
-        let task_manager = Arc::new(RecordingTaskManager::new(agent.clone() as AgentManagerHandle));
+        let task_manager = Arc::new(RecordingTaskManager::new(AgentInstance::Mock(agent.clone())));
         let executor = make_executor_with_task_manager(task_manager.clone());
         let job = CronJob {
             execution_mode: ExecutionMode::NewConversation,
@@ -1614,7 +1618,7 @@ mod tests {
     #[tokio::test]
     async fn execute_inner_new_conversation_with_saved_skill_injects_saved_skill() {
         let agent = Arc::new(RecordingAgent::new("conv_1", "default", true));
-        let task_manager = Arc::new(RecordingTaskManager::new(agent.clone() as AgentManagerHandle));
+        let task_manager = Arc::new(RecordingTaskManager::new(AgentInstance::Mock(agent.clone())));
         let executor = make_executor_with_task_manager(task_manager.clone());
         let job = CronJob {
             execution_mode: ExecutionMode::NewConversation,
@@ -1655,7 +1659,7 @@ mod tests {
     #[tokio::test]
     async fn execute_inner_existing_with_saved_skill_keeps_saved_skill_out_of_prompt_and_turn() {
         let agent = Arc::new(RecordingAgent::new("conv_1", "default", true));
-        let executor = make_executor_with_agent(agent.clone() as AgentManagerHandle);
+        let executor = make_executor_with_agent(AgentInstance::Mock(agent.clone()));
         let job = sample_job();
         let saved_skill = SavedSkillContext {
             name: "cron-cron_test1".into(),
@@ -1681,7 +1685,7 @@ mod tests {
     #[tokio::test]
     async fn execute_inner_existing_without_saved_skill_does_not_send_skill_suggest_follow_up() {
         let agent = Arc::new(RecordingAgent::new("conv_1", "default", true));
-        let executor = make_executor_with_agent(agent.clone() as AgentManagerHandle);
+        let executor = make_executor_with_agent(AgentInstance::Mock(agent.clone()));
         let job = sample_job();
 
         let result = executor.execute_inner(&job, "conv_1", None).await;
@@ -1711,7 +1715,7 @@ mod tests {
     #[tokio::test]
     async fn execute_inner_uses_conversation_workspace_when_job_workspace_missing() {
         let agent = Arc::new(RecordingAgent::new("conv_1", "default", true));
-        let task_manager = Arc::new(RecordingTaskManager::new(agent.clone() as AgentManagerHandle));
+        let task_manager = Arc::new(RecordingTaskManager::new(AgentInstance::Mock(agent.clone())));
         let executor = make_executor_with_task_manager(task_manager.clone());
         let mut job = CronJob {
             execution_mode: ExecutionMode::NewConversation,
@@ -1737,7 +1741,7 @@ mod tests {
     #[tokio::test]
     async fn execute_inner_persists_agent_workspace_when_conversation_workspace_missing() {
         let agent = Arc::new(RecordingAgent::new("conv_1", "default", true));
-        let task_manager = Arc::new(RecordingTaskManager::new(agent.clone() as AgentManagerHandle));
+        let task_manager = Arc::new(RecordingTaskManager::new(AgentInstance::Mock(agent.clone())));
         let repo = Arc::new(MissingWorkspaceConversationRepo::new("conv_1", serde_json::json!({})));
         let executor = make_executor_with_task_manager_and_repo(task_manager.clone(), repo.clone());
         let mut job = CronJob {
@@ -1771,7 +1775,7 @@ mod tests {
     #[tokio::test]
     async fn execute_inner_inserts_right_side_user_message_for_cron_prompt() {
         let agent = Arc::new(RecordingAgent::new("conv_1", "default", true));
-        let task_manager = Arc::new(RecordingTaskManager::new(agent.clone() as AgentManagerHandle));
+        let task_manager = Arc::new(RecordingTaskManager::new(AgentInstance::Mock(agent.clone())));
         let repo = Arc::new(MissingWorkspaceConversationRepo::new(
             "conv_1",
             serde_json::json!({ "workspace": "/tmp/existing-conversation-workspace" }),
@@ -1806,7 +1810,7 @@ mod tests {
     #[tokio::test]
     async fn execute_inner_upserts_cron_trigger_artifact_and_broadcasts_event() {
         let agent = Arc::new(RecordingAgent::new("conv_1", "default", true));
-        let task_manager = Arc::new(RecordingTaskManager::new(agent.clone() as AgentManagerHandle));
+        let task_manager = Arc::new(RecordingTaskManager::new(AgentInstance::Mock(agent.clone())));
         let repo = Arc::new(MissingWorkspaceConversationRepo::new(
             "conv_1",
             serde_json::json!({ "workspace": "/tmp/existing-conversation-workspace" }),
@@ -1852,14 +1856,14 @@ mod tests {
         struct StubTaskManager;
         #[async_trait::async_trait]
         impl IWorkerTaskManager for StubTaskManager {
-            fn get_task(&self, _: &str) -> Option<AgentManagerHandle> {
+            fn get_task(&self, _: &str) -> Option<AgentInstance> {
                 None
             }
             async fn get_or_build_task(
                 &self,
                 _: &str,
                 _: BuildTaskOptions,
-            ) -> Result<AgentManagerHandle, aionui_common::AppError> {
+            ) -> Result<AgentInstance, aionui_common::AppError> {
                 Err(aionui_common::AppError::Internal("stub".into()))
             }
             fn kill(&self, _: &str, _: Option<aionui_common::AgentKillReason>) -> Result<(), aionui_common::AppError> {
@@ -2068,21 +2072,21 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl IAgentManager for RecordingAgent {
+    impl IAgentTask for RecordingAgent {
         fn agent_type(&self) -> AgentType {
             AgentType::Acp
         }
 
-        fn status(&self) -> Option<ConversationStatus> {
-            Some(ConversationStatus::Pending)
+        fn conversation_id(&self) -> &str {
+            &self.conversation_id
         }
 
         fn workspace(&self) -> &str {
             &self.workspace
         }
 
-        fn conversation_id(&self) -> &str {
-            &self.conversation_id
+        fn status(&self) -> Option<ConversationStatus> {
+            Some(ConversationStatus::Pending)
         }
 
         fn last_activity_at(&self) -> TimestampMs {
@@ -2103,28 +2107,13 @@ mod tests {
             Ok(())
         }
 
-        fn confirm(
-            &self,
-            _msg_id: &str,
-            _call_id: &str,
-            _data: serde_json::Value,
-            _always_allow: bool,
-        ) -> Result<(), aionui_common::AppError> {
-            Ok(())
-        }
-
-        fn get_confirmations(&self) -> Vec<Confirmation> {
-            Vec::new()
-        }
-
-        fn check_approval(&self, _action: &str, _command_type: Option<&str>) -> bool {
-            false
-        }
-
         fn kill(&self, _reason: Option<AgentKillReason>) -> Result<(), aionui_common::AppError> {
             Ok(())
         }
+    }
 
+    #[async_trait::async_trait]
+    impl IMockAgent for RecordingAgent {
         async fn get_mode(&self) -> Result<AgentModeResponse, aionui_common::AppError> {
             Ok(AgentModeResponse {
                 mode: self.mode().await,
@@ -2138,28 +2127,24 @@ mod tests {
             *guard = mode.to_owned();
             Ok(())
         }
-
-        fn as_any(&self) -> &dyn std::any::Any {
-            self
-        }
     }
 
     struct FixedTaskManager {
-        agent: AgentManagerHandle,
+        agent: AgentInstance,
     }
 
     #[async_trait::async_trait]
     impl IWorkerTaskManager for FixedTaskManager {
-        fn get_task(&self, _conversation_id: &str) -> Option<AgentManagerHandle> {
-            Some(Arc::clone(&self.agent))
+        fn get_task(&self, _conversation_id: &str) -> Option<AgentInstance> {
+            Some(self.agent.clone())
         }
 
         async fn get_or_build_task(
             &self,
             _conversation_id: &str,
             _options: BuildTaskOptions,
-        ) -> Result<AgentManagerHandle, aionui_common::AppError> {
-            Ok(Arc::clone(&self.agent))
+        ) -> Result<AgentInstance, aionui_common::AppError> {
+            Ok(self.agent.clone())
         }
 
         fn kill(
@@ -2182,12 +2167,12 @@ mod tests {
     }
 
     struct RecordingTaskManager {
-        agent: AgentManagerHandle,
+        agent: AgentInstance,
         options: Mutex<Vec<BuildTaskOptions>>,
     }
 
     impl RecordingTaskManager {
-        fn new(agent: AgentManagerHandle) -> Self {
+        fn new(agent: AgentInstance) -> Self {
             Self {
                 agent,
                 options: Mutex::new(Vec::new()),
@@ -2205,17 +2190,17 @@ mod tests {
 
     #[async_trait::async_trait]
     impl IWorkerTaskManager for RecordingTaskManager {
-        fn get_task(&self, _conversation_id: &str) -> Option<AgentManagerHandle> {
-            Some(Arc::clone(&self.agent))
+        fn get_task(&self, _conversation_id: &str) -> Option<AgentInstance> {
+            Some(self.agent.clone())
         }
 
         async fn get_or_build_task(
             &self,
             _conversation_id: &str,
             options: BuildTaskOptions,
-        ) -> Result<AgentManagerHandle, aionui_common::AppError> {
+        ) -> Result<AgentInstance, aionui_common::AppError> {
             self.options.lock().unwrap().push(options);
-            Ok(Arc::clone(&self.agent))
+            Ok(self.agent.clone())
         }
 
         fn kill(
@@ -2560,7 +2545,7 @@ mod tests {
         }
     }
 
-    fn make_executor_with_agent(agent: AgentManagerHandle) -> JobExecutor {
+    fn make_executor_with_agent(agent: AgentInstance) -> JobExecutor {
         make_executor_with_task_manager(Arc::new(FixedTaskManager { agent }))
     }
 

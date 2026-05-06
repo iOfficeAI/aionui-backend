@@ -882,12 +882,12 @@ mod tests {
     use super::*;
     use crate::test_utils::MockTeamRepo;
     use crate::types::{Team, TeamAgent, TeammateRole};
-    use aionui_ai_agent::agent_manager::{AgentManagerHandle, IAgentManager, approval_key};
+    use aionui_ai_agent::agent_manager::approval_key;
+    use aionui_ai_agent::agent_task::{AgentInstance, IAgentTask, IMockAgent};
     use aionui_ai_agent::stream_event::AgentStreamEvent;
     use aionui_ai_agent::types::BuildTaskOptions;
     use aionui_api_types::{AgentModeResponse, WebSocketMessage};
     use aionui_common::{AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, TimestampMs, now_ms};
-    use std::any::Any;
     use std::sync::{Arc, Mutex};
     use tokio::sync::broadcast;
 
@@ -945,18 +945,18 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl IAgentManager for RecordingAgent {
+    impl IAgentTask for RecordingAgent {
         fn agent_type(&self) -> AgentType {
             AgentType::Acp
         }
-        fn status(&self) -> Option<ConversationStatus> {
-            None
+        fn conversation_id(&self) -> &str {
+            &self.conversation_id
         }
         fn workspace(&self) -> &str {
             "/tmp/ws"
         }
-        fn conversation_id(&self) -> &str {
-            &self.conversation_id
+        fn status(&self) -> Option<ConversationStatus> {
+            None
         }
         fn last_activity_at(&self) -> TimestampMs {
             now_ms()
@@ -974,15 +974,13 @@ mod tests {
         async fn stop(&self) -> Result<(), AppError> {
             Ok(())
         }
-        fn confirm(
-            &self,
-            _msg_id: &str,
-            _call_id: &str,
-            _data: serde_json::Value,
-            _always_allow: bool,
-        ) -> Result<(), AppError> {
+        fn kill(&self, _reason: Option<AgentKillReason>) -> Result<(), AppError> {
             Ok(())
         }
+    }
+
+    #[async_trait::async_trait]
+    impl IMockAgent for RecordingAgent {
         fn get_confirmations(&self) -> Vec<Confirmation> {
             Vec::new()
         }
@@ -990,17 +988,11 @@ mod tests {
             let _ = approval_key(Some(action), command_type);
             false
         }
-        fn kill(&self, _reason: Option<AgentKillReason>) -> Result<(), AppError> {
-            Ok(())
-        }
         async fn get_mode(&self) -> Result<AgentModeResponse, AppError> {
             Ok(AgentModeResponse {
                 mode: "default".into(),
                 initialized: false,
             })
-        }
-        fn as_any(&self) -> &dyn Any {
-            self
         }
     }
 
@@ -1008,7 +1000,7 @@ mod tests {
     /// exercised by D7b; the other methods are unreachable in these tests
     /// and panic to surface drift early.
     struct StubTaskManager {
-        tasks: Mutex<std::collections::HashMap<String, AgentManagerHandle>>,
+        tasks: Mutex<std::collections::HashMap<String, AgentInstance>>,
         kill_calls: Mutex<Vec<(String, Option<AgentKillReason>)>>,
         kill_error: Option<String>,
     }
@@ -1032,7 +1024,7 @@ mod tests {
             }
         }
 
-        fn insert(&self, conv_id: &str, handle: AgentManagerHandle) {
+        fn insert(&self, conv_id: &str, handle: AgentInstance) {
             self.tasks.lock().unwrap().insert(conv_id.into(), handle);
         }
 
@@ -1043,14 +1035,14 @@ mod tests {
 
     #[async_trait::async_trait]
     impl IWorkerTaskManager for StubTaskManager {
-        fn get_task(&self, conversation_id: &str) -> Option<AgentManagerHandle> {
+        fn get_task(&self, conversation_id: &str) -> Option<AgentInstance> {
             self.tasks.lock().unwrap().get(conversation_id).cloned()
         }
         async fn get_or_build_task(
             &self,
             _conversation_id: &str,
             _options: BuildTaskOptions,
-        ) -> Result<AgentManagerHandle, AppError> {
+        ) -> Result<AgentInstance, AppError> {
             panic!("get_or_build_task should not be called in D7b tests")
         }
         fn kill(&self, conversation_id: &str, reason: Option<AgentKillReason>) -> Result<(), AppError> {
@@ -1083,7 +1075,7 @@ mod tests {
         let sent: Arc<Mutex<Vec<SendMessageData>>> = Arc::new(Mutex::new(Vec::new()));
         let stub = StubTaskManager::new();
         for conv_id in conv_ids {
-            let agent: AgentManagerHandle = Arc::new(RecordingAgent::new(conv_id, sent.clone(), fail_with.clone()));
+            let agent = AgentInstance::Mock(Arc::new(RecordingAgent::new(conv_id, sent.clone(), fail_with.clone())));
             stub.insert(conv_id, agent);
         }
         (Arc::new(stub), sent)

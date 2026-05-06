@@ -26,6 +26,9 @@ use crate::openclaw::OpenClawAgentManager;
 use crate::stream_event::AgentStreamEvent;
 use crate::types::{AgentStreamChunk, SendMessageData};
 
+#[cfg(any(test, feature = "test-support"))]
+use aionui_common::Confirmation;
+
 /// Ten-method public surface every agent type implements identically.
 ///
 /// Object-safe by construction (no generic methods, no `Self` by value).
@@ -77,6 +80,49 @@ pub trait IAgentTask: Send + Sync {
     fn kill(&self, reason: Option<AgentKillReason>) -> Result<(), AppError>;
 }
 
+/// Extended trait used exclusively by the `AgentInstance::Mock` variant so
+/// tests can inject richer fake behaviour (pending confirmations, approval
+/// memory, fake session keys, etc.) without polluting the production
+/// `IAgentTask` contract with trait-level defaults that would be lies for
+/// at least one concrete manager.
+///
+/// Every method has a sensible identity-style default so simple mocks only
+/// need to implement the ten `IAgentTask` methods and pick up nothing for
+/// free.
+#[cfg(any(test, feature = "test-support"))]
+#[async_trait::async_trait]
+pub trait IMockAgent: IAgentTask {
+    fn get_confirmations(&self) -> Vec<Confirmation> {
+        Vec::new()
+    }
+    fn check_approval(&self, _action: &str, _command_type: Option<&str>) -> bool {
+        false
+    }
+    fn confirm(
+        &self,
+        _msg_id: &str,
+        _call_id: &str,
+        _data: serde_json::Value,
+        _always_allow: bool,
+    ) -> Result<(), AppError> {
+        Ok(())
+    }
+    fn get_session_key(&self) -> Option<String> {
+        None
+    }
+    async fn get_mode(&self) -> Result<aionui_api_types::AgentModeResponse, AppError> {
+        Ok(aionui_api_types::AgentModeResponse {
+            mode: "default".into(),
+            initialized: false,
+        })
+    }
+    async fn set_mode(&self, _mode: &str) -> Result<(), AppError> {
+        Err(AppError::BadRequest(
+            "Mode switching is not supported for this mock".into(),
+        ))
+    }
+}
+
 /// Concrete, closed-set dispatcher for the five agent variants.
 ///
 /// Every generic path holds an `AgentInstance` (not `Arc<dyn IAgentTask>`):
@@ -93,6 +139,17 @@ pub enum AgentInstance {
     OpenClaw(Arc<OpenClawAgentManager>),
     Nanobot(Arc<NanobotAgentManager>),
     Remote(Arc<RemoteAgentManager>),
+    /// Test-only trait-object escape hatch used by downstream crates
+    /// (conversation/cron/team/app tests) to inject fake agents without
+    /// spinning up a real CLI or WebSocket connection. Gated behind
+    /// `#[cfg(any(test, feature = "test-support"))]`: production builds
+    /// never see this variant, so every `match` in release code can
+    /// rely on the five-variant closed set. The trait object is
+    /// [`IMockAgent`] (extends `IAgentTask`) so mocks can also override
+    /// the enum-level helpers — `get_confirmations`, `check_approval`,
+    /// `confirm`, `get_session_key`, `get_mode`, `set_mode`.
+    #[cfg(any(test, feature = "test-support"))]
+    Mock(Arc<dyn IMockAgent>),
 }
 
 impl AgentInstance {
@@ -104,6 +161,8 @@ impl AgentInstance {
             Self::OpenClaw(m) => m.as_ref(),
             Self::Nanobot(m) => m.as_ref(),
             Self::Remote(m) => m.as_ref(),
+            #[cfg(any(test, feature = "test-support"))]
+            Self::Mock(m) => m.as_ref(),
         }
     }
 
@@ -183,6 +242,8 @@ impl AgentInstance {
             Self::OpenClaw(m) => m.get_confirmations(),
             Self::Nanobot(_) => Vec::new(),
             Self::Remote(m) => m.get_confirmations(),
+            #[cfg(any(test, feature = "test-support"))]
+            Self::Mock(m) => m.get_confirmations(),
         }
     }
 
@@ -200,6 +261,8 @@ impl AgentInstance {
             Self::OpenClaw(m) => m.confirm(msg_id, call_id, data, always_allow),
             Self::Nanobot(m) => m.confirm(msg_id, call_id, data, always_allow),
             Self::Remote(m) => m.confirm(msg_id, call_id, data, always_allow),
+            #[cfg(any(test, feature = "test-support"))]
+            Self::Mock(m) => m.confirm(msg_id, call_id, data, always_allow),
         }
     }
 
@@ -211,6 +274,8 @@ impl AgentInstance {
             Self::OpenClaw(m) => m.check_approval(action, command_type),
             Self::Nanobot(_) => false,
             Self::Remote(m) => m.check_approval(action, command_type),
+            #[cfg(any(test, feature = "test-support"))]
+            Self::Mock(m) => m.check_approval(action, command_type),
         }
     }
 
@@ -219,6 +284,8 @@ impl AgentInstance {
         match self {
             Self::OpenClaw(m) => m.get_session_key(),
             Self::Acp(_) | Self::Aionrs(_) | Self::Nanobot(_) | Self::Remote(_) => None,
+            #[cfg(any(test, feature = "test-support"))]
+            Self::Mock(m) => m.get_session_key(),
         }
     }
 
@@ -233,6 +300,8 @@ impl AgentInstance {
                 mode: "default".into(),
                 initialized: false,
             }),
+            #[cfg(any(test, feature = "test-support"))]
+            Self::Mock(m) => m.get_mode().await,
         }
     }
 
@@ -246,6 +315,8 @@ impl AgentInstance {
             Self::OpenClaw(_) | Self::Nanobot(_) | Self::Remote(_) => Err(AppError::BadRequest(
                 "Mode switching is not supported for this agent type".into(),
             )),
+            #[cfg(any(test, feature = "test-support"))]
+            Self::Mock(m) => m.set_mode(mode).await,
         }
     }
 }

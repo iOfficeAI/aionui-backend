@@ -40,14 +40,14 @@ struct NoopTaskManager;
 
 #[async_trait::async_trait]
 impl IWorkerTaskManager for NoopTaskManager {
-    fn get_task(&self, _: &str) -> Option<Arc<dyn aionui_ai_agent::agent_manager::IAgentManager>> {
+    fn get_task(&self, _: &str) -> Option<aionui_ai_agent::AgentInstance> {
         None
     }
     async fn get_or_build_task(
         &self,
         _: &str,
         _: aionui_ai_agent::types::BuildTaskOptions,
-    ) -> Result<Arc<dyn aionui_ai_agent::agent_manager::IAgentManager>, AppError> {
+    ) -> Result<aionui_ai_agent::AgentInstance, AppError> {
         Err(AppError::Internal("noop".into()))
     }
     fn kill(&self, _: &str, _: Option<AgentKillReason>) -> Result<(), AppError> {

@@ -7,8 +7,7 @@ use axum::routing::{get, post};
 use std::path::Component;
 
 use crate::acp_agent::AcpAgentManager;
-use crate::agent_manager::AgentManagerHandle;
-use crate::openclaw::OpenClawAgentManager;
+use crate::agent_task::AgentInstance;
 use crate::task_manager::IWorkerTaskManager;
 use agent_client_protocol::schema::{AgentCapabilities, SessionConfigOption, UsageUpdate};
 use aionui_api_types::{
@@ -17,7 +16,7 @@ use aionui_api_types::{
     SlashCommandItem, WorkspaceBrowseQuery, WorkspaceEntry,
 };
 use aionui_auth::CurrentUser;
-use aionui_common::{AgentType, AppError};
+use aionui_common::AppError;
 use aionui_db::IConversationRepository;
 use serde::Deserialize;
 
@@ -181,7 +180,7 @@ async fn reload_context(
     Extension(_user): Extension<CurrentUser>,
     Path(id): Path<String>,
 ) -> Result<Json<ApiResponse<()>>, AppError> {
-    let _handle = get_task(&state, &id)?;
+    let _instance = get_task(&state, &id)?;
 
     // Context reload triggers re-discovery of skills and workspace state.
     // The specific reload behavior varies by agent type and will be
@@ -199,17 +198,17 @@ async fn side_question(
         return Err(AppError::BadRequest("question must not be empty".into()));
     }
 
-    let handle = get_task(&state, &id)?;
+    let instance = get_task(&state, &id)?;
 
-    // Only ACP agents support side questions
-    if handle.agent_type() != AgentType::Acp {
-        return Ok(Json(ApiResponse::ok(SideQuestionResponse {
-            status: "unsupported".into(),
-            answer: None,
-        })));
-    }
-
-    let acp = downcast_acp(&handle)?;
+    let acp = match &instance {
+        AgentInstance::Acp(m) => m,
+        _ => {
+            return Ok(Json(ApiResponse::ok(SideQuestionResponse {
+                status: "unsupported".into(),
+                answer: None,
+            })));
+        }
+    };
 
     // Side question is gated by the agent's behavior_policy flag.
     if !acp.supports_side_question() {
@@ -234,14 +233,13 @@ async fn get_slash_commands(
     Extension(_user): Extension<CurrentUser>,
     Path(id): Path<String>,
 ) -> Result<Json<ApiResponse<Vec<SlashCommandItem>>>, AppError> {
-    let handle = get_task(&state, &id)?;
+    let instance = get_task(&state, &id)?;
 
     // Only ACP agents have slash commands
-    if handle.agent_type() != AgentType::Acp {
+    let AgentInstance::Acp(acp) = &instance else {
         return Ok(Json(ApiResponse::ok(Vec::new())));
-    }
+    };
 
-    let acp = downcast_acp(&handle)?;
     let commands = acp.load_slash_commands().await?;
     Ok(Json(ApiResponse::ok(commands)))
 }
@@ -251,8 +249,8 @@ async fn get_mode(
     Extension(_user): Extension<CurrentUser>,
     Path(id): Path<String>,
 ) -> Result<Json<ApiResponse<AgentModeResponse>>, AppError> {
-    let handle = get_task(&state, &id)?;
-    Ok(Json(ApiResponse::ok(handle.get_mode().await?)))
+    let instance = get_task(&state, &id)?;
+    Ok(Json(ApiResponse::ok(instance.get_mode().await?)))
 }
 
 async fn set_mode(
@@ -265,8 +263,8 @@ async fn set_mode(
     if req.mode.trim().is_empty() {
         return Err(AppError::BadRequest("mode must not be empty".into()));
     }
-    let handle = get_task(&state, &id)?;
-    handle.set_mode(&req.mode).await?;
+    let instance = get_task(&state, &id)?;
+    instance.set_mode(&req.mode).await?;
     Ok(Json(ApiResponse::success()))
 }
 
@@ -275,15 +273,8 @@ async fn get_model(
     Extension(_user): Extension<CurrentUser>,
     Path(id): Path<String>,
 ) -> Result<Json<ApiResponse<GetModelInfoResponse>>, AppError> {
-    let handle = get_task(&state, &id)?;
-
-    if handle.agent_type() != AgentType::Acp {
-        return Err(AppError::BadRequest(
-            "This endpoint is only available for ACP agents".into(),
-        ));
-    }
-
-    let acp = downcast_acp(&handle)?;
+    let instance = get_task(&state, &id)?;
+    let acp = require_acp(&instance)?;
     let sdk_model = acp.model_info().await;
 
     let model_info = sdk_model.map(|m| {
@@ -324,14 +315,16 @@ async fn set_model(
         return Err(AppError::BadRequest("model_id must not be empty".into()));
     }
 
-    let handle = get_task(&state, &id)?;
-    if handle.agent_type() != AgentType::Acp {
-        return Err(AppError::BadRequest(
-            "Model switching is not supported for this agent type".into(),
-        ));
-    }
+    let instance = get_task(&state, &id)?;
+    let acp = match &instance {
+        AgentInstance::Acp(m) => m,
+        _ => {
+            return Err(AppError::BadRequest(
+                "Model switching is not supported for this agent type".into(),
+            ));
+        }
+    };
 
-    let acp = downcast_acp(&handle)?;
     acp.set_model_info(&req.model_id).await?;
     Ok(Json(ApiResponse::success()))
 }
@@ -341,15 +334,8 @@ async fn get_config(
     Extension(_user): Extension<CurrentUser>,
     Path(params): Path<ConfigPathParams>,
 ) -> Result<Json<ApiResponse<Option<SessionConfigOption>>>, AppError> {
-    let handle = get_task(&state, &params.id)?;
-
-    if handle.agent_type() != AgentType::Acp {
-        return Err(AppError::BadRequest(
-            "This endpoint is only available for ACP agents".into(),
-        ));
-    }
-
-    let acp = downcast_acp(&handle)?;
+    let instance = get_task(&state, &params.id)?;
+    let acp = require_acp(&instance)?;
     let config_option = acp
         .config_options()
         .await
@@ -365,15 +351,16 @@ async fn set_config(
     body: Result<Json<SetConfigOptionRequest>, JsonRejection>,
 ) -> Result<Json<ApiResponse<()>>, AppError> {
     let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
-    let handle = get_task(&state, &params.id)?;
+    let instance = get_task(&state, &params.id)?;
+    let acp = match &instance {
+        AgentInstance::Acp(m) => m,
+        _ => {
+            return Err(AppError::BadRequest(
+                "Config updates are not supported for this agent type".into(),
+            ));
+        }
+    };
 
-    if handle.agent_type() != AgentType::Acp {
-        return Err(AppError::BadRequest(
-            "Config updates are not supported for this agent type".into(),
-        ));
-    }
-
-    let acp = downcast_acp(&handle)?;
     acp.set_config_option(&params.config_id, &req.value).await?;
     Ok(Json(ApiResponse::success()))
 }
@@ -383,15 +370,8 @@ async fn get_configs(
     Extension(_user): Extension<CurrentUser>,
     Path(id): Path<String>,
 ) -> Result<Json<ApiResponse<Vec<SessionConfigOption>>>, AppError> {
-    let handle = get_task(&state, &id)?;
-
-    if handle.agent_type() != AgentType::Acp {
-        return Err(AppError::BadRequest(
-            "This endpoint is only available for ACP agents".into(),
-        ));
-    }
-
-    let acp = downcast_acp(&handle)?;
+    let instance = get_task(&state, &id)?;
+    let acp = require_acp(&instance)?;
     Ok(Json(ApiResponse::ok(acp.config_options().await)))
 }
 
@@ -402,15 +382,16 @@ async fn set_configs(
     body: Result<Json<SetConfigOptionsRequest>, JsonRejection>,
 ) -> Result<Json<ApiResponse<()>>, AppError> {
     let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
-    let handle = get_task(&state, &id)?;
+    let instance = get_task(&state, &id)?;
+    let acp = match &instance {
+        AgentInstance::Acp(m) => m,
+        _ => {
+            return Err(AppError::BadRequest(
+                "Config updates are not supported for this agent type".into(),
+            ));
+        }
+    };
 
-    if handle.agent_type() != AgentType::Acp {
-        return Err(AppError::BadRequest(
-            "Config updates are not supported for this agent type".into(),
-        ));
-    }
-
-    let acp = downcast_acp(&handle)?;
     for update in req.config_options {
         if update.config_id.trim().is_empty() {
             return Err(AppError::BadRequest("config_id must not be empty".into()));
@@ -426,15 +407,8 @@ async fn get_usage(
     Extension(_user): Extension<CurrentUser>,
     Path(id): Path<String>,
 ) -> Result<Json<ApiResponse<Option<UsageUpdate>>>, AppError> {
-    let handle = get_task(&state, &id)?;
-
-    if handle.agent_type() != AgentType::Acp {
-        return Err(AppError::BadRequest(
-            "This endpoint is only available for ACP agents".into(),
-        ));
-    }
-
-    let acp = downcast_acp(&handle)?;
+    let instance = get_task(&state, &id)?;
+    let acp = require_acp(&instance)?;
     let usage = acp.usage().await;
     Ok(Json(ApiResponse::ok(usage)))
 }
@@ -444,15 +418,8 @@ async fn get_agent_capabilities(
     Extension(_user): Extension<CurrentUser>,
     Path(id): Path<String>,
 ) -> Result<Json<ApiResponse<Option<AgentCapabilities>>>, AppError> {
-    let handle = get_task(&state, &id)?;
-
-    if handle.agent_type() != AgentType::Acp {
-        return Err(AppError::BadRequest(
-            "This endpoint is only available for ACP agents".into(),
-        ));
-    }
-
-    let acp = downcast_acp(&handle)?;
+    let instance = get_task(&state, &id)?;
+    let acp = require_acp(&instance)?;
     let capabilities = acp.agent_capabilities().await;
     Ok(Json(ApiResponse::ok(capabilities)))
 }
@@ -462,18 +429,12 @@ async fn get_openclaw_runtime(
     Extension(_user): Extension<CurrentUser>,
     Path(id): Path<String>,
 ) -> Result<Json<ApiResponse<serde_json::Value>>, AppError> {
-    let handle = get_task(&state, &id)?;
-
-    if handle.agent_type() != AgentType::OpenclawGateway {
+    let instance = get_task(&state, &id)?;
+    let AgentInstance::OpenClaw(openclaw) = &instance else {
         return Err(AppError::BadRequest(
             "This endpoint is only available for OpenClaw agents".into(),
         ));
-    }
-
-    let openclaw = handle
-        .as_any()
-        .downcast_ref::<OpenClawAgentManager>()
-        .ok_or_else(|| AppError::Internal("Failed to downcast to OpenClawAgentManager".into()))?;
+    };
 
     let diagnostics = openclaw.get_diagnostics().await;
     Ok(Json(ApiResponse::ok(diagnostics)))
@@ -481,16 +442,21 @@ async fn get_openclaw_runtime(
 
 // ── Helpers ────────────────────────────────────────────────────────
 
-fn get_task(state: &AuxiliaryRouterState, conversation_id: &str) -> Result<AgentManagerHandle, AppError> {
+fn get_task(state: &AuxiliaryRouterState, conversation_id: &str) -> Result<AgentInstance, AppError> {
     state
         .worker_task_manager
         .get_task(conversation_id)
         .ok_or_else(|| AppError::NotFound(format!("No active agent for conversation '{conversation_id}'")))
 }
 
-fn downcast_acp(handle: &AgentManagerHandle) -> Result<&AcpAgentManager, AppError> {
-    handle
-        .as_any()
-        .downcast_ref::<AcpAgentManager>()
-        .ok_or_else(|| AppError::Internal("Failed to downcast to AcpAgentManager".into()))
+/// Recover the concrete ACP manager from an [`AgentInstance`] or return
+/// a `BadRequest` — used by ACP-only auxiliary endpoints to surface a
+/// meaningful 400 instead of the previous 500-via-downcast.
+fn require_acp(instance: &AgentInstance) -> Result<&Arc<AcpAgentManager>, AppError> {
+    match instance {
+        AgentInstance::Acp(m) => Ok(m),
+        _ => Err(AppError::BadRequest(
+            "This endpoint is only available for ACP agents".into(),
+        )),
+    }
 }

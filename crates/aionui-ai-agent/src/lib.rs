@@ -30,14 +30,15 @@ pub use acp_agent::AcpAgentManager;
 pub use acp_routes::{AcpRouterState, acp_routes};
 pub use agent_manager::{AgentManagerHandle, IAgentManager, approval_key};
 pub use agent_registry::AgentRegistry;
-// NOTE (PR #8a): `IAgentTask` / `AgentInstance` are defined but intentionally
-// not added to the crate-level prelude yet — the old `IAgentManager` trait
-// is still the primary surface exposed via `pub use agent_manager::*`. Re-
-// exporting both would cause glob-importing consumers (integration tests)
-// to see ambiguous method resolution for `agent_type`/`status`/etc. PR #8b
-// switches consumers over, and PR #8c removes `IAgentManager` entirely and
-// re-exports `agent_task::*` here.
+// `AgentInstance` is the new canonical agent handle; `IAgentTask` is
+// intentionally *not* re-exported while `IAgentManager` still exists —
+// otherwise glob-importing consumers would see ambiguous method
+// resolution (`agent_type`/`status`/...). PR #8c removes `IAgentManager`
+// and adds `pub use agent_task::IAgentTask` here.
 pub use agent_routes::{AgentRouterState, agent_routes};
+pub use agent_task::AgentInstance;
+#[cfg(any(test, feature = "test-support"))]
+pub use agent_task::IMockAgent;
 pub use aionrs_agent::AionrsAgentManager;
 pub use aionui_api_types::{
     AcpBuildExtra, AcpModelInfo, AcpSessionConfigOption, AionrsBuildExtra, OpenClawBuildExtra, OpenClawGatewayConfig,

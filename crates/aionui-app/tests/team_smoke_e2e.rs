@@ -18,14 +18,14 @@ mod common;
 
 use std::sync::Arc;
 
-use aionui_ai_agent::agent_manager::IAgentManager;
+use aionui_ai_agent::agent_task::{AgentInstance, IAgentTask, IMockAgent};
 use aionui_ai_agent::stream_event::{AgentStreamEvent, ErrorEventData, FinishEventData};
 use aionui_ai_agent::types::{AgentStreamChunk, BuildTaskOptions, SendMessageData};
 use aionui_ai_agent::{AgentFactory, IWorkerTaskManager, WorkerTaskManagerImpl};
 use aionui_api_types::AcpBuildExtra;
 use aionui_api_types::TeamMcpStdioConfig;
 use aionui_app::{AppServices, build_module_states, create_router_with_states};
-use aionui_common::{AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, TimestampMs};
+use aionui_common::{AgentKillReason, AgentType, AppError, ConversationStatus, TimestampMs};
 use aionui_db::models::{MailboxMessageRow, TeamTaskRow};
 use aionui_db::{ITeamRepository, SqliteTeamRepository};
 use axum::http::StatusCode;
@@ -118,18 +118,18 @@ impl MockAgentManager {
 }
 
 #[async_trait::async_trait]
-impl IAgentManager for MockAgentManager {
+impl IAgentTask for MockAgentManager {
     fn agent_type(&self) -> AgentType {
         AgentType::Acp
     }
-    fn status(&self) -> Option<ConversationStatus> {
-        None
+    fn conversation_id(&self) -> &str {
+        &self.conversation_id
     }
     fn workspace(&self) -> &str {
         &self.workspace
     }
-    fn conversation_id(&self) -> &str {
-        &self.conversation_id
+    fn status(&self) -> Option<ConversationStatus> {
+        None
     }
     fn last_activity_at(&self) -> TimestampMs {
         0
@@ -182,22 +182,12 @@ impl IAgentManager for MockAgentManager {
     async fn stop(&self) -> Result<(), AppError> {
         Ok(())
     }
-    fn confirm(&self, _msg_id: &str, _call_id: &str, _data: Value, _always_allow: bool) -> Result<(), AppError> {
-        Ok(())
-    }
-    fn get_confirmations(&self) -> Vec<Confirmation> {
-        vec![]
-    }
-    fn check_approval(&self, _action: &str, _command_type: Option<&str>) -> bool {
-        false
-    }
     fn kill(&self, _reason: Option<AgentKillReason>) -> Result<(), AppError> {
         Ok(())
     }
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
 }
+
+impl IMockAgent for MockAgentManager {}
 
 /// Every conversation gets a `MockAgentManager` wired to whatever
 /// `team_mcp_stdio_config` was persisted for it.
@@ -221,7 +211,7 @@ fn mock_factory() -> AgentFactory {
                 user_id: None,
             });
             let agent = MockAgentManager::new(opts.conversation_id, opts.workspace, extra.team_mcp_stdio_config);
-            Ok(Arc::new(agent) as aionui_ai_agent::AgentManagerHandle)
+            Ok(AgentInstance::Mock(Arc::new(agent)))
         }
         .boxed()
     })

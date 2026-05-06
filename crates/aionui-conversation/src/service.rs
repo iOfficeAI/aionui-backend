@@ -1031,7 +1031,7 @@ impl ConversationService {
                 .with_turn_completion(false);
 
                 let rx = agent.subscribe();
-                let send_agent = Arc::clone(&agent);
+                let send_agent = agent.clone();
                 let conv_id_send = conv_id.clone();
                 // 1. Send the message to the agent and concurrently run the relay to stream events.
                 tokio::spawn(async move {
