@@ -120,7 +120,7 @@ impl StreamRelay {
                             // Otherwise the thinking_done arriving after finish
                             // re-activates the processing indicator.
                             if has_thinking {
-                                self.send_thinking_done();
+                                self.send_thinking_done(thinking_started_at);
                             }
                             self.forward_to_websocket(&event);
                             self.persist_thinking(&thinking_buffer, thinking_started_at).await;
@@ -144,7 +144,7 @@ impl StreamRelay {
                         "StreamRelay channel closed without terminal event"
                     );
                     if has_thinking {
-                        self.send_thinking_done();
+                        self.send_thinking_done(thinking_started_at);
                     }
                     self.persist_thinking(&thinking_buffer, thinking_started_at).await;
                     // Channel closed without finish/error — still finalize
@@ -312,9 +312,11 @@ impl StreamRelay {
         if thinking_buffer.is_empty() {
             return;
         }
+        let duration_ms = started_at.map(|t| (now_ms() - t).max(0));
         let content = json!({
             "content": thinking_buffer,
             "status": "done",
+            "duration_ms": duration_ms,
         })
         .to_string();
         let row = MessageRow {
@@ -334,11 +336,12 @@ impl StreamRelay {
     }
 
     /// Send a `thinking` event with `status: "done"` to close the thinking UI.
-    fn send_thinking_done(&self) {
+    fn send_thinking_done(&self, started_at: Option<i64>) {
+        let duration = started_at.map(|t| (now_ms() - t).max(0) as u64);
         let thinking_done = AgentStreamEvent::Thinking(ThinkingEventData {
             content: String::new(),
             subject: None,
-            duration: None,
+            duration,
             status: Some("done".into()),
         });
         self.forward_to_websocket(&thinking_done);
