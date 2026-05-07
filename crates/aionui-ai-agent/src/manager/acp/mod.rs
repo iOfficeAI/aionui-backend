@@ -6,6 +6,7 @@ mod mode_normalize;
 pub mod permission_router;
 pub mod reconcile;
 pub mod session;
+mod session_flow;
 
 pub use agent::AcpAgentManager;
 pub use catalog_forwarder::CatalogForwarder;
