@@ -166,18 +166,9 @@ async fn get_config(
     Extension(_user): Extension<CurrentUser>,
     Path(params): Path<ConfigPathParams>,
 ) -> Result<Json<ApiResponse<Option<SessionConfigOption>>>, AppError> {
-    let instance = get_task(&state, &params.id)?;
-    let AgentInstance::Acp(acp) = &instance else {
-        return Err(AppError::BadRequest(
-            "Config options are only available for ACP agents".into(),
-        ));
-    };
-    let config_option = acp
-        .config_options()
-        .await
-        .into_iter()
-        .find(|opt| *opt.id.0 == *params.config_id);
-    Ok(Json(ApiResponse::ok(config_option)))
+    Ok(Json(ApiResponse::ok(
+        state.service.get_config_option(&params.id, &params.config_id).await?,
+    )))
 }
 
 async fn set_config(
@@ -187,14 +178,10 @@ async fn set_config(
     body: Result<Json<SetConfigOptionRequest>, JsonRejection>,
 ) -> Result<Json<ApiResponse<()>>, AppError> {
     let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
-    let instance = get_task(&state, &params.id)?;
-    let AgentInstance::Acp(acp) = &instance else {
-        return Err(AppError::BadRequest(
-            "Config updates are not supported for this agent type".into(),
-        ));
-    };
-
-    acp.set_config_option(&params.config_id, &req.value).await?;
+    state
+        .service
+        .set_config_option(&params.id, &params.config_id, req)
+        .await?;
     Ok(Json(ApiResponse::success()))
 }
 
@@ -203,13 +190,7 @@ async fn get_configs(
     Extension(_user): Extension<CurrentUser>,
     Path(id): Path<String>,
 ) -> Result<Json<ApiResponse<Vec<SessionConfigOption>>>, AppError> {
-    let instance = get_task(&state, &id)?;
-    let AgentInstance::Acp(acp) = &instance else {
-        return Err(AppError::BadRequest(
-            "Config options are only available for ACP agents".into(),
-        ));
-    };
-    Ok(Json(ApiResponse::ok(acp.config_options().await)))
+    Ok(Json(ApiResponse::ok(state.service.get_configs(&id).await?)))
 }
 
 async fn set_configs(
@@ -219,20 +200,7 @@ async fn set_configs(
     body: Result<Json<SetConfigOptionsRequest>, JsonRejection>,
 ) -> Result<Json<ApiResponse<()>>, AppError> {
     let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
-    let instance = get_task(&state, &id)?;
-    let AgentInstance::Acp(acp) = &instance else {
-        return Err(AppError::BadRequest(
-            "Config updates are not supported for this agent type".into(),
-        ));
-    };
-
-    for update in req.config_options {
-        if update.config_id.trim().is_empty() {
-            return Err(AppError::BadRequest("config_id must not be empty".into()));
-        }
-        acp.set_config_option(&update.config_id, &update.value).await?;
-    }
-
+    state.service.set_configs_batch(&id, req).await?;
     Ok(Json(ApiResponse::success()))
 }
 

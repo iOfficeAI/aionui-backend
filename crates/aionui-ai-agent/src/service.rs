@@ -9,7 +9,8 @@ use std::sync::Arc;
 
 use agent_client_protocol::schema::SessionModelState;
 use aionui_api_types::{
-    AgentModeResponse, GetModelInfoResponse, ModelInfoEntry, ModelInfoPayload, SetModeRequest, SetModelRequest,
+    AgentModeResponse, GetModelInfoResponse, ModelInfoEntry, ModelInfoPayload, SetConfigOptionRequest,
+    SetConfigOptionsRequest, SetModeRequest, SetModelRequest,
 };
 use aionui_common::AppError;
 use aionui_db::IConversationRepository;
@@ -88,6 +89,69 @@ impl AgentService {
             ));
         };
         acp.set_model_info(&req.model_id).await
+    }
+
+    pub async fn get_config_option(
+        &self,
+        conversation_id: &str,
+        config_id: &str,
+    ) -> Result<Option<agent_client_protocol::schema::SessionConfigOption>, AppError> {
+        let instance = self.task(conversation_id)?;
+        let AgentInstance::Acp(acp) = &instance else {
+            return Err(AppError::BadRequest(
+                "Config options are only available for ACP agents".into(),
+            ));
+        };
+        let found = acp
+            .config_options()
+            .await
+            .into_iter()
+            .find(|opt| *opt.id.0 == *config_id);
+        Ok(found)
+    }
+
+    pub async fn set_config_option(
+        &self,
+        conversation_id: &str,
+        config_id: &str,
+        req: SetConfigOptionRequest,
+    ) -> Result<(), AppError> {
+        let instance = self.task(conversation_id)?;
+        let AgentInstance::Acp(acp) = &instance else {
+            return Err(AppError::BadRequest(
+                "Config updates are not supported for this agent type".into(),
+            ));
+        };
+        acp.set_config_option(config_id, &req.value).await
+    }
+
+    pub async fn get_configs(
+        &self,
+        conversation_id: &str,
+    ) -> Result<Vec<agent_client_protocol::schema::SessionConfigOption>, AppError> {
+        let instance = self.task(conversation_id)?;
+        let AgentInstance::Acp(acp) = &instance else {
+            return Err(AppError::BadRequest(
+                "Config options are only available for ACP agents".into(),
+            ));
+        };
+        Ok(acp.config_options().await)
+    }
+
+    pub async fn set_configs_batch(&self, conversation_id: &str, req: SetConfigOptionsRequest) -> Result<(), AppError> {
+        let instance = self.task(conversation_id)?;
+        let AgentInstance::Acp(acp) = &instance else {
+            return Err(AppError::BadRequest(
+                "Config updates are not supported for this agent type".into(),
+            ));
+        };
+        for update in req.config_options {
+            if update.config_id.trim().is_empty() {
+                return Err(AppError::BadRequest("config_id must not be empty".into()));
+            }
+            acp.set_config_option(&update.config_id, &update.value).await?;
+        }
+        Ok(())
     }
 }
 
