@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Pre-commit hook: fmt check + clippy on affected crates.
+# Activated via: just setup
+# Bypass with: git commit --no-verify
+
+staged_rs=$(git diff --cached --name-only --diff-filter=ACMR -- '*.rs')
+[ -z "$staged_rs" ] && exit 0
+
+# Step 1: format check (full workspace, < 1s)
+if ! cargo fmt --all -- --check > /dev/null 2>&1; then
+    echo "❌ Format check failed."
+    echo "   Run: just fmt"
+    exit 1
+fi
+
+# Step 2: clippy on affected crates only
+crates=$(echo "$staged_rs" | grep '^crates/' | sed 's|crates/\([^/]*\)/.*|\1|' | sort -u)
+
+if [ -n "$crates" ]; then
+    clippy_args=""
+    for c in $crates; do
+        clippy_args="$clippy_args -p $c"
+    done
+    if ! cargo clippy $clippy_args -- -D warnings; then
+        echo ""
+        echo "❌ Clippy failed on affected crates."
+        echo "   Run: just lint-fix"
+        exit 1
+    fi
+fi

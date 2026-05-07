@@ -5,11 +5,12 @@ use crate::factory::acp_assembler::AcpSessionParams;
 use crate::manager::acp::{AcpSession, AcpSessionEvent, PermissionRouter, PersistedSessionState};
 use crate::protocol::acp::AcpProtocol;
 use crate::protocol::events::{
-    AgentStreamEvent, AvailableCommandsEventData, FinishEventData, SessionAssignedEventData, StartEventData,
+    AgentStreamEvent, AvailableCommandsEventData, ErrorEventData, FinishEventData, SessionAssignedEventData,
+    StartEventData,
 };
 use crate::registry::CatalogSender;
 use crate::shared_kernel::{ModeId, ModelId, SessionId as DomainSessionId};
-use crate::types::{AgentStreamChunk, SendMessageData};
+use crate::types::SendMessageData;
 use agent_client_protocol::schema::{
     AgentCapabilities, AvailableCommand, CancelNotification, ContentBlock, LoadSessionRequest, PromptRequest,
     SessionConfigOption, SessionId, SessionModeState, SessionModelState, SetSessionConfigOptionRequest,
@@ -131,11 +132,6 @@ pub struct AcpAgentManager {
     protocol: AcpProtocol,
     /// Typed event broadcast channel.
     event_tx: broadcast::Sender<AgentStreamEvent>,
-    /// Raw stream chunk broadcast channel consumed by the team scheduler's
-    /// wake-timeout watchdog. Emission points are wired up in W4-D25c-2;
-    /// this channel exists from D25c-1 onward so `subscribe_stream` can
-    /// hand out live receivers regardless of whether emitters are active.
-    stream_tx: broadcast::Sender<AgentStreamChunk>,
     /// Timestamp of last activity (atomic for lock-free reads). Shared
     /// with the `PermissionRouter` so permission arrivals update the
     /// activity timestamp without reverse-referencing the manager.
@@ -323,12 +319,11 @@ impl AcpAgentManager {
             .ok_or_else(|| AppError::Internal("Failed to take stdio from CLI process".into()))?;
 
         let (event_tx, _) = broadcast::channel(256);
-        let (stream_tx, _) = broadcast::channel(256);
         let (permission_tx, permission_rx) = mpsc::channel(32);
         let (domain_event_tx, domain_event_rx) = mpsc::channel(256);
 
         // Connect via ACP SDK — executes initialize handshake
-        let protocol = AcpProtocol::connect(stdin, stdout, event_tx.clone(), stream_tx.clone(), permission_tx)
+        let protocol = AcpProtocol::connect(stdin, stdout, event_tx.clone(), permission_tx)
             .await
             .map_err(|e| {
                 error!(
@@ -377,7 +372,6 @@ impl AcpAgentManager {
             process: Arc::new(process),
             protocol,
             event_tx,
-            stream_tx,
             last_activity: Arc::new(AtomicI64::new(now_ms())),
             session_lock: Mutex::new(()),
             permission_router,
@@ -920,29 +914,19 @@ impl crate::agent_task::IAgentTask for AcpAgentManager {
         self.event_tx.subscribe()
     }
 
-    fn subscribe_stream(&self) -> broadcast::Receiver<AgentStreamChunk> {
-        self.stream_tx.subscribe()
-    }
-
     async fn send_message(&self, data: SendMessageData) -> Result<(), AppError> {
         self.last_activity.store(now_ms(), Ordering::Relaxed);
 
-        // Drive the session, then emit a terminal chunk so subscribers
-        // (wake timeout watchdog, crash detector) always see a Finish or
-        // Error at the end of every turn — matching the contract documented
-        // on `AgentStreamChunk`.
         let result = self.ensure_session_and_send(&data).await;
         match &result {
             Ok(()) => {
-                let _ = self.stream_tx.send(AgentStreamChunk::Finish {
-                    agent_crash: false,
-                    stop_reason: None,
-                });
+                let _ = self.event_tx.send(AgentStreamEvent::Finish(FinishEventData::default()));
             }
             Err(err) => {
-                let _ = self.stream_tx.send(AgentStreamChunk::Error {
+                let _ = self.event_tx.send(AgentStreamEvent::Error(ErrorEventData {
                     message: err.to_string(),
-                });
+                    code: None,
+                }));
             }
         }
         result
@@ -1071,19 +1055,6 @@ impl AcpAgentManager {
 mod tests {
     use super::*;
     use serde_json::json;
-
-    /// The stream channel powering [`AcpAgentManager::subscribe_stream`] is
-    /// created identically to the one inside `new()` — capacity 256 and
-    /// the `AgentStreamChunk` element type. Subscribing before any emit
-    /// yields a live receiver that observes `TryRecvError::Empty`. Once
-    /// D25c-2 wires up emitters, existing subscribers will begin seeing
-    /// chunks; the empty-on-idle contract stays intact.
-    #[test]
-    fn stream_channel_yields_live_receiver_that_is_initially_empty() {
-        let (tx, _) = broadcast::channel::<AgentStreamChunk>(256);
-        let mut rx = tx.subscribe();
-        assert!(matches!(rx.try_recv(), Err(broadcast::error::TryRecvError::Empty)));
-    }
 
     #[test]
     fn confirm_option_id_accepts_string_or_object() {

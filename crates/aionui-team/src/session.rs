@@ -3,7 +3,7 @@ use std::sync::{Arc, Weak};
 
 use aionui_ai_agent::IWorkerTaskManager;
 use aionui_ai_agent::types::SendMessageData;
-use aionui_common::AgentKillReason;
+use aionui_common::{AgentKillReason, ConversationStatus};
 use aionui_conversation::ConversationService;
 use aionui_db::ITeamRepository;
 use aionui_realtime::EventBroadcaster;
@@ -15,6 +15,7 @@ use crate::mcp::{TeamMcpServer, TeamMcpStdioConfig, TeamMcpStdioServerSpec};
 use crate::prompts::{build_lead_prompt, build_teammate_prompt, build_wake_payload};
 use crate::scheduler::{TeammateManager, normalize_name};
 use crate::service::TeamSessionService;
+use crate::service::spawn_support::resolve_full_auto_mode;
 use crate::task_board::TaskBoard;
 use crate::types::{MailboxMessageType, Team, TeamAgent, TeammateRole, TeammateStatus};
 
@@ -487,6 +488,20 @@ impl TeamSession {
             inject_skills: Vec::new(),
         };
 
+        // Guard: if the agent is already running (e.g. ConversationService::send_message
+        // already started a turn with its own StreamRelay), skip to avoid duplicate
+        // streaming output. The unread messages will be picked up by on_agent_finish.
+        if handle.status() == Some(ConversationStatus::Running) {
+            warn!(
+                team_id = %self.team.id,
+                slot_id,
+                conversation_id = %input.conversation_id,
+                "try_wake: agent already running, skipping to avoid duplicate StreamRelay"
+            );
+            self.scheduler.release_wake_lock(slot_id);
+            return;
+        }
+
         // Set up a StreamRelay so the agent's response is persisted to the
         // conversation messages table and forwarded to WebSocket (making the
         // output visible in the team panel). Turn completion is enabled so the
@@ -815,7 +830,7 @@ impl TeamSession {
     ) -> Result<(), TeamError> {
         let patch = serde_json::json!({
             "team_mcp_stdio_config": mcp_stdio_cfg,
-            "session_mode": "bypassPermissions",
+            "session_mode": resolve_full_auto_mode(&agent.backend),
         });
 
         service
@@ -884,8 +899,8 @@ mod tests {
     use crate::test_utils::MockTeamRepo;
     use crate::types::{Team, TeamAgent, TeammateRole};
     use aionui_ai_agent::agent_task::{AgentInstance, IAgentTask, IMockAgent};
-    use aionui_ai_agent::shared_kernel::approval_key;
     use aionui_ai_agent::protocol::events::AgentStreamEvent;
+    use aionui_ai_agent::shared_kernel::approval_key;
     use aionui_ai_agent::types::BuildTaskOptions;
     use aionui_api_types::{AgentModeResponse, WebSocketMessage};
     use aionui_common::{AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, TimestampMs, now_ms};

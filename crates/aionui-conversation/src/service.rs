@@ -914,7 +914,7 @@ impl ConversationService {
         conversation_id: &str,
         req: SendMessageRequest,
         task_manager: &Arc<dyn IWorkerTaskManager>,
-    ) -> Result<(), AppError> {
+    ) -> Result<String, AppError> {
         if req.content.trim().is_empty() {
             return Err(AppError::BadRequest("Message content must not be empty".into()));
         }
@@ -970,6 +970,19 @@ impl ConversationService {
         };
         self.repo.insert_message(&user_msg).await?;
 
+        self.broadcaster.broadcast(WebSocketMessage::new(
+            "message.userCreated",
+            serde_json::json!({
+                "conversation_id": conversation_id,
+                "msg_id": &user_msg_id,
+                "content": &req.content,
+                "position": "right",
+                "status": "finish",
+                "hidden": req.hidden,
+                "created_at": user_msg.created_at,
+            }),
+        ));
+
         // Build task options from conversation row
         let build_opts = self.build_task_options(&row)?;
         let stored_workspace = build_opts.workspace.clone();
@@ -1001,7 +1014,7 @@ impl ConversationService {
         // Every turn mints a fresh msg_id and passes it as the agent
         // correlation id so DB row, WebSocket stream events, and
         // agent-internal tracing all share one identifier per turn.
-        let msg_id_log = user_msg_id;
+        let user_msg_id_ret = user_msg_id.clone();
         tokio::spawn(async move {
             let first_turn_msg_id = Self::mint_msg_id();
             let mut pending_send = Some((
@@ -1070,8 +1083,8 @@ impl ConversationService {
             StreamRelay::complete_conversation(&repo, &broadcaster, &conv_id).await;
         });
 
-        info!(conversation_id, msg_id = %msg_id_log, "Message dispatched, stream relay started");
-        Ok(())
+        info!(conversation_id, msg_id = %user_msg_id_ret, "Message dispatched, stream relay started");
+        Ok(user_msg_id_ret)
     }
 
     /// Insert a pre-built `MessageRow` into the conversation's message history

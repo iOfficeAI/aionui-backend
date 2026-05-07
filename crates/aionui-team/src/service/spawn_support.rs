@@ -39,6 +39,18 @@ pub(super) fn parse_agent_type(backend: &str) -> Result<AgentType, TeamError> {
     Err(TeamError::InvalidRequest(format!("unsupported backend: {backend}")))
 }
 
+/// Resolve the most permissive session mode for a given backend string.
+/// Reuses `AgentType::full_auto_mode_id` from aionui-common.
+pub(crate) fn resolve_full_auto_mode(backend: &str) -> &'static str {
+    let agent_type = if ACP_VENDOR_LABELS.contains(&backend) {
+        AgentType::Acp
+    } else {
+        let quoted = format!("\"{backend}\"");
+        serde_json::from_str::<AgentType>(&quoted).unwrap_or(AgentType::Acp)
+    };
+    agent_type.full_auto_mode_id(Some(backend))
+}
+
 impl TeamSessionService {
     pub async fn spawn_agent_in_session(
         &self,

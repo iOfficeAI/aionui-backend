@@ -1511,9 +1511,39 @@ async fn send_message_returns_accepted() {
     let task_mgr: Arc<dyn IWorkerTaskManager> = Arc::new(MockTaskManager::new());
 
     let conv = svc.create("user_1", make_create_req()).await.unwrap();
-    let result = svc.send_message("user_1", &conv.id, make_send_req(), &task_mgr).await;
+    let msg_id = svc
+        .send_message("user_1", &conv.id, make_send_req(), &task_mgr)
+        .await
+        .unwrap();
 
-    assert!(result.is_ok());
+    assert!(!msg_id.is_empty(), "msg_id must be non-empty");
+    assert_eq!(msg_id.len(), 8, "msg_id should be an 8-char short hex ID");
+}
+
+#[tokio::test]
+async fn send_message_broadcasts_user_created_event() {
+    let (svc, broadcaster, _repo, _task_mgr) = make_service();
+    let task_mgr: Arc<dyn IWorkerTaskManager> = Arc::new(MockTaskManager::new());
+
+    let conv = svc.create("user_1", make_create_req()).await.unwrap();
+    // Clear events from create
+    broadcaster.take_events();
+
+    let msg_id = svc
+        .send_message("user_1", &conv.id, make_send_req(), &task_mgr)
+        .await
+        .unwrap();
+
+    let events = broadcaster.take_events();
+    let user_created = events
+        .iter()
+        .find(|e| e.name == "message.userCreated")
+        .expect("should broadcast message.userCreated event");
+
+    assert_eq!(user_created.data["conversation_id"], conv.id);
+    assert_eq!(user_created.data["msg_id"], msg_id);
+    assert_eq!(user_created.data["content"], "Hello");
+    assert_eq!(user_created.data["position"], "right");
 }
 
 #[tokio::test]

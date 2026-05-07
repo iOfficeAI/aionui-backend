@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use aionui_ai_agent::types::AgentStreamChunk;
+use aionui_ai_agent::AgentStreamEvent;
 use tokio::sync::broadcast;
 use tracing::warn;
 
@@ -40,7 +40,7 @@ impl TeammateManager {
     pub fn arm_wake_timeout(
         &self,
         slot_id: &str,
-        stream_rx: broadcast::Receiver<AgentStreamChunk>,
+        stream_rx: broadcast::Receiver<AgentStreamEvent>,
         on_timeout: WakeTimeoutHandler,
     ) {
         let slot_id_owned = slot_id.to_owned();
@@ -54,9 +54,10 @@ impl TeammateManager {
 
             let timed_out = loop {
                 tokio::select! {
-                    chunk = rx.recv() => {
-                        match chunk {
-                            Ok(AgentStreamChunk::Finish { .. }) => break false,
+                    event = rx.recv() => {
+                        match event {
+                            Ok(AgentStreamEvent::Finish(_)) => break false,
+                            Ok(AgentStreamEvent::Error(_)) => break false,
                             Err(broadcast::error::RecvError::Closed) => break false,
                             Err(broadcast::error::RecvError::Lagged(n)) => {
                                 warn!(slot_id = %slot_id_owned, skipped = n, "wake watchdog lagged");

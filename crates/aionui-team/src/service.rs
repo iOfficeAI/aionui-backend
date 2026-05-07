@@ -1,5 +1,5 @@
 mod response_builder;
-mod spawn_support;
+pub(crate) mod spawn_support;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Weak};
@@ -18,7 +18,7 @@ use dashmap::DashMap;
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
 
-use self::spawn_support::parse_agent_type;
+use self::spawn_support::{parse_agent_type, resolve_full_auto_mode};
 use crate::error::TeamError;
 use crate::session::TeamSession;
 use crate::types::{Team, TeamAgent, TeammateRole};
@@ -158,7 +158,7 @@ impl TeamSessionService {
                 self.conversation_service
                     .update_extra(
                         existing_id,
-                        serde_json::json!({"teamId": team_id, "backend": input.backend}),
+                        serde_json::json!({"teamId": team_id, "backend": input.backend, "session_mode": resolve_full_auto_mode(&input.backend)}),
                     )
                     .await
                     .map_err(|e| TeamError::InvalidRequest(format!("failed to adopt conversation: {e}")))?;
@@ -187,6 +187,7 @@ impl TeamSessionService {
                     extra: serde_json::json!({
                         "teamId": team_id,
                         "backend": input.backend,
+                        "session_mode": resolve_full_auto_mode(&input.backend),
                     }),
                 };
                 let conv = self
@@ -620,7 +621,7 @@ impl TeamSessionService {
             let cfg = session.mcp_stdio_config(&agent.slot_id);
             let patch = serde_json::json!({
                 "team_mcp_stdio_config": cfg,
-                "session_mode": "bypassPermissions",
+                "session_mode": resolve_full_auto_mode(&agent.backend),
             });
 
             if let Err(e) = self

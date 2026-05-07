@@ -2,6 +2,11 @@
 default:
     @just --list
 
+# Enable pre-commit hooks (run once after clone)
+setup:
+    git config core.hooksPath .githooks
+    @echo "✅ Git hooks enabled"
+
 # Build in release mode and install to ~/.cargo/bin
 # Use `just build --force` to skip cache check
 build *FLAGS: lint-fix fmt

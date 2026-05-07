@@ -553,7 +553,7 @@ impl JobExecutor {
             .send_message(&user_id, conversation_id, send_req, &self.task_manager)
             .await
         {
-            Ok(()) => {
+            Ok(_) => {
                 if let Err(e) = self.upsert_cron_trigger_artifact(conversation_id, job).await {
                     warn!(
                         job_id = %job.id,

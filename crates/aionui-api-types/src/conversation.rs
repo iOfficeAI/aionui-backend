@@ -51,6 +51,12 @@ pub struct SendMessageRequest {
     pub hidden: bool,
 }
 
+/// Response for `POST /api/conversations/:id/messages`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SendMessageResponse {
+    pub msg_id: String,
+}
+
 // ── Query types ────────────────────────────────────────────────────
 
 /// Query parameters for `GET /api/conversations`.
