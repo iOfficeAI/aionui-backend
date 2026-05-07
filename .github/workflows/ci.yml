@@ -36,8 +36,6 @@ jobs:
           toolchain: "1.95.0"
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - name: Rewrite SSH to HTTPS for public dependency
-        run: git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
       - run: cargo clippy --workspace -- -D warnings
 
   test:
@@ -49,8 +47,6 @@ jobs:
         with:
           toolchain: "1.95.0"
       - uses: Swatinem/rust-cache@v2
-      - name: Rewrite SSH to HTTPS for public dependency
-        run: git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
       - run: cargo test --workspace
 
   changes:
