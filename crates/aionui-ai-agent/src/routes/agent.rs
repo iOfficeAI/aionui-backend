@@ -15,6 +15,7 @@ use crate::registry::AgentRegistry;
 #[derive(Clone)]
 pub struct AgentRouterState {
     pub agent_registry: Arc<AgentRegistry>,
+    pub service: Arc<crate::service::AgentService>,
 }
 
 pub fn agent_routes(state: AgentRouterState) -> Router {

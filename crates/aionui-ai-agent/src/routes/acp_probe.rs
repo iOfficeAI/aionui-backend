@@ -14,6 +14,7 @@ use aionui_common::AppError;
 
 use crate::protocol::cli_detect;
 use crate::registry::AgentRegistry;
+use crate::service::AgentService;
 use crate::task_manager::IWorkerTaskManager;
 use aionui_api_types::AcpModelInfo;
 
@@ -22,6 +23,7 @@ use aionui_api_types::AcpModelInfo;
 pub struct AcpRouterState {
     pub worker_task_manager: Arc<dyn IWorkerTaskManager>,
     pub agent_registry: Arc<AgentRegistry>,
+    pub service: Arc<AgentService>,
 }
 
 /// Build the ACP management router.

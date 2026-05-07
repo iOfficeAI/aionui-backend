@@ -33,8 +33,9 @@ use aionui_channel::{ChannelRouterState, channel_routes};
 use aionui_conversation::{ConversationRouterState, conversation_routes};
 use aionui_cron::{CronRouterState, cron_routes};
 use aionui_db::{
-    Database, IAcpSessionRepository, IAgentMetadataRepository, IUserRepository, SqliteAcpSessionRepository,
-    SqliteAgentMetadataRepository, SqliteProviderRepository, SqliteRemoteAgentRepository, SqliteUserRepository,
+    Database, IAcpSessionRepository, IAgentMetadataRepository, IConversationRepository, IUserRepository,
+    SqliteAcpSessionRepository, SqliteAgentMetadataRepository, SqliteConversationRepository, SqliteProviderRepository,
+    SqliteRemoteAgentRepository, SqliteUserRepository,
 };
 use aionui_extension::{
     ExtensionRouterState, HubRouterState, SkillRouterState, extension_routes, hub_routes, skill_routes,
@@ -97,6 +98,8 @@ pub struct AppServices {
     pub event_bus: Arc<BroadcastEventBus>,
     pub worker_task_manager: Arc<dyn IWorkerTaskManager>,
     pub agent_registry: Arc<AgentRegistry>,
+    pub conversation_repo: Arc<dyn IConversationRepository>,
+    pub acp_session_sync: Arc<AcpSessionSyncService>,
     /// Raw JWT secret string, used to derive encryption keys.
     pub jwt_secret_raw: String,
     pub data_dir: String,
@@ -207,6 +210,9 @@ impl AppServices {
             Arc::new(SqliteAcpSessionRepository::new(database.pool().clone()));
         let acp_agent_service = AcpSessionSyncService::new(acp_session_repo.clone());
 
+        let conversation_repo: Arc<dyn IConversationRepository> =
+            Arc::new(SqliteConversationRepository::new(database.pool().clone()));
+
         // Skill paths need app resource dir (for builtin rules) + data dir
         // (for user skills + materialized views). AcpSkillManager uses these
         // for first-message skill index/body loading.
@@ -271,6 +277,8 @@ impl AppServices {
             event_bus: Arc::new(BroadcastEventBus::new(256)),
             worker_task_manager,
             agent_registry,
+            conversation_repo,
+            acp_session_sync: acp_agent_service,
             jwt_secret_raw: secret,
             data_dir,
             local,

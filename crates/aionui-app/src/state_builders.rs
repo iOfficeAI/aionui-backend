@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use aionui_ai_agent::{
-    AcpRouterState, AgentRouterState, RemoteAgentRouterState, RemoteAgentService, SessionRouterState,
+    AcpRouterState, AgentRouterState, AgentService, RemoteAgentRouterState, RemoteAgentService, SessionRouterState,
 };
 use aionui_assistant::{AssistantRouterState, AssistantService, BuiltinAssistantRegistry};
 use aionui_auth::extract_token_from_ws_headers;
@@ -85,13 +85,20 @@ pub async fn build_module_states(services: &AppServices) -> (ModuleStates, Chann
             .unwrap_or_else(|| std::path::PathBuf::from("aionui-backend")),
     );
 
+    let agent_service = AgentService::new(
+        services.worker_task_manager.clone(),
+        services.agent_registry.clone(),
+        services.conversation_repo.clone(),
+        services.acp_session_sync.clone(),
+    );
+
     let states = ModuleStates {
         system: build_system_state(services),
         conversation: build_conversation_state(services, Some(cron.cron_service.clone())),
         remote_agent: build_remote_agent_state(services),
-        acp: build_acp_state(services),
+        acp: build_acp_state(services, agent_service.clone()),
         connection_test: build_connection_test_state(),
-        session: build_session_state(services),
+        session: build_session_state(services, agent_service.clone()),
         file: build_file_state(services),
         mcp: build_mcp_state(services),
         extension: ext_state,
@@ -110,6 +117,7 @@ pub async fn build_module_states(services: &AppServices) -> (ModuleStates, Chann
         assistant,
         agent: AgentRouterState {
             agent_registry: services.agent_registry.clone(),
+            service: agent_service,
         },
     };
 
@@ -184,10 +192,11 @@ pub fn build_remote_agent_state(services: &AppServices) -> RemoteAgentRouterStat
 }
 
 /// Build the default `AcpRouterState` from application services.
-pub fn build_acp_state(services: &AppServices) -> AcpRouterState {
+pub fn build_acp_state(services: &AppServices, agent_service: Arc<AgentService>) -> AcpRouterState {
     AcpRouterState {
         worker_task_manager: services.worker_task_manager.clone(),
         agent_registry: services.agent_registry.clone(),
+        service: agent_service,
     }
 }
 
@@ -200,12 +209,13 @@ pub fn build_connection_test_state() -> ConnectionTestRouterState {
 
 /// Build the default `SessionRouterState` (formerly `AuxiliaryRouterState`)
 /// from application services.
-pub fn build_session_state(services: &AppServices) -> SessionRouterState {
+pub fn build_session_state(services: &AppServices, agent_service: Arc<AgentService>) -> SessionRouterState {
     let pool = services.database.pool().clone();
     let conversation_repo = Arc::new(SqliteConversationRepository::new(pool));
     SessionRouterState {
         worker_task_manager: services.worker_task_manager.clone(),
         conversation_repo,
+        service: agent_service,
     }
 }
 

@@ -40,6 +40,7 @@ pub use session_ops::session_ops_routes;
 pub struct SessionRouterState {
     pub worker_task_manager: Arc<dyn IWorkerTaskManager>,
     pub conversation_repo: Arc<dyn IConversationRepository>,
+    pub service: Arc<crate::service::AgentService>,
 }
 
 /// Build the combined session router, merging
