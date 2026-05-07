@@ -3,7 +3,7 @@ use std::sync::{Arc, Weak};
 
 use aionui_ai_agent::IWorkerTaskManager;
 use aionui_ai_agent::types::SendMessageData;
-use aionui_common::AgentKillReason;
+use aionui_common::{AgentKillReason, ConversationStatus};
 use aionui_conversation::ConversationService;
 use aionui_db::ITeamRepository;
 use aionui_realtime::EventBroadcaster;
@@ -487,6 +487,20 @@ impl TeamSession {
             files: files.unwrap_or_default(),
             inject_skills: Vec::new(),
         };
+
+        // Guard: if the agent is already running (e.g. ConversationService::send_message
+        // already started a turn with its own StreamRelay), skip to avoid duplicate
+        // streaming output. The unread messages will be picked up by on_agent_finish.
+        if handle.status() == Some(ConversationStatus::Running) {
+            warn!(
+                team_id = %self.team.id,
+                slot_id,
+                conversation_id = %input.conversation_id,
+                "try_wake: agent already running, skipping to avoid duplicate StreamRelay"
+            );
+            self.scheduler.release_wake_lock(slot_id);
+            return;
+        }
 
         // Set up a StreamRelay so the agent's response is persisted to the
         // conversation messages table and forwarded to WebSocket (making the
