@@ -34,6 +34,10 @@ pub enum AgentStreamEvent {
     AgentStatus(AgentStatusEventData),
     Thinking(ThinkingEventData),
     Plan(PlanEventData),
+    // DEPRECATED: Use AcpPermission(AcpPermissionEventData::Confirmation(..)) instead.
+    // This variant remains only for wire-format compatibility with the frontend;
+    // no production code should emit it after Stage 5 (see review.md §B3, target §7.5).
+    // Removing it is a coordinated cross-repo change.
     Permission(serde_json::Value),
     AcpPermission(AcpPermissionEventData),
     SkillSuggest(SkillSuggestEventData),

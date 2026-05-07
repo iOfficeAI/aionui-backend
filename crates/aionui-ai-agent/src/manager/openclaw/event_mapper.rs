@@ -1,10 +1,11 @@
+use aionui_common::Confirmation;
 use serde_json::Value;
 use tracing::debug;
 
 use super::protocol::{AgentEvent, ApprovalRequestEvent, ChatEvent, ChatEventState, EventFrame};
 use crate::protocol::events::{
-    AgentStreamEvent, ErrorEventData, FinishEventData, StartEventData, TextEventData, ThinkingEventData,
-    ToolCallEventData, ToolCallStatus,
+    AcpPermissionEventData, AgentStreamEvent, ErrorEventData, FinishEventData, StartEventData, TextEventData,
+    ThinkingEventData, ToolCallEventData, ToolCallStatus,
 };
 
 #[derive(Default)]
@@ -220,18 +221,22 @@ fn map_approval_event(event: &EventFrame) -> Vec<AgentStreamEvent> {
     let tool_call = approval.tool_call.as_ref();
     let call_id = tool_call
         .and_then(|tc| tc.tool_call_id.as_deref())
-        .unwrap_or(&approval.request_id);
-    let action = tool_call.and_then(|tc| tc.title.as_deref()).unwrap_or("unknown");
-    let command_type = tool_call.and_then(|tc| tc.kind.as_deref());
+        .unwrap_or(&approval.request_id)
+        .to_owned();
 
-    let confirmation = serde_json::json!({
-        "call_id": call_id,
-        "action": action,
-        "command_type": command_type,
-        "request_id": approval.request_id,
-    });
+    let confirmation = Confirmation {
+        id: approval.request_id.clone(),
+        call_id,
+        title: tool_call.and_then(|tc| tc.title.clone()),
+        action: tool_call.and_then(|tc| tc.title.clone()),
+        description: String::new(),
+        command_type: tool_call.and_then(|tc| tc.kind.as_deref()).map(ToOwned::to_owned),
+        options: Vec::new(),
+    };
 
-    vec![AgentStreamEvent::Permission(confirmation)]
+    vec![AgentStreamEvent::AcpPermission(AcpPermissionEventData::Confirmation(
+        confirmation,
+    ))]
 }
 
 fn compute_text_delta(message: &Option<Value>, accumulated: &mut String) -> Option<String> {
@@ -482,12 +487,12 @@ mod tests {
         let events = map_openclaw_event(&event, &mut state, None);
 
         assert_eq!(events.len(), 1);
-        if let AgentStreamEvent::Permission(v) = &events[0] {
-            assert_eq!(v["call_id"], "tc-1");
-            assert_eq!(v["action"], "bash");
-            assert_eq!(v["request_id"], "req-1");
+        if let AgentStreamEvent::AcpPermission(AcpPermissionEventData::Confirmation(conf)) = &events[0] {
+            assert_eq!(conf.call_id, "tc-1");
+            assert_eq!(conf.action, Some("bash".to_owned()));
+            assert_eq!(conf.id, "req-1");
         } else {
-            panic!("Expected Permission");
+            panic!("Expected AcpPermission(Confirmation)");
         }
     }
 

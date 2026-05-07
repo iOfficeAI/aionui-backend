@@ -7,7 +7,7 @@ use serde_json::json;
 use tokio::sync::broadcast;
 use tracing::debug;
 
-use crate::protocol::events::{AgentStreamEvent, ToolCallEventData, ToolCallStatus};
+use crate::protocol::events::{AcpPermissionEventData, AgentStreamEvent, ToolCallEventData, ToolCallStatus};
 
 /// Implements `ProtocolEmitter` for the aionui-backend context.
 ///
@@ -70,13 +70,16 @@ impl ProtocolEmitter for BackendProtocolSink {
                     confs.push(confirmation.clone());
                 }
 
-                let json_val = serde_json::to_value(&confirmation).unwrap_or_default();
-                let _ = self.event_tx.send(AgentStreamEvent::Permission(json_val));
+                let _ = self
+                    .event_tx
+                    .send(AgentStreamEvent::AcpPermission(AcpPermissionEventData::Confirmation(
+                        confirmation.clone(),
+                    )));
 
                 debug!(
                     call_id,
                     tool_name = %tool.name,
-                    "BackendProtocolSink: emitted Permission event"
+                    "BackendProtocolSink: emitted AcpPermission(Confirmation) event"
                 );
             }
 
@@ -136,11 +139,11 @@ mod tests {
 
         let received = rx.try_recv().unwrap();
         match received {
-            AgentStreamEvent::Permission(data) => {
-                assert_eq!(data["call_id"], "c1");
-                assert!(data["options"].as_array().unwrap().len() >= 3);
+            AgentStreamEvent::AcpPermission(AcpPermissionEventData::Confirmation(conf)) => {
+                assert_eq!(conf.call_id, "c1");
+                assert!(conf.options.len() >= 3);
             }
-            other => panic!("Expected Permission, got {:?}", other),
+            other => panic!("Expected AcpPermission(Confirmation), got {:?}", other),
         }
 
         let stored = confs.read().unwrap();
