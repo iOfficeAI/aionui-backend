@@ -6,10 +6,9 @@ pub use service::RemoteAgentService;
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI64, Ordering};
 
 use aionui_common::{
-    AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, RemoteAgentStatus, TimestampMs, now_ms,
+    AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, RemoteAgentStatus, TimestampMs,
 };
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
@@ -17,12 +16,12 @@ use tokio::sync::{Mutex, RwLock, broadcast};
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, error, info, warn};
 
+use crate::agent_runtime::AgentRuntime;
 use crate::protocol::events::AgentStreamEvent;
 use crate::types::SendMessageData;
 
 /// Internal mutable state for the Remote agent.
 struct RemoteState {
-    status: Option<ConversationStatus>,
     session_key: Option<String>,
     confirmations: Vec<Confirmation>,
     has_messages: bool,
@@ -46,12 +45,9 @@ pub struct RemoteAgentConfig {
 /// connection protocol. The Rust implementation owns the WebSocket connection
 /// directly (no CLI subprocess).
 pub struct RemoteAgentManager {
-    conversation_id: String,
-    workspace: String,
+    runtime: AgentRuntime,
     remote_config: RemoteAgentConfig,
-    event_tx: broadcast::Sender<AgentStreamEvent>,
     state: RwLock<RemoteState>,
-    last_activity: AtomicI64,
     /// WebSocket sink for sending messages, wrapped in Mutex for concurrency.
     ws_sink: Mutex<
         Option<
@@ -72,22 +68,18 @@ impl RemoteAgentManager {
         workspace: String,
         remote_config: RemoteAgentConfig,
     ) -> Result<Self, AppError> {
-        let (event_tx, _) = broadcast::channel(256);
+        let runtime = AgentRuntime::new(conversation_id, workspace, 256);
 
         let manager = Self {
-            conversation_id,
-            workspace,
+            runtime,
             remote_config,
-            event_tx,
             state: RwLock::new(RemoteState {
-                status: None,
                 session_key: None,
                 confirmations: Vec::new(),
                 has_messages: false,
                 approval_memory: HashMap::new(),
                 connection_status: RemoteAgentStatus::Unknown,
             }),
-            last_activity: AtomicI64::new(now_ms()),
             ws_sink: Mutex::new(None),
             _reader_handle: Mutex::new(None),
         };
@@ -105,7 +97,7 @@ impl RemoteAgentManager {
         })?;
 
         info!(
-            conversation_id = %self.conversation_id,
+            conversation_id = %self.runtime.conversation_id(),
             url = url,
             "Connected to remote agent"
         );
@@ -142,12 +134,12 @@ impl RemoteAgentManager {
         while let Some(msg) = stream.next().await {
             match msg {
                 Ok(Message::Text(text)) => {
-                    self.last_activity.store(now_ms(), Ordering::Relaxed);
+                    self.runtime.bump_activity();
                     match serde_json::from_str::<Value>(&text) {
                         Ok(raw_json) => self.handle_raw_event(raw_json).await,
                         Err(e) => {
                             debug!(
-                                conversation_id = %self.conversation_id,
+                                conversation_id = %self.runtime.conversation_id(),
                                 error = %e,
                                 "Non-JSON WebSocket message, skipping"
                             );
@@ -156,14 +148,14 @@ impl RemoteAgentManager {
                 }
                 Ok(Message::Close(_)) => {
                     debug!(
-                        conversation_id = %self.conversation_id,
+                        conversation_id = %self.runtime.conversation_id(),
                         "Remote WebSocket closed"
                     );
                     break;
                 }
                 Err(e) => {
                     warn!(
-                        conversation_id = %self.conversation_id,
+                        conversation_id = %self.runtime.conversation_id(),
                         error = %e,
                         "WebSocket read error"
                     );
@@ -173,11 +165,13 @@ impl RemoteAgentManager {
             }
         }
 
-        // Connection closed — update state
-        let mut state = self.state.write().await;
-        state.connection_status = RemoteAgentStatus::Error;
-        if state.status == Some(ConversationStatus::Running) {
-            state.status = Some(ConversationStatus::Finished);
+        // Connection closed — update connection_status and ensure terminal agent status.
+        {
+            let mut state = self.state.write().await;
+            state.connection_status = RemoteAgentStatus::Error;
+        }
+        if self.runtime.status() == Some(ConversationStatus::Running) {
+            self.runtime.transition_to(ConversationStatus::Finished);
         }
     }
 
@@ -186,7 +180,7 @@ impl RemoteAgentManager {
             Ok(event) => event,
             Err(_) => {
                 debug!(
-                    conversation_id = %self.conversation_id,
+                    conversation_id = %self.runtime.conversation_id(),
                     "Unrecognized remote event, skipping"
                 );
                 return;
@@ -194,28 +188,27 @@ impl RemoteAgentManager {
         };
 
         self.update_state_from_event(&stream_event).await;
-        let _ = self.event_tx.send(stream_event);
+        self.runtime.emit(stream_event);
     }
 
     async fn update_state_from_event(&self, event: &AgentStreamEvent) {
         match event {
             AgentStreamEvent::Start(data) => {
-                let mut state = self.state.write().await;
-                state.status = Some(ConversationStatus::Running);
+                self.runtime.transition_to(ConversationStatus::Running);
                 if let Some(ref sid) = data.session_id {
+                    let mut state = self.state.write().await;
                     state.session_key = Some(sid.clone());
                 }
             }
             AgentStreamEvent::Finish(data) => {
-                let mut state = self.state.write().await;
-                state.status = Some(ConversationStatus::Finished);
+                self.runtime.transition_to(ConversationStatus::Finished);
                 if let Some(ref sid) = data.session_id {
+                    let mut state = self.state.write().await;
                     state.session_key = Some(sid.clone());
                 }
             }
             AgentStreamEvent::Error(_) => {
-                let mut state = self.state.write().await;
-                state.status = Some(ConversationStatus::Finished);
+                self.runtime.transition_to(ConversationStatus::Finished);
             }
             AgentStreamEvent::AcpPermission(data) => {
                 if let Some(conf) = data.as_confirmation() {
@@ -243,7 +236,7 @@ impl RemoteAgentManager {
 
         sink.send(Message::Text(text.into())).await.map_err(|e| {
             error!(
-                conversation_id = %self.conversation_id,
+                conversation_id = %self.runtime.conversation_id(),
                 error = %e,
                 "Failed to send WebSocket message"
             );
@@ -266,42 +259,42 @@ impl crate::agent_task::IAgentTask for RemoteAgentManager {
     }
 
     fn conversation_id(&self) -> &str {
-        &self.conversation_id
+        self.runtime.conversation_id()
     }
 
     fn workspace(&self) -> &str {
-        &self.workspace
+        self.runtime.workspace()
     }
 
     fn status(&self) -> Option<ConversationStatus> {
-        self.state.try_read().ok().and_then(|g| g.status)
+        self.runtime.status()
     }
 
     fn last_activity_at(&self) -> TimestampMs {
-        self.last_activity.load(Ordering::Relaxed)
+        self.runtime.last_activity_at()
     }
 
     fn subscribe(&self) -> broadcast::Receiver<AgentStreamEvent> {
-        self.event_tx.subscribe()
+        self.runtime.subscribe()
     }
 
     async fn send_message(&self, data: SendMessageData) -> Result<(), AppError> {
-        self.last_activity.store(now_ms(), Ordering::Relaxed);
+        self.runtime.bump_activity();
 
         let is_first = {
             let mut state = self.state.write().await;
             let first = !state.has_messages;
             state.has_messages = true;
-            state.status = Some(ConversationStatus::Running);
             first
         };
+        self.runtime.transition_to(ConversationStatus::Running);
 
         if is_first {
             // First message: create new session via sessionsReset
             let payload = json!({
                 "type": "sessionsReset",
                 "data": {
-                    "conversationId": self.conversation_id,
+                    "conversationId": self.runtime.conversation_id(),
                     "message": data.content,
                     "msgId": data.msg_id,
                 }
@@ -338,7 +331,7 @@ impl crate::agent_task::IAgentTask for RemoteAgentManager {
 
     fn kill(&self, reason: Option<AgentKillReason>) -> Result<(), AppError> {
         info!(
-            conversation_id = %self.conversation_id,
+            conversation_id = %self.runtime.conversation_id(),
             ?reason,
             "Killing Remote agent"
         );
@@ -369,7 +362,7 @@ impl RemoteAgentManager {
         // WebSocket send for confirmation will be fully wired in Phase 6.15 integration
         // via a command channel that avoids &self lifetime issues in spawned tasks.
         warn!(
-            conversation_id = %self.conversation_id,
+            conversation_id = %self.runtime.conversation_id(),
             call_id = call_id,
             "Remote agent confirm: WebSocket send deferred to integration phase"
         );
