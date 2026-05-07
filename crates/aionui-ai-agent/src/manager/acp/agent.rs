@@ -1,22 +1,17 @@
 use crate::capability::cli_process::CliAgentProcess;
-use crate::capability::first_message_injector::{InjectionConfig, inject_first_message_prefix};
 use crate::capability::skill_manager::AcpSkillManager;
 use crate::factory::acp_assembler::AcpSessionParams;
 use crate::manager::acp::{AcpSession, AcpSessionEvent, PermissionRouter, PersistedSessionState};
 use crate::protocol::acp::AcpProtocol;
-use crate::protocol::events::{
-    AgentStreamEvent, AvailableCommandsEventData, ErrorEventData, FinishEventData, SessionAssignedEventData,
-    StartEventData,
-};
+use crate::protocol::events::{AgentStreamEvent, ErrorEventData, FinishEventData};
 use crate::registry::CatalogSender;
 use crate::shared_kernel::{ModeId, ModelId, SessionId as DomainSessionId};
 use crate::types::SendMessageData;
 use agent_client_protocol::schema::{
-    AgentCapabilities, AvailableCommand, CancelNotification, ContentBlock, LoadSessionRequest, PromptRequest,
-    SessionConfigOption, SessionId, SessionModeState, SessionModelState, SetSessionConfigOptionRequest,
-    SetSessionModeRequest, SetSessionModelRequest, UsageUpdate,
+    AgentCapabilities, AvailableCommand, CancelNotification, SessionConfigOption, SessionId, SessionModeState,
+    SessionModelState, SetSessionConfigOptionRequest, SetSessionModeRequest, SetSessionModelRequest, UsageUpdate,
 };
-use aionui_api_types::{AgentHandshake, AgentMetadata, SlashCommandItem};
+use aionui_api_types::{AgentHandshake, SlashCommandItem};
 use aionui_common::{
     AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, TimestampMs, normalize_keys_to_snake_case,
     now_ms,
@@ -29,61 +24,10 @@ use std::time::Duration;
 use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
 use tracing::{error, info};
 
+use super::mode_normalize::{agent_metadata_uses_claude_meta_resume, normalize_requested_mode};
+
 /// Grace period before force-killing an ACP process (ms).
 const ACP_KILL_GRACE_MS: u64 = 500;
-
-fn normalize_requested_mode(metadata: &AgentMetadata, mode: &str) -> String {
-    let trimmed = mode.trim();
-    if trimmed.is_empty() {
-        return String::new();
-    }
-
-    // AionUi persists the legacy aliases `yolo` / `yoloNoSandbox` while
-    // ACP backends expect their native mode id (e.g. `full-access` for
-    // Codex). Resolution is data-driven: the mapping lives on each
-    // catalog row's top-level `yolo_id` column. Backends without a
-    // `yolo_id` have no equivalent, so the alias passes through
-    // unchanged and `session/set_mode` gets the caller's original
-    // value.
-    if matches!(trimmed, "yolo" | "yoloNoSandbox")
-        && let Some(native) = metadata.yolo_id.as_deref()
-    {
-        return native.to_owned();
-    }
-
-    // Codex has legacy `default`/`autoEdit` aliases that map to its
-    // native `auto` mode. Keep the mapping data-driven by keying on the
-    // vendor backend label rather than re-introducing an AcpBackend
-    // enum variant.
-    if matches!(metadata.backend.as_deref(), Some("codex")) && matches!(trimmed, "default" | "autoEdit") {
-        return "auto".to_owned();
-    }
-
-    trimmed.to_owned()
-}
-
-/// Whether the agent described by `metadata` uses Claude-style meta resume
-/// (`session/new` with `_meta.claudeCode.options.resume`) instead of the
-/// generic `session/load` path.
-///
-/// Mirrors the AionUi frontend rule
-/// `useClaudeMetaResume = backend === 'claude' || !!caps?._meta?.claudeCode`.
-///
-/// Handshake blobs persisted by the backend are normalised to snake_case
-/// (see `sdk_to_snake_value`), so the lookup prefers `claude_code` and
-/// falls back to `claudeCode` for any blob that bypassed normalisation.
-fn agent_metadata_uses_claude_meta_resume(metadata: &AgentMetadata) -> bool {
-    if metadata.backend.as_deref() == Some("claude") {
-        return true;
-    }
-    metadata
-        .handshake
-        .agent_capabilities
-        .as_ref()
-        .and_then(|caps| caps.get("_meta"))
-        .and_then(|meta| meta.get("claude_code").or_else(|| meta.get("claudeCode")))
-        .is_some()
-}
 
 fn confirm_option_id(data: &Value) -> Option<String> {
     match data {
@@ -103,7 +47,7 @@ fn confirm_option_id(data: &Value) -> Option<String> {
 /// leaves the backend. All handshake columns, WebSocket payloads, and
 /// HTTP responses share this rule — callers should go through this
 /// helper instead of `serde_json::to_value` directly.
-fn sdk_to_snake_value<T: serde::Serialize>(value: &T) -> Option<Value> {
+pub(super) fn sdk_to_snake_value<T: serde::Serialize>(value: &T) -> Option<Value> {
     let mut v = serde_json::to_value(value).ok()?;
     normalize_keys_to_snake_case(&mut v);
     Some(v)
@@ -117,21 +61,21 @@ fn sdk_to_snake_value<T: serde::Serialize>(value: &T) -> Option<Value> {
 /// previous hand-crafted JSON-over-stdin/stdout approach.
 pub struct AcpAgentManager {
     /// Pre-computed, immutable session parameters assembled by the factory.
-    params: Arc<AcpSessionParams>,
+    pub(super) params: Arc<AcpSessionParams>,
     /// Session aggregate root — owns desired/observed/advertised state.
     /// Single in-memory source of truth for session lifecycle, modes,
     /// models, config, and all runtime data previously split across
     /// `AcpRuntimeSnapshot` and `AcpState`.
-    session: RwLock<AcpSession>,
+    pub(super) session: RwLock<AcpSession>,
     /// Standalone conversation status (not part of the session aggregate
     /// because it is a UI-level concern, not ACP protocol state).
     status: RwLock<Option<ConversationStatus>>,
     /// Underlying CLI process (for lifecycle management: kill, is_running).
     process: Arc<CliAgentProcess>,
     /// ACP protocol handle (SDK connection).
-    protocol: AcpProtocol,
+    pub(super) protocol: AcpProtocol,
     /// Typed event broadcast channel.
-    event_tx: broadcast::Sender<AgentStreamEvent>,
+    pub(super) event_tx: broadcast::Sender<AgentStreamEvent>,
     /// Timestamp of last activity (atomic for lock-free reads). Shared
     /// with the `PermissionRouter` so permission arrivals update the
     /// activity timestamp without reverse-referencing the manager.
@@ -142,10 +86,10 @@ pub struct AcpAgentManager {
     /// and back. Owns the receiver channel, pending map, and closing flag.
     permission_router: Arc<PermissionRouter>,
     /// Shared skill manager — used to discover skills for first-message injection.
-    skill_manager: Arc<AcpSkillManager>,
+    pub(super) skill_manager: Arc<AcpSkillManager>,
     /// Domain event sender — session aggregate events are forwarded here
     /// for the persistence consumer (`AcpSessionSyncService`).
-    domain_event_tx: mpsc::Sender<AcpSessionEvent>,
+    pub(super) domain_event_tx: mpsc::Sender<AcpSessionEvent>,
 }
 
 impl AcpAgentManager {
@@ -174,7 +118,7 @@ impl AcpAgentManager {
     /// reported as current, then issues the minimal set of SDK calls
     /// (set_mode, set_config_option) to bring the CLI into alignment.
     /// Best-effort: individual failures are logged but do not abort.
-    async fn reconcile_session(&self, session_id: &str) {
+    pub(super) async fn reconcile_session(&self, session_id: &str) {
         use crate::manager::acp::ReconcileAction;
 
         let actions = {
@@ -389,65 +333,9 @@ impl AcpAgentManager {
             .start(self.event_tx.clone(), Arc::clone(&self.last_activity));
     }
 
-    /// Start the session event tracker loop.
-    pub fn start_session_event_tracker(self: &Arc<Self>) {
-        let this = Arc::clone(self);
-        tokio::spawn(async move {
-            let mut rx = this.event_tx.subscribe();
-            loop {
-                match rx.recv().await {
-                    Ok(event) => {
-                        this.apply_event_to_session(&event).await;
-                    }
-                    Err(broadcast::error::RecvError::Closed) => break,
-                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                }
-            }
-        });
-    }
-
-    /// Mirror a stream event into the `AcpSession` aggregate's observed/advertised
-    /// layer and forward any resulting domain events to the persistence consumer.
-    async fn apply_event_to_session(&self, event: &AgentStreamEvent) {
-        match event {
-            AgentStreamEvent::AcpModeInfo(value) => {
-                if let Ok(update) = serde_json::from_value::<SessionModeState>(value.clone()) {
-                    let mut s = self.session.write().await;
-                    s.apply_advertised_modes(update);
-                    self.commit_session_changes(&mut s).await;
-                } else if let Some(current_id) = value.get("currentModeId").and_then(|v: &Value| v.as_str()) {
-                    let mut s = self.session.write().await;
-                    s.apply_observed_mode(ModeId::new(current_id));
-                    self.commit_session_changes(&mut s).await;
-                }
-            }
-            AgentStreamEvent::AcpModelInfo(value) => {
-                if let Ok(update) = serde_json::from_value::<SessionModelState>(value.clone()) {
-                    let mut s = self.session.write().await;
-                    s.apply_advertised_models(update);
-                    self.commit_session_changes(&mut s).await;
-                }
-            }
-            AgentStreamEvent::AcpConfigOption(value) => {
-                if let Ok(update) = serde_json::from_value::<Vec<SessionConfigOption>>(value.clone()) {
-                    let mut s = self.session.write().await;
-                    s.apply_advertised_config_options(update);
-                    self.commit_session_changes(&mut s).await;
-                }
-            }
-            AgentStreamEvent::AcpContextUsage(value) => {
-                if let Ok(update) = serde_json::from_value::<UsageUpdate>(value.clone()) {
-                    let mut s = self.session.write().await;
-                    s.apply_context_usage(update);
-                }
-            }
-            _ => {}
-        }
-    }
-
     /// Drain pending domain events from the session aggregate and
     /// forward them to the persistence consumer via the mpsc channel.
-    async fn commit_session_changes(&self, session: &mut AcpSession) {
+    pub(super) async fn commit_session_changes(&self, session: &mut AcpSession) {
         for event in session.drain_events() {
             let _ = self.domain_event_tx.send(event).await;
         }
@@ -520,274 +408,6 @@ impl AcpAgentManager {
         Ok(())
     }
 
-    /// Create a new ACP session and send the first prompt.
-    async fn session_new_and_prompt(&self, data: &SendMessageData) -> Result<(), AppError> {
-        // Emit Start event
-        let _ = self
-            .event_tx
-            .send(AgentStreamEvent::Start(StartEventData { session_id: None }));
-
-        let req = self.params.new_session_request();
-        tracing::info!(
-            has_team_mcp = self.params.config.team_mcp_stdio_config.is_some(),
-            has_guide_mcp = self.params.config.guide_mcp_config.is_some(),
-            guide_mcp_port = self.params.config.guide_mcp_config.as_ref().map(|c| c.port),
-            mcp_servers_count = req.mcp_servers.len(),
-            "session_new_and_prompt: sending session/new"
-        );
-        let session_response = self.protocol.new_session(req).await.map_err(AppError::from)?;
-
-        let sid = session_response.session_id.to_string();
-
-        // Populate the session aggregate from the session response
-        {
-            let mut session = self.session.write().await;
-            if let Some(models) = session_response.models {
-                session.apply_advertised_models(models);
-            }
-            if let Some(modes) = session_response.modes {
-                session.apply_advertised_modes(modes);
-            }
-            if let Some(config_options) = session_response.config_options {
-                session.apply_advertised_config_options(config_options);
-            }
-            session.assign_session_id(DomainSessionId::new(sid.clone()));
-            self.commit_session_changes(&mut session).await;
-        }
-        self.emit_snapshot_events().await;
-
-        // Notify subscribers (e.g. session_sync consumer) so the new id is
-        // persisted into `acp_session.session_id` — resume can then
-        // choose `session/load` instead of a fresh `session/new`.
-        let _ = self
-            .event_tx
-            .send(AgentStreamEvent::SessionAssigned(SessionAssignedEventData {
-                session_id: sid.clone(),
-            }));
-
-        self.reconcile_session(&sid).await;
-
-        let injected_content = inject_first_message_prefix(
-            &data.content,
-            &self.skill_manager,
-            InjectionConfig {
-                preset_context: self.params.preset_context.as_deref(),
-                skills: &self.params.config.skills,
-                native_skill_support: self.native_skill_support(),
-                custom_workspace: self.params.workspace.is_custom,
-            },
-        )
-        .await;
-
-        // Send the prompt
-        self.protocol
-            .prompt(PromptRequest::new(
-                SessionId::new(sid.clone()),
-                vec![ContentBlock::from(injected_content)],
-            ))
-            .await
-            .map_err(AppError::from)?;
-
-        // Emit Finish event when prompt completes
-        let _ = self
-            .event_tx
-            .send(AgentStreamEvent::Finish(FinishEventData { session_id: Some(sid) }));
-
-        Ok(())
-    }
-
-    /// Resume an existing session and send a message.
-    ///
-    /// Assumes `preload_snapshot` has already been called by the
-    /// caller (conversation service) on resume paths — the session
-    /// aggregate may therefore already carry `current_mode_id` / `current_model_id`
-    /// from `acp_session.session_config.runtime`. When the CLI's
-    /// `session/load` response arrives, we merge it in but keep the
-    /// preloaded `current_*` values because they reflect the user's
-    /// last explicit choice; the CLI's own `current_*` is only used
-    /// when the aggregate has nothing yet.
-    async fn session_resume_and_send(&self, data: &SendMessageData, session_id: Option<&str>) -> Result<(), AppError> {
-        if self.uses_claude_meta_resume() {
-            // Claude backend: use session/new with _meta.claudeCode.options.resume
-            // instead of session/load. This matches AionUi frontend behavior and
-            // ensures mcpServers are re-injected on resume.
-            if let Some(sid) = session_id {
-                let mut meta = serde_json::Map::new();
-                let mut claude_code = serde_json::Map::new();
-                let mut options = serde_json::Map::new();
-                options.insert("resume".into(), Value::String(sid.to_owned()));
-                claude_code.insert("options".into(), Value::Object(options));
-                meta.insert("claudeCode".into(), Value::Object(claude_code));
-
-                let req = self.params.new_session_request().meta(meta);
-
-                info!(
-                    session_id = %sid,
-                    has_team_mcp = self.params.config.team_mcp_stdio_config.is_some(),
-                    has_guide_mcp = self.params.config.guide_mcp_config.is_some(),
-                    guide_mcp_port = self.params.config.guide_mcp_config.as_ref().map(|c| c.port),
-                    mcp_servers_count = req.mcp_servers.len(),
-                    "session_resume: using session/new with claudeCode.options.resume"
-                );
-
-                let session_response = self.protocol.new_session(req).await.map_err(AppError::from)?;
-
-                let new_sid = session_response.session_id.to_string();
-                {
-                    let mut session = self.session.write().await;
-                    if let Some(models) = session_response.models {
-                        session.apply_advertised_models(models);
-                    }
-                    if let Some(modes) = session_response.modes {
-                        session.apply_advertised_modes(modes);
-                    }
-                    if let Some(config_options) = session_response.config_options {
-                        session.apply_advertised_config_options(config_options);
-                    }
-                    session.assign_session_id(DomainSessionId::new(new_sid.clone()));
-                    self.commit_session_changes(&mut session).await;
-                }
-                self.emit_snapshot_events().await;
-
-                self.reconcile_session(&new_sid).await;
-
-                return self.prompt_existing_session(data, Some(&new_sid)).await;
-            }
-        } else if self.supports_session_load()
-            && let Some(sid) = session_id
-        {
-            // Non-Claude backends (e.g. Codex): use session/load
-            let (preloaded_mode, preloaded_model) = {
-                let session = self.session.read().await;
-                (
-                    session.modes().map(|m| m.current_mode_id.to_string()),
-                    session.model_info().map(|m| m.current_model_id.to_string()),
-                )
-            };
-
-            let mut load_req = LoadSessionRequest::new(SessionId::new(sid), &self.params.workspace.path);
-            if !self.params.mcp_servers.is_empty() {
-                load_req = load_req.mcp_servers(self.params.mcp_servers.clone());
-            }
-            let resp = self.protocol.load_session(load_req).await.map_err(AppError::from)?;
-
-            let mut session = self.session.write().await;
-            if let Some(mut models) = resp.models {
-                if let Some(db_current) = preloaded_model {
-                    models.current_model_id = db_current.into();
-                }
-                session.apply_advertised_models(models);
-            }
-            if let Some(mut modes) = resp.modes {
-                if let Some(db_current) = preloaded_mode {
-                    modes.current_mode_id = db_current.into();
-                }
-                session.apply_advertised_modes(modes);
-            }
-            if let Some(config_options) = resp.config_options {
-                session.apply_advertised_config_options(config_options);
-            }
-            drop(session);
-        }
-
-        self.emit_snapshot_events().await;
-
-        // Seed the session aggregate and reconcile.
-        if let Some(sid) = session_id {
-            {
-                let mut session = self.session.write().await;
-                session.assign_session_id(DomainSessionId::new(sid));
-                self.commit_session_changes(&mut session).await;
-            }
-            self.reconcile_session(sid).await;
-        }
-
-        self.prompt_existing_session(data, session_id).await
-    }
-
-    /// Send a prompt to an already-established session.
-    async fn prompt_existing_session(&self, data: &SendMessageData, session_id: Option<&str>) -> Result<(), AppError> {
-        let sid = session_id.ok_or_else(|| AppError::Internal("Cannot prompt: no session ID available".into()))?;
-
-        // Emit Start event
-        let _ = self.event_tx.send(AgentStreamEvent::Start(StartEventData {
-            session_id: Some(sid.to_owned()),
-        }));
-
-        self.protocol
-            .prompt(PromptRequest::new(
-                SessionId::new(sid),
-                vec![ContentBlock::from(data.content.clone())],
-            ))
-            .await
-            .map_err(AppError::from)?;
-
-        // Emit Finish event
-        let _ = self.event_tx.send(AgentStreamEvent::Finish(FinishEventData {
-            session_id: Some(sid.to_owned()),
-        }));
-
-        Ok(())
-    }
-
-    /// Emit model/mode/config events from the session aggregate so the frontend
-    /// receives the initial session state via WebSocket immediately after
-    /// session creation or load.
-    async fn emit_snapshot_events(&self) {
-        use aionui_api_types::{ModelInfoEntry, ModelInfoPayload};
-
-        let session = self.session.read().await;
-        if let Some(models) = session.model_info() {
-            let current_id = models.current_model_id.to_string();
-            let available: Vec<ModelInfoEntry> = models
-                .available_models
-                .iter()
-                .map(|am| ModelInfoEntry {
-                    id: am.model_id.to_string(),
-                    label: am.name.clone(),
-                })
-                .collect();
-            let current_label = available
-                .iter()
-                .find(|e| e.id == current_id)
-                .map(|e| e.label.clone())
-                .unwrap_or_else(|| current_id.clone());
-            let payload = ModelInfoPayload {
-                current_model_id: Some(current_id),
-                current_model_label: Some(current_label),
-                available_models: available,
-            };
-            // ModelInfoPayload is our own struct but go through the
-            // normaliser for consistency with sibling events.
-            if let Some(v) = sdk_to_snake_value(&payload) {
-                let _ = self.event_tx.send(AgentStreamEvent::AcpModelInfo(v));
-            }
-        }
-        if let Some(modes) = session.modes()
-            && let Some(v) = sdk_to_snake_value(&modes)
-        {
-            let _ = self.event_tx.send(AgentStreamEvent::AcpModeInfo(v));
-        }
-        if let Some(config_options) = session.config_options()
-            && let Some(v) = sdk_to_snake_value(&serde_json::json!({
-                "config_options": config_options,
-            }))
-        {
-            // Wrap in `{config_options: [...]}` to match the SDK
-            // `ConfigOptionUpdate` shape used by the streaming path —
-            // handshake blobs and downstream consumers see a uniform
-            // structure regardless of origin.
-            let _ = self.event_tx.send(AgentStreamEvent::AcpConfigOption(v));
-        }
-        if let Some(cmds) = session.available_commands() {
-            let _ = self
-                .event_tx
-                .send(AgentStreamEvent::AvailableCommands(AvailableCommandsEventData {
-                    commands: cmds.to_vec(),
-                }));
-        }
-    }
-
     /// Return available slash commands from the session aggregate.
     pub async fn load_slash_commands(&self) -> Result<Vec<SlashCommandItem>, AppError> {
         let session = self.session.read().await;
@@ -850,11 +470,11 @@ impl AcpAgentManager {
     /// Whether this agent uses Claude-style meta resume (session/new with
     /// `_meta.claudeCode.options.resume`) instead of session/load.
     /// Matches AionUi frontend: `useClaudeMetaResume = backend === 'claude' || !!caps?._meta?.claudeCode`
-    fn uses_claude_meta_resume(&self) -> bool {
+    pub(super) fn uses_claude_meta_resume(&self) -> bool {
         agent_metadata_uses_claude_meta_resume(&self.params.metadata)
     }
 
-    fn supports_session_load(&self) -> bool {
+    pub(super) fn supports_session_load(&self) -> bool {
         self.params
             .metadata
             .handshake
@@ -865,7 +485,7 @@ impl AcpAgentManager {
             .unwrap_or(false)
     }
 
-    fn native_skill_support(&self) -> bool {
+    pub(super) fn native_skill_support(&self) -> bool {
         self.params
             .metadata
             .native_skills_dirs
@@ -1070,166 +690,5 @@ mod tests {
             confirm_option_id(&json!({ "value": "allow_always" })).as_deref(),
             Some("allow_always")
         );
-    }
-
-    fn metadata_with_yolo_id(yolo_id: Option<&str>) -> AgentMetadata {
-        use aionui_api_types::{AgentSource, AgentSourceInfo, BehaviorPolicy};
-        AgentMetadata {
-            id: "test".into(),
-            icon: None,
-            name: "Test".into(),
-            name_i18n: None,
-            description: None,
-            description_i18n: None,
-            backend: None,
-            agent_type: AgentType::Acp,
-            agent_source: AgentSource::Builtin,
-            agent_source_info: AgentSourceInfo::default(),
-            enabled: true,
-            available: true,
-            command: None,
-            resolved_command: None,
-            args: vec![],
-            env: vec![],
-            native_skills_dirs: None,
-            behavior_policy: BehaviorPolicy::default(),
-            yolo_id: yolo_id.map(ToOwned::to_owned),
-            sort_order: 3130,
-            handshake: AgentHandshake::default(),
-        }
-    }
-
-    #[test]
-    fn normalize_requested_mode_rewrites_yolo_when_behavior_policy_maps_it() {
-        let meta = metadata_with_yolo_id(Some("full-access"));
-        assert_eq!(normalize_requested_mode(&meta, "yolo"), "full-access");
-        assert_eq!(normalize_requested_mode(&meta, "yoloNoSandbox"), "full-access");
-    }
-
-    #[test]
-    fn normalize_requested_mode_passes_through_when_no_yolo_id() {
-        let meta = metadata_with_yolo_id(None);
-        // No mapping configured — aliases flow through unchanged.
-        assert_eq!(normalize_requested_mode(&meta, "yolo"), "yolo");
-        assert_eq!(normalize_requested_mode(&meta, "yoloNoSandbox"), "yoloNoSandbox");
-    }
-
-    #[test]
-    fn normalize_requested_mode_passes_through_non_yolo_modes() {
-        let meta = metadata_with_yolo_id(Some("full-access"));
-        assert_eq!(normalize_requested_mode(&meta, "default"), "default");
-        assert_eq!(normalize_requested_mode(&meta, "read-only"), "read-only");
-        assert_eq!(
-            normalize_requested_mode(&meta, "bypassPermissions"),
-            "bypassPermissions"
-        );
-    }
-
-    /// Vendor-specific yolo rewrites are entirely data-driven by
-    /// `metadata.yolo_id`. Rebuild fixtures with the seed values
-    /// `006_agent_metadata.sql` would hydrate, then assert both yolo
-    /// aliases hit the native mode id for each vendor.
-    #[test]
-    fn normalize_requested_mode_rewrites_yolo_for_builtin_vendors() {
-        // Claude / Codebuddy → bypassPermissions.
-        let claude_like = metadata_with_yolo_id(Some("bypassPermissions"));
-        assert_eq!(normalize_requested_mode(&claude_like, "yolo"), "bypassPermissions");
-        assert_eq!(
-            normalize_requested_mode(&claude_like, "yoloNoSandbox"),
-            "bypassPermissions"
-        );
-        // Opencode → build.
-        let opencode_like = metadata_with_yolo_id(Some("build"));
-        assert_eq!(normalize_requested_mode(&opencode_like, "yolo"), "build");
-        // Cursor → agent.
-        let cursor_like = metadata_with_yolo_id(Some("agent"));
-        assert_eq!(normalize_requested_mode(&cursor_like, "yolo"), "agent");
-        // When a row has no yolo_id the alias flows through unchanged.
-        let gemini_like = metadata_with_yolo_id(None);
-        assert_eq!(normalize_requested_mode(&gemini_like, "yolo"), "yolo");
-    }
-
-    /// Codex's legacy `default` / `autoEdit` aliases should rewrite to
-    /// its native `auto` mode when the row's backend label is "codex".
-    /// Other backends must leave `default` / `autoEdit` untouched.
-    #[test]
-    fn normalize_requested_mode_rewrites_codex_default_and_auto_edit() {
-        let mut codex_meta = metadata_with_yolo_id(Some("full-access"));
-        codex_meta.backend = Some("codex".into());
-        assert_eq!(normalize_requested_mode(&codex_meta, "default"), "auto");
-        assert_eq!(normalize_requested_mode(&codex_meta, "autoEdit"), "auto");
-
-        let other = metadata_with_yolo_id(None);
-        assert_eq!(normalize_requested_mode(&other, "default"), "default");
-        assert_eq!(normalize_requested_mode(&other, "autoEdit"), "autoEdit");
-    }
-
-    /// Claude backend must take the `session/new` + `_meta.claudeCode.options.resume`
-    /// path so `mcpServers` are re-injected on resume. `backend == "claude"`
-    /// alone is enough — we don't need the handshake to advertise `_meta`.
-    #[test]
-    fn uses_claude_meta_resume_true_for_claude_backend() {
-        let mut meta = metadata_with_yolo_id(None);
-        meta.backend = Some("claude".into());
-        assert!(agent_metadata_uses_claude_meta_resume(&meta));
-    }
-
-    /// A non-Claude-labelled backend that still advertises
-    /// `agent_capabilities._meta.claudeCode` (snake_case, as persisted by
-    /// `sdk_to_snake_value`) must also follow the Claude resume path —
-    /// this matches the frontend's `!!caps?._meta?.claudeCode` check.
-    #[test]
-    fn uses_claude_meta_resume_true_for_meta_claude_code() {
-        let mut meta = metadata_with_yolo_id(None);
-        meta.backend = Some("custom-claude-wrapper".into());
-        meta.handshake.agent_capabilities = Some(json!({
-            "_meta": {
-                "claude_code": { "some": "flag" }
-            }
-        }));
-        assert!(agent_metadata_uses_claude_meta_resume(&meta));
-
-        // A handshake that bypassed snake_case normalisation (camelCase
-        // `claudeCode`) must still be recognised.
-        let mut camel_meta = metadata_with_yolo_id(None);
-        camel_meta.backend = Some("custom-claude-wrapper".into());
-        camel_meta.handshake.agent_capabilities = Some(json!({
-            "_meta": {
-                "claudeCode": { "some": "flag" }
-            }
-        }));
-        assert!(agent_metadata_uses_claude_meta_resume(&camel_meta));
-    }
-
-    /// Codex (and any non-Claude backend without the `_meta.claudeCode`
-    /// marker) must fall through to the `session/load` branch.
-    #[test]
-    fn uses_claude_meta_resume_false_for_codex() {
-        let mut meta = metadata_with_yolo_id(Some("full-access"));
-        meta.backend = Some("codex".into());
-        assert!(!agent_metadata_uses_claude_meta_resume(&meta));
-
-        // Codex with unrelated capability keys must still be false.
-        meta.handshake.agent_capabilities = Some(json!({
-            "load_session": true,
-            "_meta": { "codex": { "whatever": true } }
-        }));
-        assert!(!agent_metadata_uses_claude_meta_resume(&meta));
-    }
-
-    /// Metadata with no `backend` label and no handshake capabilities
-    /// must not opt into the Claude resume path.
-    #[test]
-    fn uses_claude_meta_resume_false_for_empty() {
-        let meta = metadata_with_yolo_id(None);
-        assert!(meta.backend.is_none());
-        assert!(meta.handshake.agent_capabilities.is_none());
-        assert!(!agent_metadata_uses_claude_meta_resume(&meta));
-    }
-
-    #[test]
-    fn normalize_requested_mode_trims_and_returns_empty_for_blank() {
-        let meta = metadata_with_yolo_id(Some("full-access"));
-        assert_eq!(normalize_requested_mode(&meta, "   "), "");
     }
 }
