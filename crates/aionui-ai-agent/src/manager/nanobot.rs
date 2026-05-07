@@ -1,14 +1,14 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
-use aionui_common::{AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, TimestampMs, now_ms};
+use aionui_common::{AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, TimestampMs};
 use serde_json::{Value, json};
 use tokio::sync::{Mutex, RwLock, broadcast};
 use tracing::{debug, error, info, warn};
 
 use aionui_common::CommandSpec;
 
+use crate::agent_runtime::AgentRuntime;
 use crate::capability::cli_process::CliAgentProcess;
 use crate::protocol::events::AgentStreamEvent;
 use crate::types::SendMessageData;
@@ -19,7 +19,6 @@ const NANOBOT_KILL_GRACE_MS: u64 = 500;
 
 /// Internal mutable state for the Nanobot agent.
 struct NanobotState {
-    status: Option<ConversationStatus>,
     has_messages: bool,
 }
 
@@ -31,12 +30,9 @@ struct NanobotState {
 /// - No confirmation system
 /// - Single response stream only
 pub struct NanobotAgentManager {
-    conversation_id: String,
-    workspace: String,
+    runtime: AgentRuntime,
     process: Arc<CliAgentProcess>,
-    event_tx: broadcast::Sender<AgentStreamEvent>,
     state: RwLock<NanobotState>,
-    last_activity: AtomicI64,
     raw_rx: Mutex<Option<broadcast::Receiver<Value>>>,
 }
 
@@ -49,18 +45,12 @@ impl NanobotAgentManager {
         let raw_rx = process
             .take_initial_receiver()
             .expect("Initial receiver should be available immediately after spawn");
-        let (event_tx, _) = broadcast::channel(256);
+        let runtime = AgentRuntime::new(conversation_id, workspace, 256);
 
         Ok(Self {
-            conversation_id,
-            workspace,
+            runtime,
             process: Arc::new(process),
-            event_tx,
-            state: RwLock::new(NanobotState {
-                status: None,
-                has_messages: false,
-            }),
-            last_activity: AtomicI64::new(now_ms()),
+            state: RwLock::new(NanobotState { has_messages: false }),
             raw_rx: Mutex::new(Some(raw_rx)),
         })
     }
@@ -89,7 +79,7 @@ impl NanobotAgentManager {
                 Some(rx) => rx,
                 None => {
                     warn!(
-                        conversation_id = %self.conversation_id,
+                        conversation_id = %self.runtime.conversation_id(),
                         "Nanobot event relay already started"
                     );
                     return;
@@ -100,19 +90,19 @@ impl NanobotAgentManager {
         loop {
             match raw_rx.recv().await {
                 Ok(raw_json) => {
-                    self.last_activity.store(now_ms(), Ordering::Relaxed);
+                    self.runtime.bump_activity();
                     self.handle_raw_event(raw_json).await;
                 }
                 Err(broadcast::error::RecvError::Lagged(n)) => {
                     warn!(
-                        conversation_id = %self.conversation_id,
+                        conversation_id = %self.runtime.conversation_id(),
                         lagged = n,
                         "Nanobot event relay lagged"
                     );
                 }
                 Err(broadcast::error::RecvError::Closed) => {
                     debug!(
-                        conversation_id = %self.conversation_id,
+                        conversation_id = %self.runtime.conversation_id(),
                         "Nanobot CLI event channel closed"
                     );
                     break;
@@ -120,9 +110,10 @@ impl NanobotAgentManager {
             }
         }
 
-        let mut state = self.state.write().await;
-        if state.status == Some(ConversationStatus::Running) {
-            state.status = Some(ConversationStatus::Finished);
+        // Channel closed without a Finish/Error event from the subprocess;
+        // ensure the status reaches a terminal state.
+        if self.runtime.status() == Some(ConversationStatus::Running) {
+            self.runtime.transition_to(ConversationStatus::Finished);
         }
     }
 
@@ -131,26 +122,24 @@ impl NanobotAgentManager {
             Ok(event) => event,
             Err(_) => {
                 debug!(
-                    conversation_id = %self.conversation_id,
+                    conversation_id = %self.runtime.conversation_id(),
                     "Unrecognized Nanobot event, skipping"
                 );
                 return;
             }
         };
 
-        self.update_state_from_event(&stream_event).await;
-        let _ = self.event_tx.send(stream_event);
+        self.update_state_from_event(&stream_event);
+        self.runtime.emit(stream_event);
     }
 
-    async fn update_state_from_event(&self, event: &AgentStreamEvent) {
+    fn update_state_from_event(&self, event: &AgentStreamEvent) {
         match event {
             AgentStreamEvent::Start(_) => {
-                let mut state = self.state.write().await;
-                state.status = Some(ConversationStatus::Running);
+                self.runtime.transition_to(ConversationStatus::Running);
             }
             AgentStreamEvent::Finish(_) | AgentStreamEvent::Error(_) => {
-                let mut state = self.state.write().await;
-                state.status = Some(ConversationStatus::Finished);
+                self.runtime.transition_to(ConversationStatus::Finished);
             }
             _ => {}
         }
@@ -164,33 +153,33 @@ impl crate::agent_task::IAgentTask for NanobotAgentManager {
     }
 
     fn conversation_id(&self) -> &str {
-        &self.conversation_id
+        self.runtime.conversation_id()
     }
 
     fn workspace(&self) -> &str {
-        &self.workspace
+        self.runtime.workspace()
     }
 
     fn status(&self) -> Option<ConversationStatus> {
-        self.state.try_read().ok().and_then(|g| g.status)
+        self.runtime.status()
     }
 
     fn last_activity_at(&self) -> TimestampMs {
-        self.last_activity.load(Ordering::Relaxed)
+        self.runtime.last_activity_at()
     }
 
     fn subscribe(&self) -> broadcast::Receiver<AgentStreamEvent> {
-        self.event_tx.subscribe()
+        self.runtime.subscribe()
     }
 
     async fn send_message(&self, data: SendMessageData) -> Result<(), AppError> {
-        self.last_activity.store(now_ms(), Ordering::Relaxed);
+        self.runtime.bump_activity();
 
         {
             let mut state = self.state.write().await;
             state.has_messages = true;
-            state.status = Some(ConversationStatus::Running);
         }
+        self.runtime.transition_to(ConversationStatus::Running);
 
         // Nanobot uses fire-and-forget: send the message, CLI blocks until complete
         let payload = json!({
@@ -211,7 +200,7 @@ impl crate::agent_task::IAgentTask for NanobotAgentManager {
 
     fn kill(&self, reason: Option<AgentKillReason>) -> Result<(), AppError> {
         info!(
-            conversation_id = %self.conversation_id,
+            conversation_id = %self.runtime.conversation_id(),
             ?reason,
             "Killing Nanobot agent"
         );
