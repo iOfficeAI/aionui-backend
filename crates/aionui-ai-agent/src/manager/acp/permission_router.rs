@@ -1,11 +1,11 @@
+use crate::agent_runtime::AgentRuntime;
 use crate::protocol::acp::{PermissionDecision, PermissionRequest};
 use crate::protocol::events::{AgentStreamEvent, permission_request_to_event_data};
-use aionui_common::now_ms;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
-use tokio::sync::{Mutex, broadcast, mpsc, oneshot};
+use std::sync::atomic::{AtomicBool, Ordering};
+use tokio::sync::{Mutex, mpsc, oneshot};
 use tracing::debug;
 
 /// MCP tool prefixes that are auto-approved without user permission.
@@ -41,16 +41,17 @@ impl PermissionRouter {
     /// layer, converts them to `Permission` events, and waits for user
     /// responses routed through the `confirm()` method.
     ///
-    /// `last_activity` is shared with the parent manager so permission
-    /// arrivals count as activity (preventing idle timeouts).
-    pub fn start(self: &Arc<Self>, event_tx: broadcast::Sender<AgentStreamEvent>, last_activity: Arc<AtomicI64>) {
+    /// `runtime` is shared with the parent manager so permission
+    /// arrivals count as activity (preventing idle timeouts) via
+    /// `runtime.bump_activity()`.
+    pub fn start(self: &Arc<Self>, runtime: AgentRuntime) {
         let this = Arc::clone(self);
 
         tokio::spawn(async move {
             let mut rx = this.permission_rx.lock().await;
 
             while let Some(perm_req) = rx.recv().await {
-                last_activity.store(now_ms(), Ordering::Relaxed);
+                runtime.bump_activity();
 
                 let call_id = perm_req.request.tool_call.tool_call_id.to_string();
 
@@ -70,7 +71,8 @@ impl PermissionRouter {
 
                 let permission_event = permission_request_to_event_data(&perm_req.request);
 
-                if event_tx
+                if runtime
+                    .event_sender()
                     .send(AgentStreamEvent::AcpPermission(permission_event))
                     .is_err()
                     && let Some(response_tx) = this.pending_permissions.lock().unwrap().remove(&call_id)

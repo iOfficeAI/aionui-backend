@@ -1,9 +1,10 @@
+use crate::agent_runtime::AgentRuntime;
 use crate::capability::cli_process::CliAgentProcess;
 use crate::capability::skill_manager::AcpSkillManager;
 use crate::factory::acp_assembler::AcpSessionParams;
 use crate::manager::acp::{AcpSession, AcpSessionEvent, PermissionRouter, PersistedSessionState};
 use crate::protocol::acp::AcpProtocol;
-use crate::protocol::events::{AgentStreamEvent, ErrorEventData, FinishEventData};
+use crate::protocol::events::AgentStreamEvent;
 use crate::registry::CatalogSender;
 use crate::shared_kernel::{ModeId, ModelId, SessionId as DomainSessionId};
 use crate::types::SendMessageData;
@@ -15,12 +16,10 @@ use agent_client_protocol::schema::{
 use aionui_api_types::{AgentHandshake, SlashCommandItem};
 use aionui_common::{
     AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, TimestampMs, normalize_keys_to_snake_case,
-    now_ms,
 };
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
 use tracing::{error, info};
@@ -68,19 +67,19 @@ pub struct AcpAgentManager {
     /// models, config, and all runtime data previously split across
     /// `AcpRuntimeSnapshot` and `AcpState`.
     pub(super) session: RwLock<AcpSession>,
-    /// Standalone conversation status (not part of the session aggregate
-    /// because it is a UI-level concern, not ACP protocol state).
-    status: RwLock<Option<ConversationStatus>>,
+    /// Shared runtime holding status, last_activity, and the event
+    /// broadcast channel. `pub(super)` so sibling modules (session_flow,
+    /// event_tracker) can call `self.runtime.emit(...)` directly.
+    ///
+    /// Lifecycle: written by `IAgentTask::send_message` (Running →
+    /// Finished/Error), `stop` (emit_finish), and `kill` (emit_error).
+    /// `emit_finish` / `emit_error` are idempotent in the Finished
+    /// absorbing state — multiple calls are safe.
+    pub(super) runtime: AgentRuntime,
     /// Underlying CLI process (for lifecycle management: kill, is_running).
     process: Arc<CliAgentProcess>,
     /// ACP protocol handle (SDK connection).
     pub(super) protocol: AcpProtocol,
-    /// Typed event broadcast channel.
-    pub(super) event_tx: broadcast::Sender<AgentStreamEvent>,
-    /// Timestamp of last activity (atomic for lock-free reads). Shared
-    /// with the `PermissionRouter` so permission arrivals update the
-    /// activity timestamp without reverse-referencing the manager.
-    last_activity: Arc<AtomicI64>,
     /// Mutex for serializing session operations (new/load/send).
     session_lock: Mutex<()>,
     /// Routes permission requests from the protocol layer to the user
@@ -270,7 +269,7 @@ impl AcpAgentManager {
             .await
             .ok_or_else(|| AppError::Internal("Failed to take stdio from CLI process".into()))?;
 
-        let (event_tx, _) = broadcast::channel(256);
+        let runtime = AgentRuntime::new(params.conversation_id.clone(), params.workspace.path.clone(), 256);
         let (permission_tx, permission_rx) = mpsc::channel(32);
         let (domain_event_tx, domain_event_rx) = mpsc::channel(256);
         // Dedicated channel for raw SDK SessionNotifications → session tracker.
@@ -279,7 +278,7 @@ impl AcpAgentManager {
         let (notification_tx, notification_rx) = mpsc::channel::<SessionNotification>(256);
 
         // Connect via ACP SDK — executes initialize handshake
-        let protocol = AcpProtocol::connect(stdin, stdout, event_tx.clone(), permission_tx, notification_tx)
+        let protocol = AcpProtocol::connect(stdin, stdout, runtime.event_sender(), permission_tx, notification_tx)
             .await
             .map_err(|e| {
                 error!(
@@ -324,11 +323,9 @@ impl AcpAgentManager {
         let manager = Self {
             params,
             session: RwLock::new(session),
-            status: RwLock::new(None),
+            runtime,
             process: Arc::new(process),
             protocol,
-            event_tx,
-            last_activity: Arc::new(AtomicI64::new(now_ms())),
             session_lock: Mutex::new(()),
             permission_router,
             skill_manager,
@@ -341,8 +338,7 @@ impl AcpAgentManager {
     /// Start the permission handler loop. Must be called after the manager
     /// is wrapped in Arc. Delegates to `PermissionRouter::start`.
     pub fn start_permission_handler(self: &Arc<Self>) {
-        self.permission_router
-            .start(self.event_tx.clone(), Arc::clone(&self.last_activity));
+        self.permission_router.start(self.runtime.clone());
     }
 
     /// Drain pending domain events from the session aggregate and
@@ -415,7 +411,7 @@ impl AcpAgentManager {
             s.mark_opened();
             self.commit_session_changes(&mut s).await;
         }
-        *self.status.write().await = Some(ConversationStatus::Running);
+        self.runtime.transition_to(ConversationStatus::Running);
 
         Ok(())
     }
@@ -531,34 +527,30 @@ impl crate::agent_task::IAgentTask for AcpAgentManager {
     }
 
     fn status(&self) -> Option<ConversationStatus> {
-        // Use try_read to avoid blocking; fall back to None if locked
-        match self.status.try_read() {
-            Ok(guard) => *guard,
-            Err(_) => None,
-        }
+        self.runtime.status()
     }
 
     fn last_activity_at(&self) -> TimestampMs {
-        self.last_activity.load(Ordering::Relaxed)
+        self.runtime.last_activity_at()
     }
 
     fn subscribe(&self) -> broadcast::Receiver<AgentStreamEvent> {
-        self.event_tx.subscribe()
+        self.runtime.subscribe()
     }
 
     async fn send_message(&self, data: SendMessageData) -> Result<(), AppError> {
-        self.last_activity.store(now_ms(), Ordering::Relaxed);
+        self.runtime.bump_activity();
 
         let result = self.ensure_session_and_send(&data).await;
         match &result {
             Ok(()) => {
-                let _ = self.event_tx.send(AgentStreamEvent::Finish(FinishEventData::default()));
+                // ACP pattern: Finish with session_id = None (default).
+                // If ACP later wants to include the session_id in Finish,
+                // read it from `self.session.read().await.session_id()`.
+                self.runtime.emit_finish(None);
             }
             Err(err) => {
-                let _ = self.event_tx.send(AgentStreamEvent::Error(ErrorEventData {
-                    message: err.to_string(),
-                    code: None,
-                }));
+                self.runtime.emit_error(err.to_string());
             }
         }
         result
@@ -571,6 +563,10 @@ impl crate::agent_task::IAgentTask for AcpAgentManager {
         }
         self.permission_router.cancel_all();
 
+        // m1 fix: mark task as Finished on explicit stop, so external
+        // status() observers see a consistent terminal state. Idempotent —
+        // if send_message already emitted Finish, this is a no-op.
+        self.runtime.emit_finish(None);
         Ok(())
     }
 
@@ -601,6 +597,16 @@ impl crate::agent_task::IAgentTask for AcpAgentManager {
         });
 
         self.permission_router.cancel_all();
+
+        // m1 fix: emit error with the kill reason so the status goes to
+        // Finished and subscribers see a terminal event. Idempotent.
+        let message = match reason {
+            Some(AgentKillReason::IdleTimeout) => "Agent killed: idle timeout".to_owned(),
+            Some(AgentKillReason::TeamMcpRebuild) => "Agent killed: team MCP rebuild".to_owned(),
+            Some(AgentKillReason::TeamDeleted) => "Agent killed: team deleted".to_owned(),
+            None => "Agent killed".to_owned(),
+        };
+        self.runtime.emit_error(message);
 
         Ok(())
     }

@@ -16,9 +16,8 @@ impl AcpAgentManager {
     /// Create a new ACP session and send the first prompt.
     pub(super) async fn session_new_and_prompt(&self, data: &SendMessageData) -> Result<(), AppError> {
         // Emit Start event
-        let _ = self
-            .event_tx
-            .send(AgentStreamEvent::Start(StartEventData { session_id: None }));
+        self.runtime
+            .emit(AgentStreamEvent::Start(StartEventData { session_id: None }));
 
         let req = self.params.new_session_request();
         tracing::info!(
@@ -52,9 +51,8 @@ impl AcpAgentManager {
         // Notify subscribers (e.g. session_sync consumer) so the new id is
         // persisted into `acp_session.session_id` — resume can then
         // choose `session/load` instead of a fresh `session/new`.
-        let _ = self
-            .event_tx
-            .send(AgentStreamEvent::SessionAssigned(SessionAssignedEventData {
+        self.runtime
+            .emit(AgentStreamEvent::SessionAssigned(SessionAssignedEventData {
                 session_id: sid.clone(),
             }));
 
@@ -82,9 +80,8 @@ impl AcpAgentManager {
             .map_err(AppError::from)?;
 
         // Emit Finish event when prompt completes
-        let _ = self
-            .event_tx
-            .send(AgentStreamEvent::Finish(FinishEventData { session_id: Some(sid) }));
+        self.runtime
+            .emit(AgentStreamEvent::Finish(FinishEventData { session_id: Some(sid) }));
 
         Ok(())
     }
@@ -211,7 +208,7 @@ impl AcpAgentManager {
         let sid = session_id.ok_or_else(|| AppError::Internal("Cannot prompt: no session ID available".into()))?;
 
         // Emit Start event
-        let _ = self.event_tx.send(AgentStreamEvent::Start(StartEventData {
+        self.runtime.emit(AgentStreamEvent::Start(StartEventData {
             session_id: Some(sid.to_owned()),
         }));
 
@@ -224,7 +221,7 @@ impl AcpAgentManager {
             .map_err(AppError::from)?;
 
         // Emit Finish event
-        let _ = self.event_tx.send(AgentStreamEvent::Finish(FinishEventData {
+        self.runtime.emit(AgentStreamEvent::Finish(FinishEventData {
             session_id: Some(sid.to_owned()),
         }));
 
@@ -261,13 +258,13 @@ impl AcpAgentManager {
             // ModelInfoPayload is our own struct but go through the
             // normaliser for consistency with sibling events.
             if let Some(v) = sdk_to_snake_value(&payload) {
-                let _ = self.event_tx.send(AgentStreamEvent::AcpModelInfo(v));
+                self.runtime.emit(AgentStreamEvent::AcpModelInfo(v));
             }
         }
         if let Some(modes) = session.modes()
             && let Some(v) = sdk_to_snake_value(&modes)
         {
-            let _ = self.event_tx.send(AgentStreamEvent::AcpModeInfo(v));
+            self.runtime.emit(AgentStreamEvent::AcpModeInfo(v));
         }
         if let Some(config_options) = session.config_options()
             && let Some(v) = sdk_to_snake_value(&serde_json::json!({
@@ -278,12 +275,11 @@ impl AcpAgentManager {
             // `ConfigOptionUpdate` shape used by the streaming path —
             // handshake blobs and downstream consumers see a uniform
             // structure regardless of origin.
-            let _ = self.event_tx.send(AgentStreamEvent::AcpConfigOption(v));
+            self.runtime.emit(AgentStreamEvent::AcpConfigOption(v));
         }
         if let Some(cmds) = session.available_commands() {
-            let _ = self
-                .event_tx
-                .send(AgentStreamEvent::AvailableCommands(AvailableCommandsEventData {
+            self.runtime
+                .emit(AgentStreamEvent::AvailableCommands(AvailableCommandsEventData {
                     commands: cmds.to_vec(),
                 }));
         }
