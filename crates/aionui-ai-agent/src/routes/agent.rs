@@ -9,7 +9,6 @@ use aionui_api_types::{AgentMetadata, ApiResponse, TestCustomAgentRequest, TestC
 use aionui_auth::CurrentUser;
 use aionui_common::AppError;
 
-use crate::protocol::cli_detect;
 use crate::registry::AgentRegistry;
 
 #[derive(Clone)]
@@ -30,24 +29,21 @@ async fn list_agents(
     State(state): State<AgentRouterState>,
     Extension(_user): Extension<CurrentUser>,
 ) -> Result<Json<ApiResponse<Vec<AgentMetadata>>>, AppError> {
-    let agents = state.agent_registry.list_all().await;
-    Ok(Json(ApiResponse::ok(agents)))
+    Ok(Json(ApiResponse::ok(state.service.list_agents().await?)))
 }
 
 async fn refresh_agents(
     State(state): State<AgentRouterState>,
     Extension(_user): Extension<CurrentUser>,
 ) -> Result<Json<ApiResponse<Vec<AgentMetadata>>>, AppError> {
-    state.agent_registry.refresh_availability().await;
-    Ok(Json(ApiResponse::ok(state.agent_registry.list_all().await)))
+    Ok(Json(ApiResponse::ok(state.service.refresh_agents().await?)))
 }
 
 async fn test_custom_agent(
-    State(_state): State<AgentRouterState>,
+    State(state): State<AgentRouterState>,
     Extension(_user): Extension<CurrentUser>,
     body: Result<Json<TestCustomAgentRequest>, JsonRejection>,
 ) -> Result<Json<ApiResponse<TestCustomAgentResponse>>, AppError> {
     let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
-    let result = cli_detect::test_custom_agent(&req.command, &req.acp_args, &req.env)?;
-    Ok(Json(ApiResponse::ok(result)))
+    Ok(Json(ApiResponse::ok(state.service.test_custom_agent(req)?)))
 }

@@ -10,9 +10,11 @@ use std::sync::Arc;
 
 use agent_client_protocol::schema::SessionModelState;
 use aionui_api_types::{
-    AgentModeResponse, GetModelInfoResponse, ModelInfoEntry, ModelInfoPayload, SetConfigOptionRequest,
-    SetConfigOptionsRequest, SetModeRequest, SetModelRequest, SideQuestionRequest, SideQuestionResponse,
-    SlashCommandItem, WorkspaceBrowseQuery, WorkspaceEntry,
+    AcpEnvResponse, AcpHealthCheckRequest, AcpHealthCheckResponse, AcpModelInfo, AgentMetadata, AgentModeResponse,
+    DetectCliRequest, DetectCliResponse, GetModelInfoResponse, ModelInfoEntry, ModelInfoPayload, ProbeModelRequest,
+    SetConfigOptionRequest, SetConfigOptionsRequest, SetModeRequest, SetModelRequest, SideQuestionRequest,
+    SideQuestionResponse, SlashCommandItem, TestCustomAgentRequest, TestCustomAgentResponse, WorkspaceBrowseQuery,
+    WorkspaceEntry,
 };
 use aionui_common::AppError;
 use aionui_db::IConversationRepository;
@@ -26,8 +28,6 @@ use crate::task_manager::IWorkerTaskManager;
 
 pub struct AgentService {
     task_manager: Arc<dyn IWorkerTaskManager>,
-    // Used by methods added in Stage 2c–2f; suppress dead_code until then.
-    #[allow(dead_code)]
     registry: Arc<AgentRegistry>,
     #[allow(dead_code)]
     conversation_repo: Arc<dyn IConversationRepository>,
@@ -355,6 +355,44 @@ impl AgentService {
         });
 
         Ok(entries)
+    }
+
+    pub async fn list_agents(&self) -> Result<Vec<AgentMetadata>, AppError> {
+        Ok(self.registry.list_all().await)
+    }
+
+    pub async fn refresh_agents(&self) -> Result<Vec<AgentMetadata>, AppError> {
+        self.registry.refresh_availability().await;
+        Ok(self.registry.list_all().await)
+    }
+
+    pub fn test_custom_agent(&self, req: TestCustomAgentRequest) -> Result<TestCustomAgentResponse, AppError> {
+        crate::protocol::cli_detect::test_custom_agent(&req.command, &req.acp_args, &req.env)
+    }
+
+    pub async fn detect_cli(&self, req: DetectCliRequest) -> Result<DetectCliResponse, AppError> {
+        Ok(crate::protocol::cli_detect::detect_cli(&self.registry, &req.backend).await)
+    }
+
+    pub async fn acp_health_check(&self, req: AcpHealthCheckRequest) -> Result<AcpHealthCheckResponse, AppError> {
+        Ok(crate::protocol::cli_detect::health_check(&self.registry, &req.backend).await)
+    }
+
+    pub fn acp_env(&self) -> Result<AcpEnvResponse, AppError> {
+        Ok(crate::protocol::cli_detect::get_env())
+    }
+
+    /// Probe a model. **Placeholder** — returns `None` once CLI availability is
+    /// confirmed. Full probing will be wired when integrated with real ACP sessions.
+    pub async fn probe_model(&self, req: ProbeModelRequest) -> Result<Option<AcpModelInfo>, AppError> {
+        let detection = crate::protocol::cli_detect::detect_cli(&self.registry, &req.backend).await;
+        if detection.path.is_none() {
+            return Err(AppError::BadRequest(format!(
+                "Backend '{}' CLI not found, cannot probe model",
+                req.backend
+            )));
+        }
+        Ok(None)
     }
 }
 

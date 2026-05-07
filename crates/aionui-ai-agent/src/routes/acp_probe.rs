@@ -12,7 +12,6 @@ use aionui_api_types::{
 use aionui_auth::CurrentUser;
 use aionui_common::AppError;
 
-use crate::protocol::cli_detect;
 use crate::registry::AgentRegistry;
 use crate::service::AgentService;
 use crate::task_manager::IWorkerTaskManager;
@@ -48,8 +47,7 @@ async fn detect_cli(
     body: Result<Json<DetectCliRequest>, JsonRejection>,
 ) -> Result<Json<ApiResponse<DetectCliResponse>>, AppError> {
     let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
-    let result = cli_detect::detect_cli(&state.agent_registry, &req.backend).await;
-    Ok(Json(ApiResponse::ok(result)))
+    Ok(Json(ApiResponse::ok(state.service.detect_cli(req).await?)))
 }
 
 async fn health_check(
@@ -58,16 +56,14 @@ async fn health_check(
     body: Result<Json<AcpHealthCheckRequest>, JsonRejection>,
 ) -> Result<Json<ApiResponse<AcpHealthCheckResponse>>, AppError> {
     let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
-    let result = cli_detect::health_check(&state.agent_registry, &req.backend).await;
-    Ok(Json(ApiResponse::ok(result)))
+    Ok(Json(ApiResponse::ok(state.service.acp_health_check(req).await?)))
 }
 
 async fn get_env(
-    State(_state): State<AcpRouterState>,
+    State(state): State<AcpRouterState>,
     Extension(_user): Extension<CurrentUser>,
 ) -> Result<Json<ApiResponse<AcpEnvResponse>>, AppError> {
-    let result = cli_detect::get_env();
-    Ok(Json(ApiResponse::ok(result)))
+    Ok(Json(ApiResponse::ok(state.service.acp_env()?)))
 }
 
 async fn probe_model(
@@ -76,14 +72,5 @@ async fn probe_model(
     body: Result<Json<ProbeModelRequest>, JsonRejection>,
 ) -> Result<Json<ApiResponse<Option<AcpModelInfo>>>, AppError> {
     let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
-    // Probe model requires a running ACP session; for now verify CLI availability
-    let detection = cli_detect::detect_cli(&state.agent_registry, &req.backend).await;
-    if detection.path.is_none() {
-        return Err(AppError::BadRequest(format!(
-            "Backend '{}' CLI not found, cannot probe model",
-            req.backend
-        )));
-    }
-    // Full model probing will be wired when integrated with real ACP sessions (6.15)
-    Ok(Json(ApiResponse::ok(None)))
+    Ok(Json(ApiResponse::ok(state.service.probe_model(req).await?)))
 }
