@@ -18,32 +18,24 @@ Only after exhausting the above — and explicitly documenting why each option i
 
 ## Architecture
 
-Cargo workspace with 17 crates under `crates/`. Dependencies flow downward:
+> For detailed background and design decisions, see [ARCHITECTURE.md](./ARCHITECTURE.md).
 
-- `aionui-common` — shared types, enums, error types, crypto utilities
-- `aionui-api-types` — API request/response types, shared across crates
-- `aionui-db` — SQLite database layer (sqlx), repository traits and implementations
-- `aionui-auth` — JWT, CSRF, password hashing, auth middleware
-- `aionui-realtime` — WebSocket manager, event broadcasting
-- Domain crates (`aionui-conversation`, `aionui-channel`, `aionui-team`, `aionui-cron`, `aionui-file`, `aionui-office`, `aionui-shell`, `aionui-mcp`, `aionui-ai-agent`, `aionui-extension`, `aionui-system`) — each owns its routes, service, and tests
-- `aionui-app` — top-level binary, composes all crates into the axum server
+Cargo workspace with 19 crates under `crates/`. Dependencies flow downward through four layers:
 
-Never introduce circular dependencies or upward references.
+**Foundation:** `aionui-common`, `aionui-api-types`, `aionui-db`, `aionui-assets`
+**Capability:** `aionui-auth`, `aionui-realtime`
+**Domain:** `aionui-conversation`, `aionui-channel`, `aionui-team`, `aionui-cron`, `aionui-file`, `aionui-office`, `aionui-shell`, `aionui-mcp`, `aionui-ai-agent`, `aionui-extension`, `aionui-system`, `aionui-assistant`
+**Composition:** `aionui-app` — top-level binary, composes all crates into the axum server
 
 Binary name: `aionui-backend` (produced by `crates/aionui-app`).
 
-## Architecture Rules
-
-> For detailed background and design decisions, see [ARCHITECTURE.md](./ARCHITECTURE.md).
-
 ### Crate Hierarchy & Dependencies
 
-- Four layers: Foundation → Capability → Domain → Composition
 - ✅ Upper layers may depend on lower layers (including cross-layer)
 - ✅ Same-layer interaction through trait abstractions only
 - ❌ No lower-layer depending on upper-layer
 - ❌ No circular dependencies
-- Changes to foundation crates (common, api-types, db) require impact assessment
+- Changes to foundation crates require impact assessment
 
 ### Domain Crate Structure
 
@@ -117,27 +109,34 @@ Every domain crate must follow:
 
 ## Code Style
 
-- Rust 2024 edition, stable toolchain
-- `cargo clippy` must pass without warnings
-- `cargo fmt` must pass
+- Rust 2024 edition, stable toolchain (pinned in `rust-toolchain.toml`)
 - Comments in English, commit messages in English
 - Each `.rs` file follows single responsibility — one module, one concern
 - Max 1000 lines per `.rs` file; split into submodules when approaching the limit
 
-## Quick Recipes
+## Development Workflow
 
-**Add endpoint to existing crate:**
+### Pushing Code
+
+Always use `just push` instead of `git push`.
+It runs fmt → clippy → test before pushing, preventing CI failures.
+Supports the same arguments as `git push` (e.g. `just push -u origin feat/branch`).
+
+### Add Endpoint to Existing Crate
+
 1. Request/response types → `aionui-api-types/src/{domain}.rs`
 2. Handler function → `crates/aionui-{domain}/src/routes.rs`
 3. Business logic → `crates/aionui-{domain}/src/service.rs`
 4. Register route in `domain_routes()` function
 5. Add test → `crates/aionui-{domain}/tests/` or `crates/aionui-app/tests/`
 
-**Add migration:**
+### Add Migration
+
 1. Next number → `ls crates/aionui-db/migrations/`
 2. Create `NNN_descriptive_name.sql` with `IF NOT EXISTS`
 
-**Add WebSocket event:**
+### Add WebSocket Event
+
 1. Event type → `aionui-api-types`
 2. Emit via `event_bus.broadcast()` in service
 3. Naming: `domain.camelCaseAction`
@@ -232,10 +231,8 @@ cargo clippy -p aionui-<crate1> -p aionui-<crate2> -- -D warnings              #
 cargo test -p aionui-<crate1> -p aionui-<crate2>                               # Test affected crates
 ```
 
-### Final Verification (run in background, 10+ min)
+### Before Push (full workspace)
 
 ```bash
-cargo fmt --all -- --check                             # Format gate (instant)
-cargo clippy --workspace -- -D warnings                # Full lint
-cargo test --workspace                                 # Full test suite
+just push                                             # fmt → clippy → test → git push
 ```

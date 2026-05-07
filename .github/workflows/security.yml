@@ -1,0 +1,19 @@
+name: Security Audit
+
+on:
+  schedule:
+    - cron: "0 8 * * 1" # Every Monday at 08:00 UTC
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}

@@ -87,6 +87,13 @@ run *ARGS:
 run-release *ARGS:
     cargo run --release --bin aionui-backend -- {{ARGS}}
 
+# Pre-push gate: format, lint, test, then push
+push *ARGS:
+    cargo fmt --all
+    cargo clippy --workspace -- -D warnings
+    cargo test --workspace
+    git push {{ ARGS }}
+
 # Clean build artifacts
 clean:
     cargo clean
