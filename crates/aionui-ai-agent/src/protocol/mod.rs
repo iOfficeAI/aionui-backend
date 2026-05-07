@@ -1,7 +1,4 @@
-pub mod acp;
-pub mod cli_detect;
-pub mod error;
+pub(crate) mod acp;
+pub(crate) mod cli_detect;
+pub(crate) mod error;
 pub mod events;
-
-pub use acp::AcpProtocol;
-pub use error::AcpError;

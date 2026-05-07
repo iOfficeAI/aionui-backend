@@ -14,7 +14,7 @@ use crate::registry::AgentRegistry;
 ///
 /// Resolves the vendor label to the first `builtin` row in the metadata
 /// catalog, then checks that the row's spawn command is on `$PATH`.
-pub async fn detect_cli(registry: &Arc<AgentRegistry>, backend: &str) -> DetectCliResponse {
+pub(crate) async fn detect_cli(registry: &Arc<AgentRegistry>, backend: &str) -> DetectCliResponse {
     let Some(meta) = registry.find_builtin_by_backend(backend).await else {
         return DetectCliResponse { path: None };
     };
@@ -27,7 +27,7 @@ pub async fn detect_cli(registry: &Arc<AgentRegistry>, backend: &str) -> DetectC
 /// Perform a health check for an ACP backend.
 ///
 /// Checks CLI availability and measures detection latency.
-pub async fn health_check(registry: &Arc<AgentRegistry>, backend: &str) -> AcpHealthCheckResponse {
+pub(crate) async fn health_check(registry: &Arc<AgentRegistry>, backend: &str) -> AcpHealthCheckResponse {
     let start = Instant::now();
 
     let Some(meta) = registry.find_builtin_by_backend(backend).await else {
@@ -59,7 +59,7 @@ fn probe_command(meta: &AgentMetadata) -> Option<String> {
 }
 
 /// Get relevant environment variables for ACP operations.
-pub fn get_env() -> AcpEnvResponse {
+pub(crate) fn get_env() -> AcpEnvResponse {
     let keys = ["PATH", "HOME", "USER", "SHELL", "LANG", "TERM"];
     let env: HashMap<String, String> = keys
         .iter()
@@ -70,7 +70,7 @@ pub fn get_env() -> AcpEnvResponse {
 }
 
 /// Test a custom ACP agent by verifying the command exists.
-pub fn test_custom_agent(
+pub(crate) fn test_custom_agent(
     command: &str,
     _acp_args: &[String],
     _env: &HashMap<String, String>,

@@ -89,6 +89,7 @@ pub struct AcpProtocol {
     initialize_response: Arc<RwLock<Option<InitializeResponse>>>,
 }
 
+#[allow(dead_code)]
 impl AcpProtocol {
     /// Connect to a running CLI process and execute the ACP initialize handshake.
     ///

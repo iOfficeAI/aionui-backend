@@ -6,7 +6,8 @@ use aionui_common::AppError;
 /// This error is internal to the `aionui-ai-agent` crate. External callers
 /// see it only after conversion to [`AppError`] via the `From` impl.
 #[derive(Debug, thiserror::Error)]
-pub enum AcpError {
+#[allow(dead_code)]
+pub(crate) enum AcpError {
     // ── Process lifecycle ──────────────────────────────────────────
     /// CLI binary not found or not executable.
     #[error("Failed to spawn agent process: {message}")]
@@ -61,7 +62,8 @@ pub enum AcpError {
 
 impl AcpError {
     /// Whether the caller may retry the operation.
-    pub fn is_retryable(&self) -> bool {
+    #[allow(dead_code)]
+    pub(crate) fn is_retryable(&self) -> bool {
         matches!(
             self,
             AcpError::SpawnFailed { .. }
