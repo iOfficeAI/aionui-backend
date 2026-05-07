@@ -51,7 +51,15 @@ pub enum AgentStreamEvent {
     AvailableCommands(AvailableCommandsEventData),
     Finish(FinishEventData),
     Error(ErrorEventData),
+    /// DEPRECATED: no producer in the backend. Retained for wire-format
+    /// compatibility — removing it would change the `AgentStreamEvent`
+    /// serde tag set visible to the frontend. Safe to delete once the
+    /// frontend is confirmed not to depend on `type: "system"` messages.
     System(serde_json::Value),
+    /// DEPRECATED: no producer in the backend. Retained for wire-format
+    /// compatibility — removing it would change the `AgentStreamEvent`
+    /// serde tag set visible to the frontend. Safe to delete once the
+    /// frontend is confirmed not to depend on `type: "request_trace"` messages.
     RequestTrace(serde_json::Value),
     SessionAssigned(SessionAssignedEventData),
 }
