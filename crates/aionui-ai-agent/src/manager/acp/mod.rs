@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod catalog_forwarder;
+mod event_tracker;
 pub mod events;
 mod mode_normalize;
 pub mod permission_router;
