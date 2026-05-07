@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use aionui_ai_agent::agent_task::{AgentInstance, IAgentTask, IMockAgent};
 use aionui_ai_agent::protocol::events::{AgentStreamEvent, ErrorEventData, FinishEventData};
-use aionui_ai_agent::types::{AgentStreamChunk, BuildTaskOptions, SendMessageData};
+use aionui_ai_agent::types::{BuildTaskOptions, SendMessageData};
 use aionui_ai_agent::task_manager::AgentFactory;
 use aionui_ai_agent::{IWorkerTaskManager, WorkerTaskManagerImpl};
 use aionui_api_types::AcpBuildExtra;
@@ -53,19 +53,16 @@ struct MockAgentManager {
     workspace: String,
     mcp_config: Option<TeamMcpStdioConfig>,
     event_tx: broadcast::Sender<AgentStreamEvent>,
-    chunk_tx: broadcast::Sender<AgentStreamChunk>,
 }
 
 impl MockAgentManager {
     fn new(conversation_id: String, workspace: String, mcp_config: Option<TeamMcpStdioConfig>) -> Self {
         let (event_tx, _) = broadcast::channel(32);
-        let (chunk_tx, _) = broadcast::channel(32);
         Self {
             conversation_id,
             workspace,
             mcp_config,
             event_tx,
-            chunk_tx,
         }
     }
 
@@ -138,9 +135,6 @@ impl IAgentTask for MockAgentManager {
     fn subscribe(&self) -> broadcast::Receiver<AgentStreamEvent> {
         self.event_tx.subscribe()
     }
-    fn subscribe_stream(&self) -> broadcast::Receiver<AgentStreamChunk> {
-        self.chunk_tx.subscribe()
-    }
 
     async fn send_message(&self, data: SendMessageData) -> Result<(), AppError> {
         // Production ACP's send_message returns as soon as the child
@@ -157,7 +151,6 @@ impl IAgentTask for MockAgentManager {
                 workspace,
                 mcp_config,
                 event_tx: event_tx.clone(),
-                chunk_tx: broadcast::channel(1).0,
             };
 
             if let Some((tool, args)) = Self::pick_tool(&data.content) {

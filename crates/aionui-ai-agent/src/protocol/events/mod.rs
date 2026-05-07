@@ -18,7 +18,7 @@ pub use tool_call::{
     AcpToolCallSessionUpdateKind, AcpToolCallStatus, AcpToolCallTextBlock, AcpToolCallTextBlockType,
     AcpToolCallUpdateData, ToolCallEventData, ToolCallStatus, ToolGroupEntry,
 };
-pub use translate::{permission_request_to_event_data, session_notification_to_chunks, session_notification_to_events};
+pub use translate::{permission_request_to_event_data, session_notification_to_events};
 
 /// Events emitted by an Agent during a message processing turn.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -106,12 +106,10 @@ pub struct ErrorEventData {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::AgentStreamChunk;
     use agent_client_protocol::schema::{
-        ContentBlock, ContentChunk, PermissionOption, PermissionOptionKind as SdkPermissionOptionKind,
-        RequestPermissionRequest, SessionNotification, SessionUpdate, ToolCall as SdkToolCall,
-        ToolCallStatus as SdkToolCallStatus, ToolCallUpdate as SdkToolCallUpdate, ToolCallUpdateFields,
-        ToolKind as SdkToolKind,
+        PermissionOption, PermissionOptionKind as SdkPermissionOptionKind, RequestPermissionRequest,
+        SessionNotification, SessionUpdate, ToolCall as SdkToolCall, ToolCallStatus as SdkToolCallStatus,
+        ToolCallUpdate as SdkToolCallUpdate, ToolCallUpdateFields, ToolKind as SdkToolKind,
     };
     use serde_json::json;
 
@@ -349,98 +347,4 @@ mod tests {
         assert_eq!(json["data"]["duration"], 1500);
     }
 
-    #[test]
-    fn agent_message_chunk_maps_to_text_chunk() {
-        let notif = SessionNotification::new(
-            "sess-1",
-            SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::from("hello world"))),
-        );
-        let chunks = session_notification_to_chunks(&notif);
-        assert_eq!(chunks.len(), 1);
-        match &chunks[0] {
-            AgentStreamChunk::Text { text } => assert_eq!(text, "hello world"),
-            other => panic!("expected Text, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn agent_thought_chunk_maps_to_thought_chunk() {
-        let notif = SessionNotification::new(
-            "sess-1",
-            SessionUpdate::AgentThoughtChunk(ContentChunk::new(ContentBlock::from("thinking..."))),
-        );
-        let chunks = session_notification_to_chunks(&notif);
-        assert_eq!(chunks.len(), 1);
-        match &chunks[0] {
-            AgentStreamChunk::Thought { content } => assert_eq!(content, "thinking..."),
-            other => panic!("expected Thought, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn tool_call_maps_to_tool_use_chunk() {
-        let notif = SessionNotification::new(
-            "sess-1",
-            SessionUpdate::ToolCall(
-                SdkToolCall::new("tool-1", "read_file")
-                    .kind(SdkToolKind::Read)
-                    .status(SdkToolCallStatus::Pending)
-                    .raw_input(json!({ "path": "/tmp/a.txt" })),
-            ),
-        );
-        let chunks = session_notification_to_chunks(&notif);
-        assert_eq!(chunks.len(), 1);
-        match &chunks[0] {
-            AgentStreamChunk::ToolUse { tool_name, input } => {
-                assert_eq!(tool_name, "read_file");
-                assert_eq!(input["path"], "/tmp/a.txt");
-            }
-            other => panic!("expected ToolUse, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn tool_call_update_without_raw_input_is_skipped() {
-        let notif = SessionNotification::new(
-            "sess-1",
-            SessionUpdate::ToolCallUpdate(SdkToolCallUpdate::new(
-                "tool-1",
-                ToolCallUpdateFields::new().status(SdkToolCallStatus::Completed),
-            )),
-        );
-        let chunks = session_notification_to_chunks(&notif);
-        assert!(chunks.is_empty());
-    }
-
-    #[test]
-    fn tool_call_update_with_raw_input_emits_tool_use() {
-        let notif = SessionNotification::new(
-            "sess-1",
-            SessionUpdate::ToolCallUpdate(SdkToolCallUpdate::new(
-                "tool-1",
-                ToolCallUpdateFields::new()
-                    .title("search")
-                    .raw_input(json!({ "q": "foo" })),
-            )),
-        );
-        let chunks = session_notification_to_chunks(&notif);
-        assert_eq!(chunks.len(), 1);
-        match &chunks[0] {
-            AgentStreamChunk::ToolUse { tool_name, input } => {
-                assert_eq!(tool_name, "search");
-                assert_eq!(input["q"], "foo");
-            }
-            other => panic!("expected ToolUse, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn plan_update_does_not_produce_chunks() {
-        let notif = SessionNotification::new(
-            "sess-1",
-            SessionUpdate::CurrentModeUpdate(agent_client_protocol::schema::CurrentModeUpdate::new("normal")),
-        );
-        let chunks = session_notification_to_chunks(&notif);
-        assert!(chunks.is_empty());
-    }
 }

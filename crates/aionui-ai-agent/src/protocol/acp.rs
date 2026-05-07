@@ -42,7 +42,6 @@ use tracing::{debug, warn};
 
 use crate::protocol::error::AcpError;
 use crate::protocol::events::{self as stream_event, AgentStreamEvent};
-use crate::types::AgentStreamChunk;
 
 use agent_client_protocol::schema::{
     AgentCapabilities, AuthMethod, AuthenticateRequest, CancelNotification, CloseSessionRequest, ExtNotification,
@@ -100,7 +99,6 @@ impl AcpProtocol {
         stdin: ChildStdin,
         stdout: ChildStdout,
         event_tx: broadcast::Sender<AgentStreamEvent>,
-        stream_tx: broadcast::Sender<AgentStreamChunk>,
         permission_tx: mpsc::Sender<PermissionRequest>,
     ) -> Result<Self, AcpError> {
         let alive = Arc::new(AtomicBool::new(true));
@@ -120,7 +118,6 @@ impl AcpProtocol {
             stdin,
             stdout,
             event_tx,
-            stream_tx,
             permission_tx,
             init_tx,
             ready_tx,
@@ -310,7 +307,6 @@ async fn run_sdk_background(
     stdin: ChildStdin,
     stdout: ChildStdout,
     event_tx: broadcast::Sender<AgentStreamEvent>,
-    stream_tx: broadcast::Sender<AgentStreamChunk>,
     permission_tx: mpsc::Sender<PermissionRequest>,
     init_tx: oneshot::Sender<Result<InitializeResponse, AcpError>>,
     ready_tx: oneshot::Sender<ConnectionTo<Agent>>,
@@ -330,7 +326,7 @@ async fn run_sdk_background(
         .on_receive_notification(
             {
                 async move |notification: SessionNotification, _cx: ConnectionTo<Agent>| {
-                    handle_session_notification(notification, &event_tx, &stream_tx).await;
+                    handle_session_notification(notification, &event_tx).await;
                     Ok(())
                 }
             },
@@ -396,26 +392,16 @@ async fn run_sdk_background(
     }
 }
 
-/// Fan out a CLI session notification to the event/stream broadcast channels.
+/// Fan out a CLI session notification to the event broadcast channel.
 async fn handle_session_notification(
     notification: SessionNotification,
     event_tx: &broadcast::Sender<AgentStreamEvent>,
-    stream_tx: &broadcast::Sender<AgentStreamChunk>,
 ) {
     log_incoming("session/update", &json_str(&notification));
 
     let events = stream_event::session_notification_to_events(&notification);
     for event in events {
         let _ = event_tx.send(event);
-    }
-
-    // Parallel projection onto the AgentStreamChunk broadcast channel.
-    // Subscribers (wake timeout watchdog, crash detector) only care about
-    // message / thought / tool-call chunks; handshake-like updates are
-    // filtered out inside `session_notification_to_chunks`.
-    let chunks = stream_event::session_notification_to_chunks(&notification);
-    for chunk in chunks {
-        let _ = stream_tx.send(chunk);
     }
 }
 

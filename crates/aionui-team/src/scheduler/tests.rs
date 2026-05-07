@@ -1,7 +1,8 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use aionui_ai_agent::types::AgentStreamChunk;
+use aionui_ai_agent::AgentStreamEvent;
+use aionui_ai_agent::protocol::events::{ErrorEventData, FinishEventData, TextEventData};
 use aionui_api_types::WebSocketMessage;
 use aionui_realtime::EventBroadcaster;
 use dashmap::DashMap;
@@ -1097,7 +1098,7 @@ async fn arm_wake_timeout_fires_handler_after_deadline() {
     let agents = make_team_agents();
     let (mgr, _) = make_manager(&agents);
     let counter = Arc::new(AtomicU32::new(0));
-    let (tx, rx) = broadcast::channel::<AgentStreamChunk>(8);
+    let (tx, rx) = broadcast::channel::<AgentStreamEvent>(8);
 
     mgr.arm_wake_timeout("worker-1", rx, counting_handler(counter.clone()));
     // Keep the sender alive so the channel does not close before the deadline.
@@ -1119,14 +1120,14 @@ async fn arm_wake_timeout_activity_resets_deadline() {
     let agents = make_team_agents();
     let (mgr, _) = make_manager(&agents);
     let counter = Arc::new(AtomicU32::new(0));
-    let (tx, rx) = broadcast::channel::<AgentStreamChunk>(8);
+    let (tx, rx) = broadcast::channel::<AgentStreamEvent>(8);
 
     mgr.arm_wake_timeout("worker-1", rx, counting_handler(counter.clone()));
     let_watchdog_settle().await;
 
     // Just before the first deadline, an activity chunk arrives.
     tokio::time::advance(Duration::from_millis(WAKE_TIMEOUT_MS - 1_000)).await;
-    tx.send(AgentStreamChunk::Text { text: "hi".into() }).unwrap();
+    tx.send(AgentStreamEvent::Text(TextEventData { content: "hi".into() })).unwrap();
     // Let the select branch observe the chunk before advancing again.
     tokio::task::yield_now().await;
 
@@ -1151,15 +1152,12 @@ async fn arm_wake_timeout_finish_exits_without_firing() {
     let agents = make_team_agents();
     let (mgr, _) = make_manager(&agents);
     let counter = Arc::new(AtomicU32::new(0));
-    let (tx, rx) = broadcast::channel::<AgentStreamChunk>(8);
+    let (tx, rx) = broadcast::channel::<AgentStreamEvent>(8);
 
     mgr.arm_wake_timeout("worker-1", rx, counting_handler(counter.clone()));
     let_watchdog_settle().await;
 
-    tx.send(AgentStreamChunk::Finish {
-        agent_crash: false,
-        stop_reason: Some("end_turn".into()),
-    })
+    tx.send(AgentStreamEvent::Finish(FinishEventData::default()))
     .unwrap();
     wait_for_map_empty(&mgr, "worker-1", 128).await;
 
@@ -1184,7 +1182,7 @@ async fn arm_wake_timeout_channel_close_exits_without_firing() {
     let agents = make_team_agents();
     let (mgr, _) = make_manager(&agents);
     let counter = Arc::new(AtomicU32::new(0));
-    let (tx, rx) = broadcast::channel::<AgentStreamChunk>(8);
+    let (tx, rx) = broadcast::channel::<AgentStreamEvent>(8);
 
     mgr.arm_wake_timeout("worker-1", rx, counting_handler(counter.clone()));
     let_watchdog_settle().await;
@@ -1206,11 +1204,11 @@ async fn arm_wake_timeout_replaces_existing_watchdog() {
     let counter_a = Arc::new(AtomicU32::new(0));
     let counter_b = Arc::new(AtomicU32::new(0));
 
-    let (tx_a, rx_a) = broadcast::channel::<AgentStreamChunk>(8);
+    let (tx_a, rx_a) = broadcast::channel::<AgentStreamEvent>(8);
     mgr.arm_wake_timeout("worker-1", rx_a, counting_handler(counter_a.clone()));
 
     // Immediately re-arm — the first watchdog must be aborted.
-    let (tx_b, rx_b) = broadcast::channel::<AgentStreamChunk>(8);
+    let (tx_b, rx_b) = broadcast::channel::<AgentStreamEvent>(8);
     mgr.arm_wake_timeout("worker-1", rx_b, counting_handler(counter_b.clone()));
     let_watchdog_settle().await;
 

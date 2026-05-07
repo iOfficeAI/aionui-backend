@@ -22,7 +22,7 @@ use crate::manager::nanobot::NanobotAgentManager;
 use crate::manager::openclaw::OpenClawAgentManager;
 use crate::manager::remote::RemoteAgentManager;
 use crate::protocol::events::AgentStreamEvent;
-use crate::types::{AgentStreamChunk, SendMessageData};
+use crate::types::SendMessageData;
 
 #[cfg(any(test, feature = "test-support"))]
 use aionui_common::Confirmation;
@@ -54,14 +54,6 @@ pub trait IAgentTask: Send + Sync {
 
     /// Subscribe to the agent's stream event channel.
     fn subscribe(&self) -> broadcast::Receiver<AgentStreamEvent>;
-
-    /// Subscribe to the raw stream chunk channel (used by team scheduler
-    /// watchdogs). Default implementation returns a receiver that
-    /// immediately closes — only ACP currently publishes chunks.
-    fn subscribe_stream(&self) -> broadcast::Receiver<AgentStreamChunk> {
-        let (tx, _) = broadcast::channel(1);
-        tx.subscribe()
-    }
 
     /// Send a user message to the agent. Returns once the agent has
     /// accepted the turn; actual streaming proceeds on the broadcast
@@ -198,11 +190,6 @@ impl AgentInstance {
     /// Subscribe to the stream event channel.
     pub fn subscribe(&self) -> broadcast::Receiver<AgentStreamEvent> {
         self.as_task().subscribe()
-    }
-
-    /// Subscribe to the raw stream chunk channel.
-    pub fn subscribe_stream(&self) -> broadcast::Receiver<AgentStreamChunk> {
-        self.as_task().subscribe_stream()
     }
 
     /// Send a user message to the agent.

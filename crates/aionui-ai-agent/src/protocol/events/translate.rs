@@ -3,7 +3,6 @@ use agent_client_protocol::schema::{
     SessionNotification, SessionUpdate, ToolCallContent as SdkToolCallContent, ToolCallLocation as SdkToolCallLocation,
     ToolCallStatus as SdkToolCallStatus, ToolCallUpdate as SdkToolCallUpdate, ToolKind as SdkToolKind,
 };
-use serde_json::Value;
 use tracing::debug;
 
 use super::permission::{
@@ -17,7 +16,6 @@ use super::tool_call::{
     AcpToolCallUpdateData,
 };
 use super::{AgentStreamEvent, TextEventData};
-use crate::types::AgentStreamChunk;
 
 /// Convert an SDK [`SessionNotification`] into zero or more [`AgentStreamEvent`]s.
 pub fn session_notification_to_events(notif: &SessionNotification) -> Vec<AgentStreamEvent> {
@@ -140,45 +138,6 @@ pub fn session_notification_to_events(notif: &SessionNotification) -> Vec<AgentS
     events
 }
 
-/// Convert an SDK [`SessionNotification`] into zero or more [`AgentStreamChunk`]s.
-pub fn session_notification_to_chunks(notif: &SessionNotification) -> Vec<AgentStreamChunk> {
-    let mut chunks = Vec::new();
-
-    match &notif.update {
-        SessionUpdate::AgentMessageChunk(chunk) => {
-            if let ContentBlock::Text(text) = &chunk.content {
-                chunks.push(AgentStreamChunk::Text {
-                    text: text.text.clone(),
-                });
-            }
-        }
-        SessionUpdate::AgentThoughtChunk(chunk) => {
-            if let ContentBlock::Text(text) = &chunk.content {
-                chunks.push(AgentStreamChunk::Thought {
-                    content: text.text.clone(),
-                });
-            }
-        }
-        SessionUpdate::ToolCall(tc) => {
-            chunks.push(AgentStreamChunk::ToolUse {
-                tool_name: tc.title.clone(),
-                input: tc.raw_input.clone().unwrap_or(Value::Null),
-            });
-        }
-        SessionUpdate::ToolCallUpdate(tcu) => {
-            if let Some(raw_input) = tcu.fields.raw_input.clone() {
-                let tool_name = tcu.fields.title.clone().unwrap_or_default();
-                chunks.push(AgentStreamChunk::ToolUse {
-                    tool_name,
-                    input: raw_input,
-                });
-            }
-        }
-        _ => {}
-    }
-
-    chunks
-}
 
 pub fn permission_request_to_event_data(request: &RequestPermissionRequest) -> AcpPermissionEventData {
     AcpPermissionEventData::Request(AcpPermissionRequestData {
