@@ -10,7 +10,6 @@ aionui-common.workspace = true
 aionui-db.workspace = true
 aionui-extension.workspace = true
 aionui-api-types.workspace = true
-aionui-realtime.workspace = true
 aionui-system.workspace = true
 axum.workspace = true
 base64.workspace = true
