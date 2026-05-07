@@ -79,6 +79,20 @@ impl AgentService {
         };
         let sdk_model = acp.model_info().await;
         let model_info = sdk_model.map(map_sdk_model_to_payload);
+
+        // If the session hasn't completed handshake yet (available_models
+        // is empty or model_info is None), fall back to the registry's
+        // cached handshake data. The registry is kept in sync by
+        // CatalogForwarder whenever any session of this agent type
+        // advertises its model list.
+        if model_info.as_ref().is_none_or(|p| p.available_models.is_empty())
+            && let Some(fallback) = self.model_info_from_registry(acp).await
+        {
+            return Ok(GetModelInfoResponse {
+                model_info: Some(fallback),
+            });
+        }
+
         Ok(GetModelInfoResponse { model_info })
     }
 
@@ -402,6 +416,45 @@ impl AgentService {
             )));
         }
         Ok(None)
+    }
+
+    /// Build a `ModelInfoPayload` from the registry's cached handshake
+    /// data. Returns `None` if the registry has no model data for this
+    /// agent type (e.g. fresh install, never ran a session).
+    async fn model_info_from_registry(&self, acp: &crate::manager::acp::AcpAgentManager) -> Option<ModelInfoPayload> {
+        let meta = self.registry.get(acp.agent_metadata_id()).await?;
+        let raw = meta.handshake.available_models?;
+
+        // Registry stores the full ModelInfoPayload as snake_case JSON
+        // (written by CatalogForwarder). Parse the available_models array
+        // from it, ignoring current_model_* (session state is authoritative
+        // for "current"; we only need the enumeration here).
+        let available: Vec<ModelInfoEntry> = raw
+            .get("available_models")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+
+        if available.is_empty() {
+            return None;
+        }
+
+        // Use the session's current_model_id if we have one (from
+        // preload_persisted), otherwise fall back to the registry's.
+        let session_model = acp.model_info().await;
+        let current_id = session_model
+            .as_ref()
+            .map(|m| m.current_model_id.to_string())
+            .or_else(|| raw.get("current_model_id").and_then(|v| v.as_str()).map(String::from));
+
+        let current_label = current_id
+            .as_ref()
+            .and_then(|id| available.iter().find(|e| e.id == *id).map(|e| e.label.clone()));
+
+        Some(ModelInfoPayload {
+            current_model_id: current_id,
+            current_model_label: current_label,
+            available_models: available,
+        })
     }
 }
 
