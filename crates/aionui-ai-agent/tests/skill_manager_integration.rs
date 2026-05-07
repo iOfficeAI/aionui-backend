@@ -11,7 +11,7 @@
 use std::fs;
 use std::sync::{Arc, Mutex};
 
-use aionui_ai_agent::capability::skill_manager::{
+use aionui_ai_agent::{
     AcpSkillManager, build_skills_index_text, build_system_instructions, detect_skill_load_request,
     prepare_first_message, prepare_first_message_with_skills_index,
 };
@@ -189,11 +189,11 @@ async fn discover_skills_respects_exclude_builtin() {
 #[test]
 fn build_index_text_contains_load_protocol() {
     let skills = vec![
-        aionui_ai_agent::capability::skill_manager::SkillIndex {
+        aionui_ai_agent::SkillIndex {
             name: "security".into(),
             description: "Security review".into(),
         },
-        aionui_ai_agent::capability::skill_manager::SkillIndex {
+        aionui_ai_agent::SkillIndex {
             name: "tdd".into(),
             description: "Test-driven development".into(),
         },
@@ -243,7 +243,7 @@ fn detect_load_skill_handles_whitespace() {
 
 #[test]
 fn system_instructions_with_loaded_skills() {
-    let skills = vec![aionui_ai_agent::capability::skill_manager::SkillDefinition {
+    let skills = vec![aionui_ai_agent::SkillDefinition {
         name: "helper".into(),
         description: "A helper".into(),
         location: std::path::PathBuf::new(),
@@ -260,7 +260,7 @@ fn system_instructions_with_loaded_skills() {
 
 #[test]
 fn first_message_with_skills_index_for_acp() {
-    let skills = vec![aionui_ai_agent::capability::skill_manager::SkillIndex {
+    let skills = vec![aionui_ai_agent::SkillIndex {
         name: "review".into(),
         description: "Code review".into(),
     }];
@@ -274,7 +274,7 @@ fn first_message_with_skills_index_for_acp() {
 
 #[test]
 fn first_message_with_full_skills_for_gemini() {
-    let skills = vec![aionui_ai_agent::capability::skill_manager::SkillDefinition {
+    let skills = vec![aionui_ai_agent::SkillDefinition {
         name: "debug".into(),
         description: "Debug".into(),
         location: std::path::PathBuf::new(),

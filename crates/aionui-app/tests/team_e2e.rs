@@ -4,7 +4,10 @@ use axum::http::StatusCode;
 use serde_json::json;
 use tower::ServiceExt;
 
-use common::{body_json, build_app, build_app_with_mock_agents, delete_with_token, get_with_token, json_with_token, setup_and_login};
+use common::{
+    body_json, build_app, build_app_with_mock_agents, delete_with_token, get_with_token, json_with_token,
+    setup_and_login,
+};
 
 fn two_agent_body() -> serde_json::Value {
     json!({

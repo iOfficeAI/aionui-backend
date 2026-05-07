@@ -38,6 +38,7 @@ pub struct CliAgentProcess {
     /// OS-level process ID.
     pid: u32,
     /// Broadcast sender for parsed stdout events (legacy mode only).
+    #[allow(dead_code)] // Part of the complete CliProcess API; used in legacy mode via subscribe()
     event_tx: broadcast::Sender<serde_json::Value>,
     /// Watch channel that transitions from `None` → `Some(ExitStatus)` on exit.
     exit_rx: watch::Receiver<Option<ExitStatus>>,
@@ -45,6 +46,7 @@ pub struct CliAgentProcess {
     /// Take this via [`take_initial_receiver`] to guarantee no events are lost.
     initial_rx: InitialReceiver,
     /// Stderr ring buffer for diagnostics.
+    #[allow(dead_code)] // Read via take_stderr(); part of diagnostics API for startup crash reporting
     stderr_buffer: Arc<Mutex<String>>,
     /// Handle to the stdout reader task (legacy mode, for cleanup).
     _stdout_handle: Option<Arc<tokio::task::JoinHandle<()>>>,
@@ -382,6 +384,7 @@ impl CliAgentProcess {
     ///
     /// Returns a broadcast receiver that yields raw `serde_json::Value` events
     /// as they are parsed from the subprocess stdout.
+    #[allow(dead_code)] // Complete CliProcess API for legacy-mode event subscription
     pub fn subscribe(&self) -> broadcast::Receiver<serde_json::Value> {
         self.event_tx.subscribe()
     }
@@ -435,21 +438,25 @@ impl CliAgentProcess {
     }
 
     /// Check whether the subprocess is still running.
+    #[allow(dead_code)] // Complete CliProcess lifecycle API
     pub fn is_running(&self) -> bool {
         self.exit_rx.borrow().is_none()
     }
 
     /// Get the exit status if the process has exited.
+    #[allow(dead_code)] // Complete CliProcess lifecycle API
     pub fn exit_status(&self) -> Option<ExitStatus> {
         *self.exit_rx.borrow()
     }
 
     /// Get the OS process ID.
+    #[allow(dead_code)] // Complete CliProcess lifecycle API
     pub fn pid(&self) -> u32 {
         self.pid
     }
 
     /// Wait for the process to exit (blocks until exit or cancellation).
+    #[allow(dead_code)] // Complete CliProcess lifecycle API
     pub async fn wait_for_exit(&self) -> Option<ExitStatus> {
         let mut rx = self.exit_rx.clone();
         // If already exited, return immediately
@@ -466,6 +473,7 @@ impl CliAgentProcess {
     /// Returns the last [`STDERR_BUFFER_MAX`] bytes of stderr output.
     /// Used for error diagnostics in `AcpError::StartupCrash` and
     /// `AcpError::Disconnected`.
+    #[allow(dead_code)] // Diagnostics API for startup crash and disconnect error reporting
     pub async fn take_stderr(&self) -> String {
         let mut buf = self.stderr_buffer.lock().await;
         std::mem::take(&mut *buf)

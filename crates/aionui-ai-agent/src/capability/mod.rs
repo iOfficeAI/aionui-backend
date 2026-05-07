@@ -4,9 +4,9 @@
 //! skill indexing, backend output/protocol sinks, first-message injection,
 //! solo-team guide prompts) that any agent implementation can compose.
 
-pub mod backend_output_sink;
-pub mod backend_protocol_sink;
-pub mod cli_process;
-pub mod first_message_injector;
-pub mod skill_manager;
-pub mod team_guide_prompt;
+pub(crate) mod backend_output_sink;
+pub(crate) mod backend_protocol_sink;
+pub(crate) mod cli_process;
+pub(crate) mod first_message_injector;
+pub(crate) mod skill_manager;
+pub(crate) mod team_guide_prompt;

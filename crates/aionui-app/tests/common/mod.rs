@@ -7,8 +7,8 @@ use http_body_util::BodyExt;
 use tower::ServiceExt;
 use wiremock::MockServer;
 
+use aionui_ai_agent::{AgentInstance, IAgentTask, IMockAgent, WorkerTaskManagerImpl};
 use aionui_app::{AppServices, build_module_states, create_router, create_router_with_states};
-use aionui_ai_agent::{AgentInstance, IMockAgent, IAgentTask, WorkerTaskManagerImpl};
 use aionui_extension::{ExternalPathsManager, SkillPaths, SkillRouterState};
 use aionui_file::FileService;
 use aionui_system::VersionCheckService;
@@ -117,7 +117,10 @@ pub async fn build_app_with_mock_agents() -> (axum::Router, AppServices) {
     });
     let wtm: std::sync::Arc<dyn aionui_ai_agent::IWorkerTaskManager> =
         std::sync::Arc::new(WorkerTaskManagerImpl::new(factory));
-    let services = AppServices::from_database(db).await.unwrap().with_worker_task_manager(wtm);
+    let services = AppServices::from_database(db)
+        .await
+        .unwrap()
+        .with_worker_task_manager(wtm);
     let router = create_router(&services).await;
     (router, services)
 }
