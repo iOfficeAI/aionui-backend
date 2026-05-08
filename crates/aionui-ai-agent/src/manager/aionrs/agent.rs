@@ -1,11 +1,11 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use aion_agent::bootstrap::AgentBootstrap;
 use aion_agent::engine::AgentEngine;
 use aion_agent::output::OutputSink;
 use aion_agent::session::Session;
-use aion_config::compat::ProviderCompat;
-use aion_config::config::{Config, ProviderType, SessionConfig};
+use aion_config::config::{CliArgs, Config};
 use aion_mcp::manager::McpManager;
 use aion_protocol::commands::SessionMode;
 use aion_protocol::{ToolApprovalManager, ToolApprovalResult};
@@ -55,60 +55,35 @@ impl AionrsAgentManager {
         let runtime = AgentRuntime::new(conversation_id.clone(), workspace.clone(), 128);
         let sink: Arc<dyn OutputSink> = Arc::new(BackendOutputSink::new(runtime.event_sender()));
 
-        let provider_type = match config_extra.provider.as_str() {
-            "openai" => ProviderType::OpenAI,
-            "bedrock" => ProviderType::Bedrock,
-            "vertex" => ProviderType::Vertex,
-            _ => ProviderType::Anthropic,
+        let cli_args = CliArgs {
+            provider: Some(config_extra.provider.clone()),
+            api_key: Some(config_extra.api_key.clone()),
+            base_url: config_extra.base_url.clone(),
+            model: Some(config_extra.model.clone()),
+            max_tokens: Some(config_extra.max_tokens),
+            max_turns: config_extra.max_turns,
+            system_prompt: config_extra.system_prompt.clone(),
+            profile: None,
+            auto_approve: config_extra.session_mode.as_deref() == Some("yolo"),
+            project_dir: Some(PathBuf::from(&workspace)),
         };
 
-        let mut compat = match provider_type {
-            ProviderType::OpenAI => ProviderCompat::openai_defaults(),
-            ProviderType::Bedrock => ProviderCompat::bedrock_defaults(),
-            ProviderType::Anthropic | ProviderType::Vertex => ProviderCompat::anthropic_defaults(),
-        };
+        let mut config = Config::resolve(&cli_args)
+            .map_err(|e| AppError::Internal(format!("Config resolve failed: {e}")))?;
+
+        // Backend-specific overrides
+        config.session.enabled = true;
+        config.session.directory = config_extra.session_directory.to_string_lossy().into_owned();
+
         if let Some(field) = config_extra.compat_overrides.max_tokens_field {
-            compat.max_tokens_field = Some(field);
+            config.compat.max_tokens_field = Some(field);
         }
         if let Some(path) = config_extra.compat_overrides.api_path {
-            compat.api_path = Some(path);
+            config.compat.api_path = Some(path);
         }
 
-        let prompt_caching = matches!(
-            provider_type,
-            ProviderType::Anthropic | ProviderType::Bedrock | ProviderType::Vertex
-        );
-
         let is_resume = resume_session.is_some();
-        let provider_label = config_extra.provider.clone();
-
-        let config = Config {
-            provider_label: provider_label.clone(),
-            provider: provider_type,
-            api_key: config_extra.api_key,
-            base_url: config_extra.base_url.unwrap_or_default(),
-            model: config_extra.model,
-            max_tokens: config_extra.max_tokens,
-            max_turns: config_extra.max_turns,
-            system_prompt: config_extra.system_prompt,
-            thinking: None,
-            prompt_caching,
-            compat,
-            tools: Default::default(),
-            session: SessionConfig {
-                enabled: true,
-                directory: config_extra.session_directory.to_string_lossy().into_owned(),
-                ..Default::default()
-            },
-            compact: Default::default(),
-            plan: Default::default(),
-            file_cache: Default::default(),
-            hooks: Default::default(),
-            bedrock: None,
-            vertex: None,
-            mcp: Default::default(),
-            debug: Default::default(),
-        };
+        let provider_label = config.provider_label.clone();
 
         let mut bootstrap = AgentBootstrap::new(config, &workspace, sink);
         if let Some(session) = resume_session {
