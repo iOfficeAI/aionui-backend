@@ -2,7 +2,7 @@ use crate::agent_runtime::AgentRuntime;
 use crate::capability::cli_process::CliAgentProcess;
 use crate::capability::skill_manager::AcpSkillManager;
 use crate::factory::acp_assembler::AcpSessionParams;
-use crate::manager::acp::{AcpSession, AcpSessionEvent, PermissionRouter, PersistedSessionState};
+use crate::manager::acp::{AcpSession, AcpSessionEvent, PermissionRouter};
 use crate::protocol::acp::AcpProtocol;
 use crate::protocol::events::AgentStreamEvent;
 use crate::registry::CatalogSender;
@@ -18,7 +18,6 @@ use aionui_common::{
     AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, TimestampMs, normalize_keys_to_snake_case,
 };
 use serde_json::Value;
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
@@ -107,11 +106,6 @@ impl AcpAgentManager {
             .filter(|mode| !mode.is_empty())
     }
 
-    async fn update_cached_mode(&self, mode: &str) {
-        let mut session = self.session.write().await;
-        session.apply_partial_mode_update(ModeId::new(mode));
-    }
-
     /// Execute reconcile actions produced by `AcpSession::plan_reconcile`.
     ///
     /// Compares the aggregate's desired state against what the CLI has
@@ -149,9 +143,35 @@ impl AcpAgentManager {
                         );
                         continue;
                     }
-                    self.update_cached_mode(&normalized).await;
+                    // SDK does not push a notification after a successful
+                    // set_mode — sync observed/advertised ourselves so the
+                    // next plan_reconcile is a no-op.
                     let mut session = self.session.write().await;
                     session.apply_observed_mode(ModeId::new(normalized));
+                    self.commit_session_changes(&mut session).await;
+                }
+                ReconcileAction::SetModel { model } => {
+                    if let Err(e) = self
+                        .protocol
+                        .set_model(SetSessionModelRequest::new(
+                            SessionId::new(session_id),
+                            model.as_str().to_owned(),
+                        ))
+                        .await
+                    {
+                        error!(
+                            conversation_id = %self.params.conversation_id,
+                            model_id = %model,
+                            error = %e,
+                            "reconcile_session: set_model failed"
+                        );
+                        continue;
+                    }
+                    // SDK does not push a CurrentModelUpdate notification —
+                    // sync observed/advertised ourselves.
+                    let mut session = self.session.write().await;
+                    session.apply_observed_model(model);
+                    self.commit_session_changes(&mut session).await;
                 }
                 ReconcileAction::SetConfigOption { key, value } => {
                     if let Err(err) = self
@@ -169,7 +189,14 @@ impl AcpAgentManager {
                             error = %err,
                             "reconcile_session: set_config_option failed; skipping"
                         );
+                        continue;
                     }
+                    // Sync observed ourselves so the next plan_reconcile
+                    // does not replay this action. CLI does not push a
+                    // config-update notification after set_config_option.
+                    let mut session = self.session.write().await;
+                    session.apply_observed_config(key, value);
+                    self.commit_session_changes(&mut session).await;
                 }
             }
         }
@@ -181,21 +208,26 @@ impl AcpAgentManager {
     }
 
     /// Set the model for the current session.
+    ///
+    /// Mirrors `set_mode`: writes user intent into the aggregate's Desired
+    /// layer, then delegates to `reconcile_session` for the SDK call.
+    /// `reconcile_session` is the sole call-site of `protocol.set_model` —
+    /// it also handles the observed sync since the CLI does not emit a
+    /// CurrentModelUpdate notification after `session/set_model`.
     pub async fn set_model_info(&self, model_id: &str) -> Result<(), AppError> {
-        let sid = self.require_session_id().await?;
+        let session_id = self.session.read().await.session_id().map(ToOwned::to_owned);
 
-        self.protocol
-            .set_model(SetSessionModelRequest::new(SessionId::new(sid), model_id.to_owned()))
-            .await
-            .map_err(AppError::from)?;
-
-        // Update the session immediately since SDK does not send a
-        // CurrentModelUpdate notification for model changes.
         {
             let mut session = self.session.write().await;
-            session.update_current_model(ModelId::new(model_id));
+            session.set_desired_model(ModelId::new(model_id));
+            self.commit_session_changes(&mut session).await;
         }
 
+        if let Some(sid) = session_id {
+            self.reconcile_session(&sid).await;
+        } else {
+            return Err(AppError::BadRequest("No active session".into()));
+        }
         Ok(())
     }
 
@@ -277,7 +309,6 @@ impl AcpAgentManager {
         // events that were broadcast for the UI (e.g. from emit_snapshot_events).
         let (notification_tx, notification_rx) = mpsc::channel::<SessionNotification>(256);
 
-        // Connect via ACP SDK — executes initialize handshake
         let protocol = AcpProtocol::connect(stdin, stdout, runtime.event_sender(), permission_tx, notification_tx)
             .await
             .map_err(|e| {
@@ -289,11 +320,6 @@ impl AcpAgentManager {
                 AppError::from(e)
             })?;
 
-        // Push the static handshake payloads (agent_capabilities +
-        // auth_methods) through the catalog sync channel. Session-driven
-        // fields — modes, models, config_options, commands — flow
-        // through the `CatalogForwarder` the factory spawns after
-        // construction.
         let init_handshake = AgentHandshake {
             agent_capabilities: protocol.agent_capabilities().and_then(|c| sdk_to_snake_value(&c)),
             auth_methods: protocol.auth_methods().and_then(|m| sdk_to_snake_value(&m)),
@@ -303,14 +329,37 @@ impl AcpAgentManager {
             catalog_tx.send_partial(params.metadata.id.clone(), init_handshake);
         }
 
-        let initial_mode = params
-            .config
-            .session_mode
-            .as_ref()
-            .map(|m| normalize_requested_mode(&params.metadata, m))
+        let snapshot = params.session_snapshot.as_ref();
+
+        // Prefer the last-persisted mode; for brand-new conversations
+        // fall back to `AcpBuildExtra::session_mode` so the first turn
+        // still honours the caller's choice.
+        let initial_mode = snapshot
+            .and_then(|s| s.current_mode_id.as_ref())
+            .map(|m| normalize_requested_mode(&params.metadata, m.as_str()))
+            .or_else(|| {
+                params
+                    .config
+                    .session_mode
+                    .as_ref()
+                    .map(|m| normalize_requested_mode(&params.metadata, m))
+            })
             .filter(|m| !m.is_empty())
             .map(ModeId::new);
-        let mut session = AcpSession::new(initial_mode, HashMap::new());
+
+        let initial_model = snapshot.and_then(|s| s.current_model_id.clone());
+        let initial_config = snapshot.map(|s| s.config_selections.clone()).unwrap_or_default();
+
+        let mut session = AcpSession::new(initial_mode, initial_model, initial_config);
+        // Seed the observed/advertised layers (observed mode/model, cached
+        // context_usage) from the persisted snapshot. Desired fields are
+        // already populated via `AcpSession::new`.
+        if let Some(snapshot) = snapshot {
+            session.preload_persisted(snapshot);
+            // Preload did not come from the user this turn — drain so the
+            // persistence consumer doesn't echo the DB back into itself.
+            session.drain_events();
+        }
         if let Some(agent_capabilities) = protocol.agent_capabilities() {
             session.apply_advertised_capabilities(agent_capabilities);
         }
@@ -347,26 +396,6 @@ impl AcpAgentManager {
         for event in session.drain_events() {
             let _ = self.domain_event_tx.send(event).await;
         }
-    }
-
-    /// Seed the session aggregate with the user's last choices. Called
-    /// by `ConversationService` on resume paths, before dispatching
-    /// `send_message`. `None` fields are ignored — the CLI's
-    /// `session/load` response fills in whatever the preload omits.
-    pub async fn preload_snapshot(&self, state: PersistedSessionState) {
-        let mut session = self.session.write().await;
-        session.preload_persisted(&state);
-        if let Some(mode) = &state.current_mode_id {
-            let normalized = normalize_requested_mode(&self.params.metadata, mode.as_str());
-            if !normalized.is_empty() {
-                session.set_desired_mode(ModeId::new(normalized));
-            }
-        }
-        for (key, value) in &state.config_selections {
-            session.set_desired_config(key.clone(), value.clone());
-        }
-        // Preload events are discarded — the DB already has these values.
-        session.drain_events();
     }
 
     /// Initialize or resume a session, then send the user message.
@@ -679,15 +708,12 @@ impl AcpAgentManager {
             self.commit_session_changes(&mut session).await;
         }
 
-        // Optimistically update advertised.modes.current_mode_id so get_mode()
-        // reflects the user's choice immediately. reconcile_session pushes the
-        // actual SDK call; the advertised state is then confirmed (or corrected)
-        // when the CLI's next SessionNotification arrives via event_tracker.
-        self.update_cached_mode(&normalized_mode).await;
-
-        // If a session is open, reconcile to the CLI. After this change, this is
-        // the SOLE call-site of `protocol.set_mode` in the crate — the aggregate
-        // root's reconcile path owns SDK alignment end-to-end.
+        // If a session is open, reconcile to the CLI. `reconcile_session`
+        // is the sole call-site of `protocol.set_mode` and the sole
+        // observed/advertised write-point — on success it calls
+        // `apply_observed_mode`, which syncs both layers and emits
+        // `ObservedModeSynced`. `get_mode()` reflects the change as soon
+        // as the SDK call returns.
         if let Some(sid) = session_id {
             self.reconcile_session(&sid).await;
         }

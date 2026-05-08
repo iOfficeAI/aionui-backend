@@ -573,3 +573,4 @@ data/
 .graphify_python
 .graphify_detect.json
 graphify-out/
+.graphify_*

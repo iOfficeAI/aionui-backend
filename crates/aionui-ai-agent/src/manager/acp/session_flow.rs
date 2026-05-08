@@ -88,10 +88,10 @@ impl AcpAgentManager {
 
     /// Resume an existing session and send a message.
     ///
-    /// Assumes `preload_snapshot` has already been called by the
-    /// caller (conversation service) on resume paths — the session
-    /// aggregate may therefore already carry `current_mode_id` / `current_model_id`
-    /// from `acp_session.session_config.runtime`. When the CLI's
+    /// The session aggregate is seeded during `AcpAgentManager::new`
+    /// from `params.session_snapshot` — on resume paths it already
+    /// carries `current_mode_id` / `current_model_id` from
+    /// `acp_session.session_config.runtime`. When the CLI's
     /// `session/load` response arrives, we merge it in but keep the
     /// preloaded `current_*` values because they reflect the user's
     /// last explicit choice; the CLI's own `current_*` is only used

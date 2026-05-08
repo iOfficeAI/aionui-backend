@@ -1,4 +1,4 @@
-use crate::shared_kernel::{ConfigKey, ConfigValue, ModeId};
+use crate::shared_kernel::{ConfigKey, ConfigValue, ModeId, ModelId};
 
 /// Actions the session driver must execute to align CLI state with user intent.
 ///
@@ -7,6 +7,7 @@ use crate::shared_kernel::{ConfigKey, ConfigValue, ModeId};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReconcileAction {
     SetMode { mode: ModeId },
+    SetModel { model: ModelId },
     SetConfigOption { key: ConfigKey, value: ConfigValue },
 }
 

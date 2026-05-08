@@ -7,25 +7,13 @@ use agent_client_protocol::schema::{
 
 use super::events::AcpSessionEvent;
 use super::reconcile::ReconcileAction;
-use crate::shared_kernel::{ConfigKey, ConfigValue, ModeId, ModelId, SessionId};
-
-/// Decoded per-session runtime state loaded from `acp_session.session_config.runtime`.
-///
-/// Only carries the user's last *choices* — the enumerations of what
-/// the agent supports (mode list, model list, config schema) come from
-/// the CLI's session response after initialization.
-#[derive(Debug, Clone, Default)]
-pub struct PersistedSessionState {
-    pub current_mode_id: Option<ModeId>,
-    pub current_model_id: Option<ModelId>,
-    pub config_selections: HashMap<ConfigKey, ConfigValue>,
-    pub context_usage: Option<UsageUpdate>,
-}
+use crate::shared_kernel::{ConfigKey, ConfigValue, ModeId, ModelId, PersistedSessionState, SessionId};
 
 /// What the user wants the session to be (intent).
 #[derive(Debug, Clone, Default)]
 struct Desired {
     mode_id: Option<ModeId>,
+    model_id: Option<ModelId>,
     config_selections: HashMap<ConfigKey, ConfigValue>,
 }
 
@@ -70,12 +58,17 @@ pub struct AcpSession {
 }
 
 impl AcpSession {
-    pub fn new(initial_mode: Option<ModeId>, config_selections: HashMap<ConfigKey, ConfigValue>) -> Self {
+    pub fn new(
+        initial_mode: Option<ModeId>,
+        initial_model: Option<ModelId>,
+        config_selections: HashMap<ConfigKey, ConfigValue>,
+    ) -> Self {
         Self {
             session_id: None,
             opened: false,
             desired: Desired {
                 mode_id: initial_mode,
+                model_id: initial_model,
                 config_selections,
             },
             observed: Observed::default(),
@@ -83,9 +76,10 @@ impl AcpSession {
             pending_events: Vec::new(),
         }
     }
+}
 
-    // ─── Getters ───────────────────────────────────────────────────────
-
+// ─── Getters ───────────────────────────────────────────────────────
+impl AcpSession {
     pub fn session_id(&self) -> Option<&str> {
         self.session_id.as_ref().map(SessionId::as_str)
     }
@@ -97,7 +91,10 @@ impl AcpSession {
     pub fn is_opened(&self) -> bool {
         self.opened
     }
+}
 
+// ─── Getters desired ───────────────────────────────────────────────────────
+impl AcpSession {
     pub fn desired_mode(&self) -> Option<&str> {
         self.desired.mode_id.as_ref().map(ModeId::as_str)
     }
@@ -106,6 +103,21 @@ impl AcpSession {
         self.desired.mode_id.as_ref()
     }
 
+    pub fn desired_model(&self) -> Option<&str> {
+        self.desired.model_id.as_ref().map(ModelId::as_str)
+    }
+
+    pub fn desired_model_id(&self) -> Option<&ModelId> {
+        self.desired.model_id.as_ref()
+    }
+
+    pub fn desired_config_selections(&self) -> &HashMap<ConfigKey, ConfigValue> {
+        &self.desired.config_selections
+    }
+}
+
+// ─── Getters observed ───────────────────────────────────────────────────────
+impl AcpSession {
     pub fn observed_mode(&self) -> Option<&str> {
         self.observed.mode_id.as_ref().map(ModeId::as_str)
     }
@@ -121,11 +133,10 @@ impl AcpSession {
     pub fn observed_model_id(&self) -> Option<&ModelId> {
         self.observed.model_id.as_ref()
     }
+}
 
-    pub fn config_selections(&self) -> &HashMap<ConfigKey, ConfigValue> {
-        &self.desired.config_selections
-    }
-
+// ─── Getters advertised ───────────────────────────────────────────────────────
+impl AcpSession {
     pub fn modes(&self) -> Option<&SessionModeState> {
         self.advertised.modes.as_ref()
     }
@@ -158,8 +169,13 @@ impl AcpSession {
         self.advertised.modes.as_ref().map(|m| m.current_mode_id.to_string())
     }
 
-    // ─── Commands (mutate + emit events) ───────────────────────────────
+    pub fn current_model_id(&self) -> Option<String> {
+        self.advertised.models.as_ref().map(|m| m.current_model_id.to_string())
+    }
+}
 
+// ─── Commands (mutate + emit events) ───────────────────────────────
+impl AcpSession {
     /// Assign (or restore) a session ID. Idempotent: re-assigning the same
     /// ID is a no-op. Assigning a *different* ID after one is already set
     /// is an invariant violation (the aggregate must be recreated).
@@ -199,6 +215,24 @@ impl AcpSession {
         true
     }
 
+    /// Set the user's desired model. Emits `DesiredModelChanged` if the
+    /// value actually changed. When advertised models are known, the model
+    /// must be in the list (otherwise the call is a no-op).
+    pub fn set_desired_model(&mut self, model: ModelId) -> bool {
+        if model.as_str().is_empty() {
+            return false;
+        }
+        if !self.is_model_valid(model.as_str()) {
+            return false;
+        }
+        if self.desired.model_id.as_ref() == Some(&model) {
+            return false;
+        }
+        self.desired.model_id = Some(model.clone());
+        self.pending_events.push(AcpSessionEvent::DesiredModelChanged { model });
+        true
+    }
+
     /// Set a user's desired config selection.
     pub fn set_desired_config(&mut self, key: ConfigKey, value: ConfigValue) {
         let changed = self.desired.config_selections.get(&key) != Some(&value);
@@ -209,22 +243,58 @@ impl AcpSession {
                 .push(AcpSessionEvent::DesiredConfigChanged { selections });
         }
     }
+}
 
-    // ─── Observations (from CLI responses/notifications) ───────────────
-
+// ─── Observations (from CLI responses/notifications) ───────────────
+impl AcpSession {
+    /// Record the CLI's current mode. Updates both `observed.mode_id` and
+    /// the `advertised.modes.current_mode_id` (available_modes preserved);
+    /// emits `ObservedModeSynced` when the value actually changed.
     pub fn apply_observed_mode(&mut self, mode: ModeId) {
         let changed = self.observed.mode_id.as_ref() != Some(&mode);
         self.observed.mode_id = Some(mode.clone());
+        let available = self
+            .advertised
+            .modes
+            .as_ref()
+            .map(|m| m.available_modes.clone())
+            .unwrap_or_default();
+        self.advertised.modes = Some(SessionModeState::new(mode.as_str().to_owned(), available));
         if changed {
             self.pending_events.push(AcpSessionEvent::ObservedModeSynced { mode });
         }
     }
 
+    /// Record the CLI's current model. Updates both `observed.model_id` and
+    /// the `advertised.models.current_model_id` (available_models preserved);
+    /// emits `ObservedModelSynced` when the value actually changed.
     pub fn apply_observed_model(&mut self, model: ModelId) {
         let changed = self.observed.model_id.as_ref() != Some(&model);
         self.observed.model_id = Some(model.clone());
+        let available = self
+            .advertised
+            .models
+            .as_ref()
+            .map(|m| m.available_models.clone())
+            .unwrap_or_default();
+        self.advertised.models = Some(SessionModelState::new(model.as_str().to_owned(), available));
         if changed {
             self.pending_events.push(AcpSessionEvent::ObservedModelSynced { model });
+        }
+    }
+
+    /// Record the CLI's current value for a single config option. Mirrors
+    /// `apply_observed_mode/model`: diff-driven, emits `ObservedConfigSynced`
+    /// with the full selection map when the value actually changed. Used by
+    /// the reconcile loop after a successful `set_config_option` so
+    /// `plan_reconcile` treats the drift as resolved.
+    pub fn apply_observed_config(&mut self, key: ConfigKey, value: ConfigValue) {
+        let changed = self.observed.config_current.get(&key) != Some(&value);
+        self.observed.config_current.insert(key, value);
+        if changed {
+            let selections = self.observed.config_current.clone();
+            self.pending_events
+                .push(AcpSessionEvent::ObservedConfigSynced { selections });
         }
     }
 
@@ -239,14 +309,22 @@ impl AcpSession {
     }
 
     pub fn apply_advertised_config_options(&mut self, options: Vec<SessionConfigOption>) {
+        let mut changed = false;
         for opt in &options {
             if let Some(current) = extract_config_current_value(&opt.kind) {
-                self.observed
-                    .config_current
-                    .insert(ConfigKey::new(opt.id.to_string()), ConfigValue::new(current));
+                let key = ConfigKey::new(opt.id.to_string());
+                let value = ConfigValue::new(current);
+                if self.observed.config_current.insert(key, value.clone()).as_ref() != Some(&value) {
+                    changed = true;
+                }
             }
         }
         self.advertised.config_options = Some(options);
+        if changed {
+            let selections = self.observed.config_current.clone();
+            self.pending_events
+                .push(AcpSessionEvent::ObservedConfigSynced { selections });
+        }
     }
 
     pub fn apply_advertised_capabilities(&mut self, caps: AgentCapabilities) {
@@ -264,17 +342,9 @@ impl AcpSession {
     pub fn apply_context_usage(&mut self, usage: UsageUpdate) {
         self.advertised.context_usage = Some(usage);
     }
+}
 
-    /// Update the model's current_model_id in place without replacing
-    /// the available models list. Used after a successful `set_model` call.
-    pub fn update_current_model(&mut self, model: ModelId) {
-        if let Some(info) = &self.advertised.models {
-            let updated = SessionModelState::new(model.as_str().to_owned(), info.available_models.clone());
-            self.advertised.models = Some(updated);
-        }
-        self.observed.model_id = Some(model);
-    }
-
+impl AcpSession {
     /// Seed the aggregate with persisted user choices from DB.
     /// Called on resume paths before the CLI session/load response arrives.
     pub fn preload_persisted(&mut self, state: &PersistedSessionState) {
@@ -293,20 +363,10 @@ impl AcpSession {
             self.advertised.context_usage = Some(usage.clone());
         }
     }
+}
 
-    /// Apply a partial mode update (only currentModeId changed, keep available_modes).
-    pub fn apply_partial_mode_update(&mut self, current_mode: ModeId) {
-        if let Some(existing) = &self.advertised.modes {
-            let available = existing.available_modes.clone();
-            self.advertised.modes = Some(SessionModeState::new(current_mode.as_str().to_owned(), available));
-        } else {
-            self.advertised.modes = Some(SessionModeState::new(current_mode.as_str().to_owned(), Vec::new()));
-        }
-        self.observed.mode_id = Some(current_mode);
-    }
-
-    // ─── Reconcile ─────────────────────────────────────────────────────
-
+// ─── Reconcile ─────────────────────────────────────────────────────
+impl AcpSession {
     /// Produce a list of actions needed to align CLI state with user intent.
     /// Pure function — no side effects. The driver executes the actions.
     pub fn plan_reconcile(&self) -> Vec<ReconcileAction> {
@@ -317,6 +377,14 @@ impl AcpSession {
         {
             actions.push(ReconcileAction::SetMode {
                 mode: desired_mode.clone(),
+            });
+        }
+
+        if let Some(desired_model) = &self.desired.model_id
+            && self.observed.model_id.as_ref() != Some(desired_model)
+        {
+            actions.push(ReconcileAction::SetModel {
+                model: desired_model.clone(),
             });
         }
 
@@ -348,6 +416,17 @@ impl AcpSession {
             Some(modes) => modes.available_modes.iter().any(|m| m.id.0.as_ref() == mode_id),
         }
     }
+
+    fn is_model_valid(&self, model_id: &str) -> bool {
+        match &self.advertised.models {
+            None => true,
+            Some(models) if models.available_models.is_empty() => true,
+            Some(models) => models
+                .available_models
+                .iter()
+                .any(|m| m.model_id.0.as_ref() == model_id),
+        }
+    }
 }
 
 fn extract_config_current_value(kind: &SessionConfigKind) -> Option<String> {
@@ -364,7 +443,7 @@ mod tests {
     use super::*;
 
     fn make_session() -> AcpSession {
-        AcpSession::new(Some(ModeId::new("default")), HashMap::new())
+        AcpSession::new(Some(ModeId::new("default")), None, HashMap::new())
     }
 
     #[test]
@@ -460,6 +539,99 @@ mod tests {
     }
 
     #[test]
+    fn apply_observed_mode_syncs_advertised_current_without_losing_available() {
+        use agent_client_protocol::schema::SessionMode;
+        let mut session = make_session();
+        session.apply_advertised_modes(SessionModeState::new(
+            "default",
+            vec![SessionMode::new("default", "Default"), SessionMode::new("plan", "Plan")],
+        ));
+        session.drain_events();
+
+        session.apply_observed_mode(ModeId::new("plan"));
+
+        assert_eq!(session.observed_mode(), Some("plan"));
+        assert_eq!(session.current_mode_id().as_deref(), Some("plan"));
+        let modes = session.modes().expect("modes present");
+        assert_eq!(modes.available_modes.len(), 2, "available_modes must be preserved");
+    }
+
+    #[test]
+    fn apply_observed_model_syncs_advertised_current_without_losing_available() {
+        use agent_client_protocol::schema::ModelInfo;
+        let mut session = make_session();
+        session.apply_advertised_models(SessionModelState::new(
+            "claude-sonnet-4",
+            vec![
+                ModelInfo::new("claude-sonnet-4", "Sonnet 4"),
+                ModelInfo::new("claude-opus-4", "Opus 4"),
+            ],
+        ));
+        session.drain_events();
+
+        session.apply_observed_model(ModelId::new("claude-opus-4"));
+
+        assert_eq!(session.observed_model(), Some("claude-opus-4"));
+        assert_eq!(session.current_model_id().as_deref(), Some("claude-opus-4"));
+        let models = session.model_info().expect("models present");
+        assert_eq!(models.available_models.len(), 2, "available_models must be preserved");
+    }
+
+    #[test]
+    fn apply_observed_mode_creates_advertised_when_empty() {
+        let mut session = make_session();
+        session.apply_observed_mode(ModeId::new("plan"));
+        assert_eq!(session.current_mode_id().as_deref(), Some("plan"));
+    }
+
+    #[test]
+    fn apply_observed_model_creates_advertised_when_empty() {
+        let mut session = make_session();
+        session.apply_observed_model(ModelId::new("claude-opus-4"));
+        assert_eq!(session.current_model_id().as_deref(), Some("claude-opus-4"));
+    }
+
+    #[test]
+    fn apply_observed_config_emits_on_change_and_is_idempotent() {
+        let mut session = make_session();
+        session.apply_observed_config(ConfigKey::new("reasoning"), ConfigValue::new("high"));
+        let events = session.drain_events();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            AcpSessionEvent::ObservedConfigSynced { selections } => {
+                assert_eq!(
+                    selections.get(&ConfigKey::new("reasoning")),
+                    Some(&ConfigValue::new("high"))
+                );
+            }
+            other => panic!("expected ObservedConfigSynced, got {other:?}"),
+        }
+
+        // Idempotent repeat: no new event.
+        session.apply_observed_config(ConfigKey::new("reasoning"), ConfigValue::new("high"));
+        assert!(session.drain_events().is_empty());
+    }
+
+    #[test]
+    fn apply_observed_config_closes_plan_reconcile_drift() {
+        let mut session = AcpSession::new(None, None, HashMap::new());
+        session.set_desired_config(ConfigKey::new("reasoning"), ConfigValue::new("high"));
+        assert_eq!(
+            session.plan_reconcile(),
+            vec![ReconcileAction::SetConfigOption {
+                key: ConfigKey::new("reasoning"),
+                value: ConfigValue::new("high"),
+            }]
+        );
+
+        session.apply_observed_config(ConfigKey::new("reasoning"), ConfigValue::new("high"));
+        assert!(
+            session.plan_reconcile().is_empty(),
+            "plan_reconcile must be a no-op once observed catches up to desired",
+        );
+    }
+
+    #[test]
     fn plan_reconcile_detects_mode_drift() {
         let mut session = make_session();
         session.set_desired_mode(ModeId::new("plan"));
@@ -483,7 +655,7 @@ mod tests {
 
     #[test]
     fn plan_reconcile_detects_config_drift() {
-        let mut session = AcpSession::new(None, HashMap::new());
+        let mut session = AcpSession::new(None, None, HashMap::new());
         session.set_desired_config(ConfigKey::new("reasoning"), ConfigValue::new("high"));
         let actions = session.plan_reconcile();
         assert_eq!(
@@ -497,7 +669,7 @@ mod tests {
 
     #[test]
     fn plan_reconcile_config_aligned_when_observed_matches() {
-        let mut session = AcpSession::new(None, HashMap::new());
+        let mut session = AcpSession::new(None, None, HashMap::new());
         session.set_desired_config(ConfigKey::new("reasoning"), ConfigValue::new("high"));
 
         session.apply_advertised_config_options(vec![SessionConfigOption::select(
@@ -537,12 +709,150 @@ mod tests {
     }
 
     #[test]
+    fn set_desired_model_emits_when_changed() {
+        let mut session = make_session();
+        assert!(session.set_desired_model(ModelId::new("claude-sonnet-4")));
+        assert_eq!(session.desired_model(), Some("claude-sonnet-4"));
+        let events = session.drain_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0],
+            AcpSessionEvent::DesiredModelChanged {
+                model: ModelId::new("claude-sonnet-4"),
+            }
+        );
+    }
+
+    #[test]
+    fn set_desired_model_rejects_empty() {
+        let mut session = make_session();
+        assert!(!session.set_desired_model(ModelId::new("")));
+        assert!(session.drain_events().is_empty());
+    }
+
+    #[test]
+    fn set_desired_model_no_op_when_unchanged() {
+        let mut session = make_session();
+        session.set_desired_model(ModelId::new("claude-sonnet-4"));
+        session.drain_events();
+        assert!(!session.set_desired_model(ModelId::new("claude-sonnet-4")));
+        assert!(session.drain_events().is_empty());
+    }
+
+    #[test]
+    fn set_desired_model_validates_against_advertised() {
+        use agent_client_protocol::schema::ModelInfo;
+        let mut session = make_session();
+        session.apply_advertised_models(SessionModelState::new(
+            "claude-sonnet-4",
+            vec![
+                ModelInfo::new("claude-sonnet-4", "Sonnet 4"),
+                ModelInfo::new("claude-opus-4", "Opus 4"),
+            ],
+        ));
+        assert!(session.set_desired_model(ModelId::new("claude-opus-4")));
+        assert!(!session.set_desired_model(ModelId::new("nonexistent")));
+    }
+
+    #[test]
+    fn set_desired_model_allows_any_when_advertised_empty() {
+        let mut session = make_session();
+        assert!(session.set_desired_model(ModelId::new("anything")));
+    }
+
+    #[test]
+    fn apply_observed_model_does_not_change_desired_model() {
+        let mut session = make_session();
+        session.set_desired_model(ModelId::new("claude-opus-4"));
+        session.drain_events();
+        session.apply_observed_model(ModelId::new("claude-sonnet-4"));
+        assert_eq!(session.desired_model(), Some("claude-opus-4"));
+        assert_eq!(session.observed_model(), Some("claude-sonnet-4"));
+    }
+
+    #[test]
+    fn plan_reconcile_detects_model_drift() {
+        let mut session = AcpSession::new(None, None, HashMap::new());
+        session.set_desired_model(ModelId::new("claude-opus-4"));
+        session.apply_observed_model(ModelId::new("claude-sonnet-4"));
+        let actions = session.plan_reconcile();
+        assert_eq!(
+            actions,
+            vec![ReconcileAction::SetModel {
+                model: ModelId::new("claude-opus-4"),
+            }]
+        );
+    }
+
+    #[test]
+    fn plan_reconcile_model_aligned_when_observed_matches() {
+        let mut session = AcpSession::new(None, None, HashMap::new());
+        session.set_desired_model(ModelId::new("claude-opus-4"));
+        session.apply_observed_model(ModelId::new("claude-opus-4"));
+        assert!(session.plan_reconcile().is_empty());
+    }
+
+    #[test]
+    fn new_with_initial_model_sets_desired_model() {
+        let session = AcpSession::new(None, Some(ModelId::new("claude-opus-4")), HashMap::new());
+        assert_eq!(session.desired_model(), Some("claude-opus-4"));
+    }
+
+    #[test]
+    fn apply_advertised_config_options_emits_observed_config_synced_on_change() {
+        let mut session = AcpSession::new(None, None, HashMap::new());
+        session.apply_advertised_config_options(vec![SessionConfigOption::select(
+            "reasoning",
+            "Reasoning",
+            "high",
+            vec![
+                SessionConfigSelectOption::new("low", "Low"),
+                SessionConfigSelectOption::new("high", "High"),
+            ],
+        )]);
+        let events = session.drain_events();
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            AcpSessionEvent::ObservedConfigSynced { selections } => {
+                assert_eq!(
+                    selections.get(&ConfigKey::new("reasoning")),
+                    Some(&ConfigValue::new("high"))
+                );
+            }
+            other => panic!("expected ObservedConfigSynced, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn apply_advertised_config_options_idempotent_when_unchanged() {
+        let mut session = AcpSession::new(None, None, HashMap::new());
+        let options = vec![SessionConfigOption::select(
+            "reasoning",
+            "Reasoning",
+            "high",
+            vec![
+                SessionConfigSelectOption::new("low", "Low"),
+                SessionConfigSelectOption::new("high", "High"),
+            ],
+        )];
+        session.apply_advertised_config_options(options.clone());
+        session.drain_events();
+
+        session.apply_advertised_config_options(options);
+        let events = session.drain_events();
+        assert!(
+            events.is_empty(),
+            "no ObservedConfigSynced when observed unchanged, got {events:?}"
+        );
+    }
+
+    #[test]
     fn set_desired_mode_plus_plan_reconcile_produces_set_mode_action() {
         // This test documents the Stage 4 invariant: the manager's set_mode
         // should only (a) call set_desired_mode on the aggregate and (b) delegate
         // to plan_reconcile for the SDK call. Plan_reconcile should emit
         // ReconcileAction::SetMode when desired and observed diverge.
-        let mut session = AcpSession::new(None, Default::default());
+        let mut session = AcpSession::new(None, None, Default::default());
         session.apply_advertised_modes(SessionModeState::new(
             "default".to_owned(),
             vec![SessionMode::new("default", "Default"), SessionMode::new("plan", "Plan")],

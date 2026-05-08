@@ -9,12 +9,15 @@ use crate::shared_kernel::{ConfigKey, ConfigValue, ModeId, ModelId, SessionId};
 /// decide which to write to DB without re-interpreting UI stream events.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AcpSessionEvent {
+    SessionOpened,
     SessionAssigned {
         session_id: SessionId,
     },
-    SessionOpened,
     DesiredModeChanged {
         mode: ModeId,
+    },
+    DesiredModelChanged {
+        model: ModelId,
     },
     DesiredConfigChanged {
         selections: HashMap<ConfigKey, ConfigValue>,
@@ -24,6 +27,9 @@ pub enum AcpSessionEvent {
     },
     ObservedModelSynced {
         model: ModelId,
+    },
+    ObservedConfigSynced {
+        selections: HashMap<ConfigKey, ConfigValue>,
     },
 }
 

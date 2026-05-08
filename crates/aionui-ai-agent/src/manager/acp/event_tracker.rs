@@ -107,7 +107,7 @@ mod tests {
 
     #[test]
     fn apply_observed_mode_emits_exactly_one_event() {
-        let mut session = AcpSession::new(None, Default::default());
+        let mut session = AcpSession::new(None, None, Default::default());
 
         // First apply: should emit one event
         session.apply_observed_mode(ModeId::new("plan"));
@@ -140,7 +140,7 @@ mod tests {
         // but does NOT push to `pending_events` (unlike apply_observed_mode).
         // This is intentional: the advertised layer is not tracked as a domain
         // event. Verify this so we know what the old tracker loop was NOT doing.
-        let mut session = AcpSession::new(None, Default::default());
+        let mut session = AcpSession::new(None, None, Default::default());
         let modes = SessionModeState::new("plan".to_owned(), vec![]);
         session.apply_advertised_modes(modes);
         let events = session.drain_events();
@@ -153,7 +153,7 @@ mod tests {
 
     #[test]
     fn apply_observed_model_emits_exactly_one_event_then_idempotent() {
-        let mut session = AcpSession::new(None, Default::default());
+        let mut session = AcpSession::new(None, None, Default::default());
 
         session.apply_observed_model(ModelId::new("claude-3-5-sonnet"));
         let events = session.drain_events();

@@ -15,9 +15,8 @@ use tokio::task::JoinHandle;
 use tokio::time::sleep_until;
 use tracing::{debug, warn};
 
-use crate::manager::acp::PersistedSessionState as SnapshotPersistedState;
 use crate::manager::acp::events::AcpSessionEvent;
-use crate::shared_kernel::{ConfigKey, ConfigValue, ModeId, ModelId};
+use crate::shared_kernel::{ConfigKey, ConfigValue, ModeId, ModelId, PersistedSessionState};
 
 const DEBOUNCE_WINDOW: Duration = Duration::from_millis(500);
 
@@ -56,7 +55,7 @@ impl AcpSessionSyncService {
     /// aggregate's value-object shape. Returns `None` when the row does
     /// not exist or the JSON payload is empty. Errors are logged and
     /// swallowed so the caller can proceed with a fresh session.
-    pub async fn load_snapshot_state(&self, conversation_id: &str) -> Option<SnapshotPersistedState> {
+    pub async fn load_snapshot_state(&self, conversation_id: &str) -> Option<PersistedSessionState> {
         let row = match self.repo.load_runtime_state(conversation_id).await {
             Ok(Some(row)) => row,
             Ok(None) => return None,
@@ -70,7 +69,7 @@ impl AcpSessionSyncService {
             }
         };
 
-        let mut state = SnapshotPersistedState {
+        let mut state = PersistedSessionState {
             current_mode_id: row.current_mode_id.map(ModeId::new),
             current_model_id: row.current_model_id.map(ModelId::new),
             ..Default::default()
@@ -166,7 +165,7 @@ impl PendingUpdate {
                 self.config_selections_json = Some(Some(json));
                 true
             }
-            AcpSessionEvent::ObservedModelSynced { model } => {
+            AcpSessionEvent::DesiredModelChanged { model } => {
                 self.current_model_id = Some(Some(model.as_str().to_owned()));
                 true
             }
@@ -374,6 +373,50 @@ mod tests {
             state.current_mode_id.as_deref(),
             Some("plan"),
             "pending update must flush on channel close"
+        );
+    }
+
+    /// DesiredModelChanged drives current_model_id persistence (mirrors
+    /// DesiredModeChanged). ObservedModelSynced must NOT write the DB —
+    /// persistence only reflects user intent, never CLI observation.
+    #[tokio::test(flavor = "current_thread")]
+    async fn desired_model_changed_persists_current_model_id() {
+        let (_svc, repo) = setup().await;
+        let (tx, rx) = mpsc::channel(64);
+
+        let cid = "conv-1".to_owned();
+        tokio::spawn(domain_event_consumer(cid, rx, repo.clone()));
+
+        tx.send(AcpSessionEvent::DesiredModelChanged {
+            model: "claude-opus-4".into(),
+        })
+        .await
+        .unwrap();
+
+        sleep(Duration::from_millis(700)).await;
+        let state = repo.load_runtime_state("conv-1").await.unwrap().unwrap();
+        assert_eq!(state.current_model_id.as_deref(), Some("claude-opus-4"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn observed_model_synced_does_not_persist() {
+        let (_svc, repo) = setup().await;
+        let (tx, rx) = mpsc::channel(64);
+
+        let cid = "conv-1".to_owned();
+        tokio::spawn(domain_event_consumer(cid, rx, repo.clone()));
+
+        tx.send(AcpSessionEvent::ObservedModelSynced {
+            model: "claude-opus-4".into(),
+        })
+        .await
+        .unwrap();
+
+        sleep(Duration::from_millis(700)).await;
+        let state = repo.load_runtime_state("conv-1").await.unwrap().unwrap();
+        assert!(
+            state.current_model_id.is_none(),
+            "ObservedModelSynced is UI-only; persistence must only come from DesiredModelChanged",
         );
     }
 

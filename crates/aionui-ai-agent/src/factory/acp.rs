@@ -1,15 +1,14 @@
 use std::sync::Arc;
 
-use aionui_api_types::AcpBuildExtra;
-use aionui_common::{AppError, CommandSpec};
-use tracing::{debug, info};
-
 use crate::agent_task::AgentInstance;
 use crate::factory::AgentFactoryDeps;
 use crate::factory::acp_assembler::{WorkspaceInfo, assemble_acp_params};
 use crate::factory::context::FactoryContext;
 use crate::manager::acp::{AcpAgentManager, CatalogForwarder};
 use crate::types::BuildTaskOptions;
+use aionui_api_types::AcpBuildExtra;
+use aionui_common::{AppError, CommandSpec};
+use tracing::{debug, info};
 
 pub(super) async fn build(
     deps: Arc<AgentFactoryDeps>,
@@ -61,36 +60,42 @@ pub(super) async fn build(
     // never had a command (e.g. remote-only). Either way the
     // caller needs to see a BadRequest, not a confusing
     // spawn-time error.
-    let command = meta
-        .resolved_command
-        .clone()
-        .ok_or_else(|| AppError::BadRequest(format!("Agent '{}' CLI not found in PATH", meta.name)))?;
-    let args = meta.args.clone();
-    let env = meta
-        .env
-        .iter()
-        .map(|e| aionui_common::EnvVar {
-            name: e.name.clone(),
-            value: e.value.clone(),
-        })
-        .collect();
+    let (command, args, env, cwd) = (
+        meta.resolved_command
+            .clone()
+            .ok_or_else(|| AppError::BadRequest(format!("Agent '{}' CLI not found in PATH", meta.name)))?,
+        meta.args.clone(),
+        meta.env
+            .iter()
+            .map(|e| aionui_common::EnvVar {
+                name: e.name.clone(),
+                value: e.value.clone(),
+            })
+            .collect(),
+        Some(ctx.workspace.clone()),
+    );
     let command_spec = CommandSpec {
         command,
         args,
         env,
-        cwd: Some(ctx.workspace.clone()),
+        cwd,
     };
+    let session_snapshot = deps.acp_agent_service.load_snapshot_state(&ctx.conversation_id).await;
 
-    let params = Arc::new(assemble_acp_params(
-        ctx.conversation_id.clone(),
-        WorkspaceInfo {
-            path: ctx.workspace,
-            is_custom: ctx.is_custom_workspace,
-        },
-        meta,
-        command_spec,
-        config,
-    ));
+    let params = Arc::new(
+        assemble_acp_params(
+            ctx.conversation_id.clone(),
+            WorkspaceInfo {
+                path: ctx.workspace,
+                is_custom: ctx.is_custom_workspace,
+            },
+            meta,
+            command_spec,
+            config,
+            session_snapshot,
+        )
+        .await,
+    );
 
     let skill_mgr = deps.skill_manager.clone();
     let catalog_tx = deps.agent_registry.catalog_sender();
@@ -106,12 +111,10 @@ pub(super) async fn build(
         catalog_tx,
     );
 
-    // Seed the aggregate with persisted runtime choices and
-    // (if present) the CLI-assigned session id, so the first
-    // turn after a task rebuild takes the resume path.
-    if let Some(state) = deps.acp_agent_service.load_snapshot_state(&ctx.conversation_id).await {
-        arc.preload_snapshot(state).await;
-    }
+    // Desired (mode/model/config) are seeded from `params.session_snapshot`
+    // inside `AcpAgentManager::new`. The CLI-assigned session id is still
+    // loaded here so the first turn after a task rebuild takes the resume
+    // path.
     if let Some(sid) = deps.acp_agent_service.load_session_id(&ctx.conversation_id).await {
         arc.restore_session_id(sid).await;
     }

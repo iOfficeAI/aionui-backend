@@ -1,9 +1,9 @@
+use crate::capability::team_guide_prompt;
+use crate::shared_kernel::PersistedSessionState;
 use agent_client_protocol::schema::{EnvVariable, McpServer, McpServerStdio, NewSessionRequest};
+use aionui_api_types::AgentMetadata;
 use aionui_api_types::{AcpBuildExtra, GuideMcpConfig, TeamMcpStdioConfig};
 use aionui_common::CommandSpec;
-
-use crate::capability::team_guide_prompt;
-use aionui_api_types::AgentMetadata;
 
 /// Backends for which solo conversations receive the Guide MCP server.
 const TEAM_CAPABLE_BACKENDS: &[&str] = &["claude", "codex", "gemini", "aionrs", "codebuddy"];
@@ -30,6 +30,7 @@ pub struct AcpSessionParams {
     pub config: AcpBuildExtra,
     pub mcp_servers: Vec<McpServer>,
     pub preset_context: Option<String>,
+    pub session_snapshot: Option<PersistedSessionState>,
 }
 
 impl AcpSessionParams {
@@ -49,12 +50,13 @@ impl AcpSessionParams {
 /// This front-loads all decision logic that was previously scattered across
 /// `build_new_session_request`, `compose_preset_context_with_team_guide`,
 /// and the factory's ACP match arm.
-pub fn assemble_acp_params(
+pub async fn assemble_acp_params(
     conversation_id: String,
     workspace: WorkspaceInfo,
     metadata: AgentMetadata,
     command_spec: CommandSpec,
     config: AcpBuildExtra,
+    session_snapshot: Option<PersistedSessionState>,
 ) -> AcpSessionParams {
     let mcp_servers = resolve_mcp_servers(&config, &conversation_id);
     let preset_context = compose_preset_context(
@@ -71,6 +73,7 @@ pub fn assemble_acp_params(
         config,
         mcp_servers,
         preset_context,
+        session_snapshot,
     }
 }
 

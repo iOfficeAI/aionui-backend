@@ -13,4 +13,4 @@ pub use catalog_forwarder::CatalogForwarder;
 pub use events::AcpSessionEvent;
 pub use permission_router::PermissionRouter;
 pub use reconcile::ReconcileAction;
-pub use session::{AcpSession, PersistedSessionState};
+pub use session::AcpSession;

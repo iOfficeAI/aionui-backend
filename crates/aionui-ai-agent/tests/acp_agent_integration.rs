@@ -88,21 +88,25 @@ async fn make_mock_agent(script: &str, backend: &str) -> (Arc<AcpAgentManager>, 
         .expect("seeded backend row must exist");
     let catalog_tx = registry.catalog_sender();
 
-    let params = Arc::new(assemble_acp_params(
-        "test-conv-1".into(),
-        WorkspaceInfo {
-            path: "/tmp".into(),
-            is_custom: true,
-        },
-        metadata,
-        aionui_common::CommandSpec {
-            command: script_path.into(),
-            args: vec![],
-            env: vec![],
-            cwd: None,
-        },
-        config,
-    ));
+    let params = Arc::new(
+        assemble_acp_params(
+            "test-conv-1".into(),
+            WorkspaceInfo {
+                path: "/tmp".into(),
+                is_custom: true,
+            },
+            metadata,
+            aionui_common::CommandSpec {
+                command: script_path.into(),
+                args: vec![],
+                env: vec![],
+                cwd: None,
+            },
+            config,
+            None,
+        )
+        .await,
+    );
 
     let (manager, _, _) = AcpAgentManager::new(params, skill_manager, &catalog_tx)
         .await
