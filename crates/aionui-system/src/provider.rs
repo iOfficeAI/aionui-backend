@@ -185,9 +185,22 @@ fn validate_create_request(req: &CreateProviderRequest) -> Result<(), AppError> 
     if req.name.trim().is_empty() {
         return Err(AppError::BadRequest("name is required".into()));
     }
-    validate_base_url(&req.base_url)?;
-    if req.api_key.trim().is_empty() {
-        return Err(AppError::BadRequest("apiKey is required".into()));
+    // Bedrock auths via bedrock_config (IAM profile / static keys) rather than
+    // an HTTP endpoint + bearer key, so baseUrl and apiKey may be empty.
+    if req.platform == "bedrock" {
+        if req.bedrock_config.is_none() {
+            return Err(AppError::BadRequest(
+                "bedrockConfig is required for bedrock platform".into(),
+            ));
+        }
+        if !req.base_url.trim().is_empty() {
+            validate_base_url(&req.base_url)?;
+        }
+    } else {
+        validate_base_url(&req.base_url)?;
+        if req.api_key.trim().is_empty() {
+            return Err(AppError::BadRequest("apiKey is required".into()));
+        }
     }
     Ok(())
 }
@@ -365,6 +378,38 @@ mod tests {
     #[test]
     fn validate_create_valid() {
         assert!(validate_create_request(&sample_create_request()).is_ok());
+    }
+
+    #[test]
+    fn validate_create_bedrock_allows_empty_base_url_and_api_key() {
+        let req = CreateProviderRequest {
+            platform: "bedrock".into(),
+            name: "AWS Bedrock".into(),
+            base_url: "".into(),
+            api_key: "".into(),
+            bedrock_config: Some(aionui_api_types::BedrockConfig {
+                auth_method: aionui_api_types::BedrockAuthMethod::Profile,
+                region: "us-west-2".into(),
+                profile: Some("ai".into()),
+                access_key_id: None,
+                secret_access_key: None,
+            }),
+            ..sample_create_request()
+        };
+        assert!(validate_create_request(&req).is_ok());
+    }
+
+    #[test]
+    fn validate_create_bedrock_requires_bedrock_config() {
+        let req = CreateProviderRequest {
+            platform: "bedrock".into(),
+            name: "AWS Bedrock".into(),
+            base_url: "".into(),
+            api_key: "".into(),
+            bedrock_config: None,
+            ..sample_create_request()
+        };
+        assert!(validate_create_request(&req).is_err());
     }
 
     #[test]
