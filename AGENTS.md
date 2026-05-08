@@ -22,7 +22,7 @@ Only after exhausting the above — and explicitly documenting why each option i
 
 Cargo workspace with 19 crates under `crates/`. Dependencies flow downward through four layers:
 
-**Foundation:** `aionui-common`, `aionui-api-types`, `aionui-db`, `aionui-assets`
+**Foundation:** `aionui-common`, `aionui-api-types`, `aionui-db`, `aionui-assets`, `aionui-runtime`
 **Capability:** `aionui-auth`, `aionui-realtime`
 **Domain:** `aionui-conversation`, `aionui-channel`, `aionui-team`, `aionui-cron`, `aionui-file`, `aionui-office`, `aionui-shell`, `aionui-mcp`, `aionui-ai-agent`, `aionui-extension`, `aionui-system`, `aionui-assistant`
 **Composition:** `aionui-app` — top-level binary, composes all crates into the axum server
@@ -84,28 +84,28 @@ Every domain crate must follow:
 
 ## Route Map
 
-| Prefix | Crate | Auth |
-|--------|-------|------|
-| `POST /login`, `/api/auth/*` | aionui-auth | Public (rate-limited) |
-| `POST /logout`, `/api/auth/user`, `/api/auth/change-password`, `/api/ws-token` | aionui-auth | Yes |
-| `/api/conversations/*`, `/api/messages/*` | aionui-conversation | Yes |
-| `/api/agents`, `/api/agents/refresh`, `/api/agents/test` | aionui-ai-agent | Yes |
-| `/api/acp/*`, `/api/conversations/{id}/acp/*` | aionui-ai-agent | Yes |
-| `/api/bedrock/*`, `/api/gemini/*` | aionui-ai-agent | Yes |
-| `/api/conversations/{id}/workspace`, `/api/conversations/{id}/side-question`, `/api/conversations/{id}/slash-commands`, `/api/conversations/{id}/reload-context` | aionui-ai-agent | Yes |
-| `/api/remote-agents/*` | aionui-ai-agent | Yes |
-| `/api/settings/*`, `/api/providers/*`, `/api/system/*` | aionui-system | Yes |
-| `/api/fs/*` | aionui-file | Yes |
-| `/api/mcp/*` | aionui-mcp | Yes |
-| `/api/extensions/*`, `/api/hub/*`, `/api/skills/*` | aionui-extension | Yes |
-| `/api/channel/*` | aionui-channel | Yes |
-| `/api/teams/*` | aionui-team | Yes |
-| `/api/cron/*` | aionui-cron | Yes |
-| `/api/word-preview/*`, `/api/excel-preview/*`, `/api/ppt-preview/*`, `/api/preview-history/*`, `/api/star-office/*`, `/api/document/*` | aionui-office | Yes |
-| `/api/ppt-proxy/*`, `/api/office-watch-proxy/*` | aionui-office | Public (iframe) |
-| `/api/shell/*`, `/api/stt` | aionui-shell | Yes |
-| `/ws` | aionui-realtime | Token callback |
-| `/health` | aionui-app | Public |
+| Prefix                                                                                                                                                           | Crate               | Auth                  |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- | --------------------- |
+| `POST /login`, `/api/auth/*`                                                                                                                                     | aionui-auth         | Public (rate-limited) |
+| `POST /logout`, `/api/auth/user`, `/api/auth/change-password`, `/api/ws-token`                                                                                   | aionui-auth         | Yes                   |
+| `/api/conversations/*`, `/api/messages/*`                                                                                                                        | aionui-conversation | Yes                   |
+| `/api/agents`, `/api/agents/refresh`, `/api/agents/test`                                                                                                         | aionui-ai-agent     | Yes                   |
+| `/api/acp/*`, `/api/conversations/{id}/acp/*`                                                                                                                    | aionui-ai-agent     | Yes                   |
+| `/api/bedrock/*`, `/api/gemini/*`                                                                                                                                | aionui-ai-agent     | Yes                   |
+| `/api/conversations/{id}/workspace`, `/api/conversations/{id}/side-question`, `/api/conversations/{id}/slash-commands`, `/api/conversations/{id}/reload-context` | aionui-ai-agent     | Yes                   |
+| `/api/remote-agents/*`                                                                                                                                           | aionui-ai-agent     | Yes                   |
+| `/api/settings/*`, `/api/providers/*`, `/api/system/*`                                                                                                           | aionui-system       | Yes                   |
+| `/api/fs/*`                                                                                                                                                      | aionui-file         | Yes                   |
+| `/api/mcp/*`                                                                                                                                                     | aionui-mcp          | Yes                   |
+| `/api/extensions/*`, `/api/hub/*`, `/api/skills/*`                                                                                                               | aionui-extension    | Yes                   |
+| `/api/channel/*`                                                                                                                                                 | aionui-channel      | Yes                   |
+| `/api/teams/*`                                                                                                                                                   | aionui-team         | Yes                   |
+| `/api/cron/*`                                                                                                                                                    | aionui-cron         | Yes                   |
+| `/api/word-preview/*`, `/api/excel-preview/*`, `/api/ppt-preview/*`, `/api/preview-history/*`, `/api/star-office/*`, `/api/document/*`                           | aionui-office       | Yes                   |
+| `/api/ppt-proxy/*`, `/api/office-watch-proxy/*`                                                                                                                  | aionui-office       | Public (iframe)       |
+| `/api/shell/*`, `/api/stt`                                                                                                                                       | aionui-shell        | Yes                   |
+| `/ws`                                                                                                                                                            | aionui-realtime     | Token callback        |
+| `/health`                                                                                                                                                        | aionui-app          | Public                |
 
 ## Code Style
 
@@ -161,10 +161,10 @@ Supports the same arguments as `git push` (e.g. `just push -u origin feat/branch
 
 ## Test Organization
 
-| Location | What goes there |
-|----------|----------------|
+| Location                                 | What goes there                        |
+| ---------------------------------------- | -------------------------------------- |
 | Inline `#[cfg(test)]` in each `.rs` file | Unit tests for that module's internals |
-| `crates/<crate>/tests/` | Integration / E2E tests for that crate |
+| `crates/<crate>/tests/`                  | Integration / E2E tests for that crate |
 
 ### Testing Rules
 
