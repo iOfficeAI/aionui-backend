@@ -32,3 +32,6 @@ tempfile.workspace = true
 zstd.workspace = true
 sha2.workspace = true
 hex.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+wait-timeout = "0.2"

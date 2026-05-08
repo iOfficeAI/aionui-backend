@@ -134,6 +134,21 @@ The bun version is pinned in
 `[package.metadata.aionui-runtime] bun_version = "..."`. Upgrading bun is
 a one-line change — no source edits required.
 
+### Startup PATH Enhancement
+
+`fn main()` calls `aionui_runtime::enhance_process_path()` **before** the
+tokio runtime starts, so every downstream `which::which(...)` and
+`Command::new(...)` — including the existing spawn sites across the
+workspace — inherits an enriched `PATH`. Three layers are merged in priority
+order: bundled bun directory → platform extra bins (`~/.bun/bin`,
+`~/.cargo/bin`, `~/.local/bin`, Windows `%APPDATA%\npm`, Git, Scoop, …) →
+current PATH → login-shell `$PATH` (Unix, 3 s timeout). The call is
+`unsafe` because Rust 2024 requires a single-threaded precondition for
+`env::set_var`; `main()` runs this as its very first statement to
+satisfy the invariant. A `startup: PATH ready path_segments=… path_len=…`
+info log confirms the enhancement at each run (no full PATH content is
+logged at `info` level).
+
 ### Pushing Code
 
 Always use `just push` instead of `git push`.

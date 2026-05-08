@@ -77,8 +77,17 @@ fn init_tracing(log_dir: &Path, log_level: Option<&str>) -> tracing_appender::no
     guard
 }
 
-#[tokio::main]
-async fn main() -> Result<ExitCode> {
+fn main() -> Result<ExitCode> {
+    // SAFETY: called before any worker thread exists (including the tokio
+    // runtime constructed below). Rust 2024 requires `unsafe` for
+    // `std::env::set_var` invoked inside `enhance_process_path`.
+    let merged_path = unsafe { aionui_runtime::enhance_process_path() };
+
+    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
+    runtime.block_on(async_main(merged_path))
+}
+
+async fn async_main(merged_path: String) -> Result<ExitCode> {
     // mcp-bridge / mcp-guide-stdio subcommands: live entirely outside the main
     // HTTP server and must not touch the database, logging setup, or `AppServices`.
     let mut argv = std::env::args();
@@ -94,6 +103,12 @@ async fn main() -> Result<ExitCode> {
 
     let log_dir = cli.log_dir.unwrap_or_else(|| Path::new(&cli.data_dir).join("logs"));
     let _log_guard = init_tracing(&log_dir, cli.log_level.as_deref());
+
+    tracing::info!(
+        path_segments = merged_path.split(if cfg!(windows) { ';' } else { ':' }).count(),
+        path_len = merged_path.len(),
+        "startup: PATH ready"
+    );
 
     let config = AppConfig {
         host: cli.host,

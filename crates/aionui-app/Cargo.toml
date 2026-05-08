@@ -33,6 +33,7 @@ aionui-channel.workspace = true
 aionui-team.workspace = true
 aionui-cron.workspace = true
 aionui-assistant.workspace = true
+aionui-runtime.workspace = true
 axum.workspace = true
 dirs.workspace = true
 tokio.workspace = true
