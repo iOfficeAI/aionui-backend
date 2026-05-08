@@ -61,7 +61,7 @@ pub struct SetModelRequest {
 }
 
 /// A single available model entry in the frontend-facing model info response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ModelInfoEntry {
     pub id: String,
     pub label: String,
