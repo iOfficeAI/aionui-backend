@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use tokio::process::Command;
+use aionui_runtime::Builder as CmdBuilder;
 use tracing::{info, warn};
 
 use crate::constants::{
@@ -90,7 +90,9 @@ pub async fn execute_hook(
         "executing lifecycle hook"
     );
 
-    let child_future = Command::new(&script).current_dir(ext_dir).kill_on_drop(true).output();
+    let mut builder = CmdBuilder::clean_cli(&script);
+    builder.current_dir(ext_dir);
+    let child_future = builder.output();
 
     let result = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), child_future).await;
 
@@ -167,6 +169,7 @@ pub fn needs_install_hook(current_version: &str, persisted_version: Option<&str>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::process::Command;
 
     // -----------------------------------------------------------------------
     // needs_install_hook

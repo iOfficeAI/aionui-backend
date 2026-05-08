@@ -1,4 +1,4 @@
-use tokio::process::Command;
+use aionui_runtime::Builder as CmdBuilder;
 
 use crate::error::ShellError;
 
@@ -19,10 +19,12 @@ impl ISystemOpener for DefaultSystemOpener {
     }
 
     async fn run_command(&self, program: &str, args: &[&str]) -> Result<(), ShellError> {
-        let output = Command::new(program)
+        let mut builder = CmdBuilder::clean_cli(program);
+        builder
             .args(args)
             .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        let output = builder
             .spawn()
             .map_err(|e| ShellError::CommandFailed(format!("{program}: {e}")))?;
 

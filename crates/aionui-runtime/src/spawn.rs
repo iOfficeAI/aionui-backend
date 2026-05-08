@@ -51,7 +51,7 @@ impl Builder {
     ///   etc. when they need to own the streams)
     /// - `kill_on_drop(true)`
     /// - removes `NODE_OPTIONS`, `NODE_INSPECT`, `NODE_DEBUG`, `CLAUDECODE`
-    pub fn agent<S: AsRef<OsStr>>(program: S) -> Self {
+    pub fn new<S: AsRef<OsStr>>(program: S) -> Self {
         let mut inner = Command::new(program);
         inner.kill_on_drop(true);
         strip_pollution(&mut inner);
@@ -207,7 +207,7 @@ mod tests {
     async fn agent_allows_stdio_override() {
         // agent() defaults to inherit. Override to piped, then verify
         // we can capture output.
-        let mut b = Builder::agent("sh");
+        let mut b = Builder::new("sh");
         b.arg("-c").arg("echo hello").stdout(Stdio::piped());
         let output = b.output().await.unwrap();
 
@@ -223,7 +223,7 @@ mod tests {
             std::env::set_var("NODE_DEBUG", "*");
         }
 
-        let mut b = Builder::agent("sh");
+        let mut b = Builder::new("sh");
         b.arg("-c")
             .arg("echo \"NI:${NODE_INSPECT:-unset} ND:${NODE_DEBUG:-unset}\"")
             .stdout(Stdio::piped());
@@ -242,7 +242,7 @@ mod tests {
 
     #[tokio::test]
     async fn spawn_returns_child_with_pid() {
-        let mut b = Builder::agent("sh");
+        let mut b = Builder::new("sh");
         b.arg("-c").arg("sleep 0.05");
         let mut child = b.spawn().unwrap();
         assert!(child.id().is_some());

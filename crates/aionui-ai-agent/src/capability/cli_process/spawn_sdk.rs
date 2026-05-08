@@ -19,7 +19,7 @@ impl CliAgentProcess {
     /// - stderr buffering
     /// - Process exit monitoring
     pub async fn spawn_for_sdk(config: CommandSpec) -> Result<Self, AppError> {
-        let mut cmd = CmdBuilder::agent(&config.command);
+        let mut cmd = CmdBuilder::new(&config.command);
         cmd.args(&config.args)
             .envs(config.env.iter().map(|e| (&e.name, &e.value)))
             .envs(Self::agent_spawn_env())

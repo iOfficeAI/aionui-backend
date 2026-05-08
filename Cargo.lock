@@ -564,6 +564,7 @@ dependencies = [
  "aionui-common",
  "aionui-db",
  "aionui-realtime",
+ "aionui-runtime",
  "async-trait",
  "axum",
  "dirs",
@@ -639,6 +640,7 @@ dependencies = [
  "aionui-common",
  "aionui-file",
  "aionui-realtime",
+ "aionui-runtime",
  "async-trait",
  "axum",
  "calamine",
@@ -652,6 +654,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "which",
 ]
 
 [[package]]
@@ -698,6 +701,7 @@ dependencies = [
  "aionui-api-types",
  "aionui-common",
  "aionui-db",
+ "aionui-runtime",
  "aionui-system",
  "async-trait",
  "axum",

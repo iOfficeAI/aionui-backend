@@ -20,9 +20,8 @@ impl CliAgentProcess {
     ///
     /// This is used by Gemini, OpenClaw, Nanobot agents.
     pub async fn spawn(config: CommandSpec) -> Result<Self, AppError> {
-        let mut cmd = CmdBuilder::agent(&config.command);
-        cmd
-            .args(&config.args)
+        let mut cmd = CmdBuilder::new(&config.command);
+        cmd.args(&config.args)
             .envs(config.env.iter().map(|e| (&e.name, &e.value)))
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
