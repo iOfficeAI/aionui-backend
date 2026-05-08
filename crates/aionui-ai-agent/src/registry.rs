@@ -271,6 +271,10 @@ fn decode_row(row: AgentMetadataRow) -> Option<AgentMetadata> {
         available_commands: parse_json(row.available_commands.as_deref(), "available_commands"),
     };
 
+    let backend_str = row.backend.as_deref().unwrap_or("");
+    let team_capable =
+        aionui_common::constants::is_team_capable(backend_str, handshake.agent_capabilities.as_ref());
+
     let mut meta = AgentMetadata {
         id: row.id,
         icon: row.icon,
@@ -292,6 +296,7 @@ fn decode_row(row: AgentMetadataRow) -> Option<AgentMetadata> {
         behavior_policy,
         yolo_id: row.yolo_id,
         sort_order: row.sort_order,
+        team_capable,
         handshake,
     };
 

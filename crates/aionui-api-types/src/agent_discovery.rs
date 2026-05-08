@@ -167,6 +167,12 @@ pub struct AgentMetadata {
     /// scheme is documented in `007_agent_metadata_sort_order.sql`.
     pub sort_order: i64,
 
+    /// Whether this agent supports team mode. Derived at hydrate time from
+    /// the hard whitelist + persisted `agent_capabilities` MCP declarations.
+    /// Not a persisted column.
+    #[serde(default)]
+    pub team_capable: bool,
+
     #[serde(default)]
     pub handshake: AgentHandshake,
 }
@@ -214,6 +220,7 @@ mod tests {
             behavior_policy: BehaviorPolicy::default(),
             yolo_id: None,
             sort_order: 3100,
+            team_capable: true,
             handshake: AgentHandshake::default(),
         };
         let v = serde_json::to_value(&meta).unwrap();
@@ -222,6 +229,7 @@ mod tests {
         assert!(v.get("resolved_command").is_none());
         assert_eq!(v["backend"], "claude");
         assert_eq!(v["available"], true);
+        assert_eq!(v["team_capable"], true);
         assert!(v.get("command").is_none());
         assert!(v.get("icon").is_none());
     }
