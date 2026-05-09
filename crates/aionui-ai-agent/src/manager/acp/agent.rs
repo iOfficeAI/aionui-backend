@@ -507,19 +507,15 @@ impl AcpAgentManager {
 }
 
 impl AcpAgentManager {
-    /// Initialize or resume a session, then send the user message.
+    /// Ensure the ACP session is opened with the CLI. Does not send a
+    /// prompt. Returns the session id that subsequent prompts should use
+    /// (may differ from the input when claude-meta-resume rewrites it).
     ///
-    /// Three paths:
-    /// 1. **No session_id at all** → `session/new` + first prompt.
-    /// 2. **Have session_id but this instance has not yet opened it with the
-    ///    CLI** → `session/load` (or claude-meta-resume) + prompt. This
-    ///    happens on the first turn after a task rebuild or after
-    ///    `restore_session_id` seeded the id from the DB.
-    /// 3. **Session already opened by this instance** → plain `prompt`. No
-    ///    `session/load` — the CLI child process still owns the session in
-    ///    memory, re-loading every turn would both waste a round-trip and
-    ///    (on some backends) reset config options.
-    async fn ensure_session_and_send(&self, data: &SendMessageData) -> Result<(), AppError> {
+    /// Three paths mirror `ensure_session_and_send`:
+    /// 1. No sid at all → `open_session_new`
+    /// 2. Sid present but CLI has not opened it (fresh task) → `open_session_resume`
+    /// 3. Already opened → noop, return the existing sid
+    async fn ensure_session_opened(&self) -> Result<String, AppError> {
         let _lock = self.session_lock.lock().await;
 
         let (session_id, opened) = {
@@ -527,31 +523,25 @@ impl AcpAgentManager {
             (s.session_id().map(ToOwned::to_owned), s.is_opened())
         };
 
-        match (session_id.as_deref(), opened) {
-            (None, _) => {
-                // Path 1: first turn in a brand-new conversation.
-                self.session_new_and_prompt(data).await?;
-            }
-            (Some(sid), false) => {
-                // Path 2: we have a persisted id but this process has not
-                // opened it with the CLI yet. Needs backend-appropriate
-                // resume handshake before the prompt.
-                self.session_resume_and_send(data, Some(sid)).await?;
-            }
-            (Some(sid), true) => {
-                // Path 3: session is live with the CLI; just prompt.
-                self.prompt_existing_session(data, Some(sid)).await?;
-            }
-        }
+        let sid = match (session_id, opened) {
+            (None, _) => self.open_session_new().await?,
+            (Some(sid), false) => self.open_session_resume(&sid).await?,
+            (Some(sid), true) => sid,
+        };
 
         {
             let mut s = self.session.write().await;
             s.mark_opened();
             self.commit_session_changes(&mut s).await;
         }
-        self.runtime.transition_to(ConversationStatus::Running);
+        Ok(sid)
+    }
 
-        Ok(())
+    /// Initialize or resume a session, then send the user message.
+    async fn ensure_session_and_send(&self, data: &SendMessageData) -> Result<(), AppError> {
+        let sid = self.ensure_session_opened().await?;
+        self.runtime.transition_to(ConversationStatus::Running);
+        self.prompt_existing_session(data, Some(&sid)).await
     }
 
     /// Whether the agent supports `session/load` — read from the ACP

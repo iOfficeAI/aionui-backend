@@ -51,6 +51,7 @@ impl AcpAgentManager {
     }
 
     /// Create a new ACP session and send the first prompt.
+    #[allow(dead_code)]
     pub(super) async fn session_new_and_prompt(&self, data: &SendMessageData) -> Result<(), AppError> {
         self.runtime
             .emit(AgentStreamEvent::Start(StartEventData { session_id: None }));
@@ -186,6 +187,7 @@ impl AcpAgentManager {
     }
 
     /// Resume an existing session and send a message.
+    #[allow(dead_code)]
     pub(super) async fn session_resume_and_send(
         &self,
         data: &SendMessageData,
