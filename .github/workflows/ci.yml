@@ -84,8 +84,10 @@ jobs:
         run: |
           # rsa is ignored in audit.toml because it only exists in Cargo.lock
           # via sqlx-mysql (optional). Fail if it ever enters the real build tree.
-          if cargo tree -p aionui-app -i rsa 2>&1 | grep -q "rustls-webpki\|rsa"; then
+          output=$(cargo tree -p aionui-app -i rsa 2>&1)
+          if ! echo "$output" | grep -q "nothing to print"; then
             echo "::error::rsa crate is now in the dependency tree! Remove the audit ignore and fix the vulnerability."
+            echo "$output"
             exit 1
           fi
       - uses: rustsec/audit-check@v2
