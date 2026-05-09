@@ -87,6 +87,11 @@ pub(crate) fn get_env() -> AcpEnvResponse {
 }
 
 /// Test a custom ACP agent by verifying the command exists.
+///
+/// Legacy Step-1-only probe retained for its unit test. The real two-step
+/// probe now lives in `custom_agent_probe::try_connect_custom_agent`.
+/// Removed from production call sites in Task 6; will be cleaned up in Task 7.
+#[allow(dead_code)]
 pub(crate) fn test_custom_agent(
     command: &str,
     _acp_args: &[String],

@@ -54,6 +54,6 @@ async fn test_custom_agent(
 ) -> Result<Json<ApiResponse<TryConnectCustomAgentResponse>>, AppError> {
     let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
     Ok(Json(ApiResponse::ok(
-        state.service.try_connect_custom_agent_legacy_passthrough(req)?,
+        state.service.try_connect_custom_agent(req).await?,
     )))
 }

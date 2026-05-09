@@ -13,9 +13,7 @@ use aionui_api_types::{
     AcpEnvResponse, AcpHealthCheckRequest, AcpHealthCheckResponse, AcpModelInfo, AgentMetadata, AgentModeResponse,
     DetectCliRequest, DetectCliResponse, GetModelInfoResponse, ModelInfoEntry, ModelInfoPayload, ProbeModelRequest,
     SetConfigOptionRequest, SetConfigOptionsRequest, SetModeRequest, SetModelRequest, SideQuestionRequest,
-    SideQuestionResponse, SlashCommandItem, TryConnectCustomAgentRequest, TryConnectCustomAgentResponse,
-    WorkspaceBrowseQuery,
-    WorkspaceEntry,
+    SideQuestionResponse, SlashCommandItem, WorkspaceBrowseQuery, WorkspaceEntry,
 };
 use aionui_common::AppError;
 use aionui_db::IConversationRepository;
@@ -49,6 +47,10 @@ impl AgentService {
             conversation_repo,
             acp_session_sync,
         })
+    }
+
+    pub(crate) fn registry(&self) -> &std::sync::Arc<crate::registry::AgentRegistry> {
+        &self.registry
     }
 
     // Private helper — move logic from routes::session_ops::get_task verbatim
@@ -373,14 +375,6 @@ impl AgentService {
         Ok(self.registry.list_all().await)
     }
 
-    pub fn try_connect_custom_agent_legacy_passthrough(
-        &self,
-        req: TryConnectCustomAgentRequest,
-    ) -> Result<TryConnectCustomAgentResponse, AppError> {
-        // Temporary shim: still points at the old Step-1-only impl until
-        // Task 4 lands the new probe module. Deleted in Task 7.
-        crate::protocol::cli_detect::test_custom_agent(&req.command, &req.acp_args, &req.env)
-    }
 }
 
 // ACP related operations

@@ -12,7 +12,8 @@
 //! The same function is called by:
 //!   - `POST /api/agents/custom/try-connect`  (manual "test connection" button)
 //!   - `AgentService::create/update_custom_agent`   (test-on-save)
-//! so both paths produce identical outcomes / error text.
+//!
+//! Both paths produce identical outcomes / error text.
 
 use std::collections::HashMap;
 use std::path::PathBuf;

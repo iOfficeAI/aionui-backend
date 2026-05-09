@@ -10,6 +10,7 @@ pub mod protocol;
 pub mod registry;
 pub mod routes;
 pub mod service;
+mod service_custom;
 pub mod shared_kernel;
 pub mod task_manager;
 pub mod types;
