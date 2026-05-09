@@ -34,6 +34,29 @@ impl StarOfficeDetector {
     }
 
     pub async fn detect(&self, preferred_url: Option<&str>, force: bool, timeout_ms: Option<u64>) -> Option<String> {
+        self.detect_inner(preferred_url, force, timeout_ms, true).await
+    }
+
+    /// Probe only `preferred_url` without expanding to `KNOWN_PORTS` or the
+    /// `±SCAN_RADIUS` neighborhood. Exists for deterministic tests that need
+    /// to pin detection to a specific mock server; production callers should
+    /// use [`detect`].
+    pub async fn detect_exact(
+        &self,
+        preferred_url: Option<&str>,
+        force: bool,
+        timeout_ms: Option<u64>,
+    ) -> Option<String> {
+        self.detect_inner(preferred_url, force, timeout_ms, false).await
+    }
+
+    async fn detect_inner(
+        &self,
+        preferred_url: Option<&str>,
+        force: bool,
+        timeout_ms: Option<u64>,
+        scan_neighbors: bool,
+    ) -> Option<String> {
         if !force {
             let cache = self.cache.lock().await;
             if let Some(ref c) = *cache {
@@ -45,7 +68,7 @@ impl StarOfficeDetector {
             }
         }
 
-        let candidates = build_candidate_urls(preferred_url);
+        let candidates = build_candidate_urls(preferred_url, scan_neighbors);
         let timeout = Duration::from_millis(timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS));
 
         tracing::debug!(count = candidates.len(), "scanning star-office candidate URLs");
@@ -85,13 +108,19 @@ impl StarOfficeDetector {
     }
 }
 
-fn build_candidate_urls(preferred_url: Option<&str>) -> Vec<String> {
+fn build_candidate_urls(preferred_url: Option<&str>, scan_neighbors: bool) -> Vec<String> {
     let mut seed_ports: Vec<u16> = Vec::new();
 
     if let Some(url) = preferred_url
         && let Some(port) = extract_port(url)
     {
         seed_ports.push(port);
+    }
+
+    if !scan_neighbors {
+        // Exact mode: skip KNOWN_PORTS and the ±SCAN_RADIUS expansion so the
+        // detector talks to the caller-supplied URL only.
+        return seed_ports.iter().map(|p| format!("http://localhost:{p}")).collect();
     }
 
     for p in KNOWN_PORTS {
@@ -207,7 +236,7 @@ mod tests {
 
     #[test]
     fn build_candidates_default_ports() {
-        let urls = build_candidate_urls(None);
+        let urls = build_candidate_urls(None, true);
         assert!(urls[0] == "http://localhost:19000");
         assert!(urls[1] == "http://localhost:18791");
         let expected_count = count_unique_expanded_ports(&[19000, 18791]);
@@ -216,7 +245,7 @@ mod tests {
 
     #[test]
     fn build_candidates_preferred_first() {
-        let urls = build_candidate_urls(Some("http://localhost:15000"));
+        let urls = build_candidate_urls(Some("http://localhost:15000"), true);
         assert_eq!(urls[0], "http://localhost:15000");
         assert_eq!(urls[1], "http://localhost:19000");
         assert_eq!(urls[2], "http://localhost:18791");
@@ -224,21 +253,21 @@ mod tests {
 
     #[test]
     fn build_candidates_preferred_overlaps_known() {
-        let urls = build_candidate_urls(Some("http://localhost:19000"));
+        let urls = build_candidate_urls(Some("http://localhost:19000"), true);
         assert_eq!(urls[0], "http://localhost:19000");
         assert_eq!(urls[1], "http://localhost:18791");
     }
 
     #[test]
     fn build_candidates_no_duplicates() {
-        let urls = build_candidate_urls(Some("http://localhost:18800"));
+        let urls = build_candidate_urls(Some("http://localhost:18800"), true);
         let unique: std::collections::HashSet<_> = urls.iter().collect();
         assert_eq!(urls.len(), unique.len());
     }
 
     #[test]
     fn build_candidates_scan_radius_coverage() {
-        let urls = build_candidate_urls(None);
+        let urls = build_candidate_urls(None, true);
         assert!(urls.contains(&"http://localhost:18976".to_string()));
         assert!(urls.contains(&"http://localhost:19024".to_string()));
         assert!(urls.contains(&"http://localhost:18767".to_string()));
@@ -247,17 +276,28 @@ mod tests {
 
     #[test]
     fn build_candidates_preferred_without_port_ignored() {
-        let urls = build_candidate_urls(Some("http://localhost"));
+        let urls = build_candidate_urls(Some("http://localhost"), true);
         assert_eq!(urls[0], "http://localhost:19000");
     }
 
     #[test]
     fn build_candidates_low_port_no_underflow() {
-        let urls = build_candidate_urls(Some("http://localhost:10"));
+        let urls = build_candidate_urls(Some("http://localhost:10"), true);
         assert!(urls.iter().all(|u| {
             let p = extract_port(u).unwrap();
             p > 0
         }));
+    }
+
+    #[test]
+    fn build_candidates_exact_mode_only_preferred() {
+        let urls = build_candidate_urls(Some("http://localhost:55555"), false);
+        assert_eq!(urls, vec!["http://localhost:55555"]);
+    }
+
+    #[test]
+    fn build_candidates_exact_mode_empty_when_no_preferred() {
+        assert!(build_candidate_urls(None, false).is_empty());
     }
 
     fn count_unique_expanded_ports(seeds: &[u16]) -> usize {
@@ -315,14 +355,18 @@ mod tests {
     #[tokio::test]
     async fn detect_no_service_returns_none() {
         let detector = StarOfficeDetector::new(reqwest::Client::new());
-        let result = detector.detect(Some("http://localhost:59999"), false, Some(50)).await;
+        let result = detector
+            .detect_exact(Some("http://localhost:59999"), false, Some(50))
+            .await;
         assert!(result.is_none());
     }
 
     #[tokio::test]
     async fn detect_cache_miss_stored() {
         let detector = StarOfficeDetector::new(reqwest::Client::new());
-        let _ = detector.detect(Some("http://localhost:59998"), false, Some(50)).await;
+        let _ = detector
+            .detect_exact(Some("http://localhost:59998"), false, Some(50))
+            .await;
         let cache = detector.cache.lock().await;
         let c = cache.as_ref().unwrap();
         assert!(c.url.is_none());

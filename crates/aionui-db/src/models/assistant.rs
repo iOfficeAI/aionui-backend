@@ -28,12 +28,17 @@ pub struct AssistantRow {
 }
 
 /// Row mapping for the `assistant_overrides` table (per-assistant user state).
+///
+/// `preset_agent_type` is `Some(_)` when the user has switched the main agent
+/// on a built-in assistant (which cannot be mutated at its source). `None`
+/// means "inherit from the built-in / user row".
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct AssistantOverrideRow {
     pub assistant_id: String,
     pub enabled: bool,
     pub sort_order: i32,
     pub last_used_at: Option<TimestampMs>,
+    pub preset_agent_type: Option<String>,
     pub updated_at: TimestampMs,
 }
 
@@ -78,10 +83,15 @@ pub struct UpdateAssistantParams<'a> {
 }
 
 /// Upsert parameters for `IAssistantOverrideRepository::upsert`.
-#[derive(Debug, Clone)]
+///
+/// `preset_agent_type` uses `Option<Option<&str>>`: outer `None` keeps the
+/// current value, outer `Some(inner)` writes `inner` (which itself may be
+/// `None` to clear the override).
+#[derive(Debug, Clone, Default)]
 pub struct UpsertOverrideParams<'a> {
     pub assistant_id: &'a str,
     pub enabled: bool,
     pub sort_order: i32,
     pub last_used_at: Option<TimestampMs>,
+    pub preset_agent_type: Option<Option<&'a str>>,
 }
