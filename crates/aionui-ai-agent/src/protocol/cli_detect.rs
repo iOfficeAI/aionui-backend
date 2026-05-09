@@ -2,10 +2,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
-use aionui_api_types::{AcpEnvResponse, AcpHealthCheckResponse, AgentMetadata, DetectCliResponse};
-use tracing::debug;
-
 use crate::registry::AgentRegistry;
+use aionui_api_types::{AcpEnvResponse, AcpHealthCheckResponse, AgentMetadata, DetectCliResponse};
+use aionui_runtime::resolve_command_path;
+use tracing::debug;
 
 /// Detect the CLI path for a given ACP backend using PATH lookup.
 ///
@@ -52,24 +52,7 @@ pub(crate) async fn health_check(registry: &Arc<AgentRegistry>, backend: &str) -
 
 fn probe_command(meta: &AgentMetadata) -> Option<String> {
     let cmd = meta.command.as_deref()?;
-    resolve_for_detect(cmd).map(|p| p.to_string_lossy().into_owned())
-}
-
-fn resolve_for_detect(cmd: &str) -> Option<std::path::PathBuf> {
-    match cmd {
-        "bun" => aionui_runtime::resolve_bun().ok(),
-        "bunx" => {
-            let bunx_name = if cfg!(windows) { "bunx.exe" } else { "bunx" };
-            if let Some(dir) = aionui_runtime::bun_bin_dir() {
-                let p = dir.join(bunx_name);
-                if p.exists() {
-                    return Some(p);
-                }
-            }
-            which::which("bunx").ok()
-        }
-        other => which::which(other).ok(),
-    }
+    resolve_command_path(cmd).map(|p| p.to_string_lossy().into_owned())
 }
 
 /// Get relevant environment variables for ACP operations.

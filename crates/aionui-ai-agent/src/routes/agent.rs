@@ -33,12 +33,9 @@ pub fn agent_routes(state: AgentRouterState) -> Router {
         .route("/api/agents", get(list_agents))
         .route("/api/agents/refresh", post(refresh_agents))
         .route("/api/agents/{id}/enabled", patch(set_agent_enabled))
-        .route("/api/agents/custom", post(create_custom_agent))
-        .route("/api/agents/custom/try-connect", post(try_connect_custom_agent))
-        .route(
-            "/api/agents/custom/{id}",
-            put(update_custom_agent).delete(delete_custom_agent),
-        )
+        .route("/api/agents/custom", post(create_custom))
+        .route("/api/agents/custom/{id}", put(update_custom).delete(delete_custom))
+        .route("/api/agents/custom/try-connect", post(try_connect_custom))
         .with_state(state)
 }
 
@@ -56,7 +53,7 @@ async fn refresh_agents(
     Ok(Json(ApiResponse::ok(state.service.refresh_agents().await?)))
 }
 
-async fn try_connect_custom_agent(
+async fn try_connect_custom(
     State(state): State<AgentRouterState>,
     Extension(_user): Extension<CurrentUser>,
     body: Result<Json<TryConnectCustomAgentRequest>, JsonRejection>,
@@ -67,7 +64,7 @@ async fn try_connect_custom_agent(
     )))
 }
 
-async fn create_custom_agent(
+async fn create_custom(
     State(state): State<AgentRouterState>,
     Extension(_user): Extension<CurrentUser>,
     body: Result<Json<CustomAgentUpsertRequest>, JsonRejection>,
@@ -76,7 +73,7 @@ async fn create_custom_agent(
     Ok(Json(ApiResponse::ok(state.service.create_custom_agent(req).await?)))
 }
 
-async fn update_custom_agent(
+async fn update_custom(
     State(state): State<AgentRouterState>,
     Extension(_user): Extension<CurrentUser>,
     Path(id): Path<String>,
@@ -88,7 +85,7 @@ async fn update_custom_agent(
     )))
 }
 
-async fn delete_custom_agent(
+async fn delete_custom(
     State(state): State<AgentRouterState>,
     Extension(_user): Extension<CurrentUser>,
     Path(id): Path<String>,

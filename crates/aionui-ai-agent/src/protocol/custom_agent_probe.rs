@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use aionui_api_types::TryConnectCustomAgentResponse;
 use aionui_common::{CommandSpec, EnvVar};
+use aionui_runtime::resolve_command_path;
 use tokio::sync::{broadcast, mpsc};
 use tracing::debug;
 
@@ -40,15 +41,16 @@ pub async fn try_connect_custom_agent(
     env: &HashMap<String, String>,
 ) -> TryConnectCustomAgentResponse {
     // ── Step 1 — which check ────────────────────────────────────────
-    let Some(resolved) = step1_resolve_command(command) else {
+    let head = first_token(command);
+    let Some(resolved) = resolve_command_path(head) else {
         return TryConnectCustomAgentResponse::FailCli {
-            error: format!("Command '{}' was not found on PATH", first_token(command)),
+            error: format!("Command '{}' was not found on PATH", head),
         };
     };
     debug!(?resolved, "probe step 1 ok");
 
     // ── Step 2 — spawn + ACP initialize ─────────────────────────────
-    match tokio::time::timeout(STEP2_TIMEOUT, step2_acp_initialize(resolved, args, env)).await {
+    match tokio::time::timeout(STEP2_TIMEOUT, acp_initialize(resolved, args, env)).await {
         Ok(Ok(())) => TryConnectCustomAgentResponse::Success,
         Ok(Err(msg)) => TryConnectCustomAgentResponse::FailAcp { error: msg },
         Err(_) => TryConnectCustomAgentResponse::FailAcp {
@@ -61,27 +63,7 @@ fn first_token(command: &str) -> &str {
     command.split_whitespace().next().unwrap_or(command)
 }
 
-fn step1_resolve_command(command: &str) -> Option<PathBuf> {
-    let head = first_token(command);
-    // Reuse the same bun/bunx resolver builtin probing uses so that
-    // `bun` commands work even with the bundled runtime.
-    match head {
-        "bun" => aionui_runtime::resolve_bun().ok(),
-        "bunx" => {
-            let bunx_name = if cfg!(windows) { "bunx.exe" } else { "bunx" };
-            if let Some(dir) = aionui_runtime::bun_bin_dir() {
-                let p = dir.join(bunx_name);
-                if p.exists() {
-                    return Some(p);
-                }
-            }
-            which::which("bunx").ok()
-        }
-        other => which::which(other).ok(),
-    }
-}
-
-async fn step2_acp_initialize(resolved: PathBuf, args: &[String], env: &HashMap<String, String>) -> Result<(), String> {
+async fn acp_initialize(resolved: PathBuf, args: &[String], env: &HashMap<String, String>) -> Result<(), String> {
     let spec = CommandSpec {
         command: resolved,
         args: args.to_vec(),
@@ -109,16 +91,36 @@ async fn step2_acp_initialize(resolved: PathBuf, args: &[String], env: &HashMap<
     let (permission_tx, _permission_rx) = mpsc::channel(4);
     let (notification_tx, _notification_rx) = mpsc::channel(4);
 
-    let protocol = AcpProtocol::connect(stdin, stdout, event_tx, permission_tx, notification_tx)
-        .await
-        .map_err(|e| format!("ACP initialize failed: {e}"))?;
-
-    // Dropping `protocol` fires the shutdown oneshot; the child process
-    // was spawned with `kill_on_drop(true)` via `aionui_runtime::Builder`
-    // so CPU stays clean.
-    drop(protocol);
-
-    Ok(())
+    // Race the ACP initialize handshake against the child process exiting.
+    // A misconfigured CLI (e.g. `bun acp` with no script) exits almost
+    // immediately with a non-zero status; without this race the
+    // `AcpProtocol::connect` call would block on its internal 30 s
+    // timeout waiting for an `initialize` reply that will never arrive.
+    let connect = AcpProtocol::connect(stdin, stdout, event_tx, permission_tx, notification_tx);
+    tokio::select! {
+        biased;
+        res = connect => {
+            let protocol = res.map_err(|e| format!("ACP initialize failed: {e}"))?;
+            // Dropping `protocol` fires the shutdown oneshot; the child
+            // process was spawned with `kill_on_drop(true)` via
+            // `aionui_runtime::Builder` so CPU stays clean.
+            drop(protocol);
+            Ok(())
+        }
+        exit = proc.wait_for_exit() => {
+            let stderr = proc.take_stderr().await;
+            let stderr = stderr.trim();
+            let status = match exit {
+                Some(s) => format!("{s}"),
+                None => "unknown".to_string(),
+            };
+            if stderr.is_empty() {
+                Err(format!("CLI exited before ACP initialize completed (status={status})"))
+            } else {
+                Err(format!("CLI exited before ACP initialize completed (status={status}): {stderr}"))
+            }
+        }
+    }
 }
 
 #[cfg(test)]

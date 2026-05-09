@@ -57,7 +57,7 @@ pub fn bun_bin_dir() -> Option<PathBuf> {
         .clone()
 }
 
-pub(crate) fn resolve_with<E: EmbeddedBun>(embed: &E) -> Result<PathBuf, ResolveError> {
+fn resolve_with<E: EmbeddedBun>(embed: &E) -> Result<PathBuf, ResolveError> {
     if let Some(p) = env_override() {
         return Ok(p);
     }
@@ -102,6 +102,27 @@ fn env_override() -> Option<PathBuf> {
     }
 }
 
+/// Resolve a command name to an absolute path.
+///
+/// For `bun` / `bunx` we go through `aionui_runtime` so the bundled
+/// runtime is used when present; everything else falls back to the
+/// user's `$PATH` via `which::which`.
+pub fn resolve_command_path(cmd: &str) -> Option<PathBuf> {
+    match cmd {
+        "bun" => resolve_bun().ok(),
+        "bunx" => {
+            let bunx_name = if cfg!(windows) { "bunx.exe" } else { "bunx" };
+            if let Some(dir) = bun_bin_dir() {
+                let p = dir.join(bunx_name);
+                if p.exists() {
+                    return Some(p);
+                }
+            }
+            which::which("bunx").ok()
+        }
+        other => which::which(other).ok(),
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;

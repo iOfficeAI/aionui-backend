@@ -20,6 +20,7 @@ use std::sync::Arc;
 use aionui_api_types::{AgentEnvEntry, AgentHandshake, AgentMetadata, AgentSource, AgentSourceInfo, BehaviorPolicy};
 use aionui_common::{AgentType, AppError};
 use aionui_db::{AgentMetadataRow, IAgentMetadataRepository, UpdateAgentHandshakeParams};
+use aionui_runtime::resolve_command_path;
 use serde_json::Value;
 use tokio::sync::{RwLock, mpsc};
 use tracing::{debug, warn};
@@ -366,28 +367,6 @@ impl CatalogSender {
                 }
             }
         }
-    }
-}
-
-/// Resolve a command name to an absolute path.
-///
-/// For `bun` / `bunx` we go through `aionui_runtime` so the bundled
-/// runtime is used when present; everything else falls back to the
-/// user's `$PATH` via `which::which`.
-fn resolve_command_path(cmd: &str) -> Option<PathBuf> {
-    match cmd {
-        "bun" => aionui_runtime::resolve_bun().ok(),
-        "bunx" => {
-            let bunx_name = if cfg!(windows) { "bunx.exe" } else { "bunx" };
-            if let Some(dir) = aionui_runtime::bun_bin_dir() {
-                let p = dir.join(bunx_name);
-                if p.exists() {
-                    return Some(p);
-                }
-            }
-            which::which("bunx").ok()
-        }
-        other => which::which(other).ok(),
     }
 }
 
