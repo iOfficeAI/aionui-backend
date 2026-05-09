@@ -9,6 +9,7 @@ mod confirmation;
 mod connection_test;
 mod conversation;
 mod cron;
+mod custom_agent;
 mod extension;
 mod file;
 mod lifecycle;
@@ -65,6 +66,9 @@ pub use cron::{
     CreateCronJobRequest, CronAgentConfigDto, CronJobExecutedEvent, CronJobMetadataDto, CronJobPayloadDto,
     CronJobRemovedPayload, CronJobResponse, CronJobStateDto, CronJobTargetDto, CronScheduleDto, HasSkillResponse,
     ListCronJobsQuery, RunNowResponse, SaveCronSkillRequest, UpdateCronJobRequest,
+};
+pub use custom_agent::{
+    CustomAgentAdvancedOverrides, CustomAgentUpsertRequest, DeleteCustomAgentResponse, SetEnabledRequest,
 };
 pub use extension::{
     DisableExtensionRequest, EnableExtensionRequest, ExtensionSummaryResponse, GetI18nRequest, GetPermissionsRequest,
