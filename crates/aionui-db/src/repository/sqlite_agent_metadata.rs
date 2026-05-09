@@ -404,14 +404,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unique_source_name_enforced() {
+    async fn same_source_same_name_allowed_with_different_ids() {
         let (repo, _db) = setup().await;
         let p1 = custom_params("custom-a", "dup");
-        let mut p2 = custom_params("custom-b", "dup");
-        p2.id = "custom-b";
-        p2.name = "dup";
+        let p2 = custom_params("custom-b", "dup");
         repo.upsert(&p1).await.unwrap();
-        let err = repo.upsert(&p2).await.expect_err("unique violation");
-        assert!(matches!(err, DbError::Query(_)));
+        repo.upsert(&p2).await.unwrap();
+        let all = repo.list_all().await.unwrap();
+        let dup_count = all.iter().filter(|r| r.name == "dup" && r.agent_source == "custom").count();
+        assert_eq!(dup_count, 2, "both rows should coexist after dropping UNIQUE(agent_source,name)");
     }
 }
