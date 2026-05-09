@@ -81,11 +81,7 @@ fn step1_resolve_command(command: &str) -> Option<PathBuf> {
     }
 }
 
-async fn step2_acp_initialize(
-    resolved: PathBuf,
-    args: &[String],
-    env: &HashMap<String, String>,
-) -> Result<(), String> {
+async fn step2_acp_initialize(resolved: PathBuf, args: &[String], env: &HashMap<String, String>) -> Result<(), String> {
     let spec = CommandSpec {
         command: resolved,
         args: args.to_vec(),
@@ -132,12 +128,7 @@ mod tests {
 
     #[tokio::test]
     async fn probe_returns_fail_cli_when_command_missing() {
-        let resp = try_connect_custom_agent(
-            "aionui-definitely-does-not-exist-xyz",
-            &[],
-            &HashMap::new(),
-        )
-        .await;
+        let resp = try_connect_custom_agent("aionui-definitely-does-not-exist-xyz", &[], &HashMap::new()).await;
         match resp {
             TryConnectCustomAgentResponse::FailCli { error } => {
                 let lower = error.to_lowercase();

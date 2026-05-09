@@ -282,9 +282,14 @@ mod tests {
     fn try_connect_response_tag_serializes() {
         use super::TryConnectCustomAgentResponse;
         let ok = TryConnectCustomAgentResponse::Success;
-        assert_eq!(serde_json::to_value(&ok).unwrap(), serde_json::json!({"step":"success"}));
+        assert_eq!(
+            serde_json::to_value(&ok).unwrap(),
+            serde_json::json!({"step":"success"})
+        );
 
-        let fail = TryConnectCustomAgentResponse::FailCli { error: "not found".into() };
+        let fail = TryConnectCustomAgentResponse::FailCli {
+            error: "not found".into(),
+        };
         assert_eq!(
             serde_json::to_value(&fail).unwrap(),
             serde_json::json!({"step":"fail_cli","error":"not found"})

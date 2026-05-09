@@ -30,8 +30,7 @@ pub use acp::{
     DetectCliResponse, GetModelInfoResponse, ModelInfoEntry, ModelInfoPayload, ProbeModelRequest,
     SessionConfigOptionUpdate, SetConfigOptionRequest, SetConfigOptionsRequest, SetModeRequest, SetModelRequest,
     SideQuestionRequest, SideQuestionResponse, TryConnectCustomAgentRequest, TryConnectCustomAgentResponse,
-    WorkspaceBrowseQuery,
-    WorkspaceEntry,
+    WorkspaceBrowseQuery, WorkspaceEntry,
 };
 pub use agent_build_extra::{
     AcpBuildExtra, AcpModelInfo, AcpSessionConfigOption, AionrsBuildExtra, OpenClawBuildExtra, OpenClawGatewayConfig,

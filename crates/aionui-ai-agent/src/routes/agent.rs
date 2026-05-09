@@ -22,7 +22,6 @@ use aionui_common::AppError;
 
 use crate::registry::AgentRegistry;
 
-
 #[derive(Clone)]
 pub struct AgentRouterState {
     pub agent_registry: Arc<AgentRegistry>,
@@ -63,7 +62,9 @@ async fn try_connect_custom_agent(
     body: Result<Json<TryConnectCustomAgentRequest>, JsonRejection>,
 ) -> Result<Json<ApiResponse<TryConnectCustomAgentResponse>>, AppError> {
     let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
-    Ok(Json(ApiResponse::ok(state.service.try_connect_custom_agent(req).await?)))
+    Ok(Json(ApiResponse::ok(
+        state.service.try_connect_custom_agent(req).await?,
+    )))
 }
 
 async fn create_custom_agent(

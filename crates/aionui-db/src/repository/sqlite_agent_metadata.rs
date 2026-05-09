@@ -411,7 +411,13 @@ mod tests {
         repo.upsert(&p1).await.unwrap();
         repo.upsert(&p2).await.unwrap();
         let all = repo.list_all().await.unwrap();
-        let dup_count = all.iter().filter(|r| r.name == "dup" && r.agent_source == "custom").count();
-        assert_eq!(dup_count, 2, "both rows should coexist after dropping UNIQUE(agent_source,name)");
+        let dup_count = all
+            .iter()
+            .filter(|r| r.name == "dup" && r.agent_source == "custom")
+            .count();
+        assert_eq!(
+            dup_count, 2,
+            "both rows should coexist after dropping UNIQUE(agent_source,name)"
+        );
     }
 }

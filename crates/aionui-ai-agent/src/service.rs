@@ -374,7 +374,6 @@ impl AgentService {
         self.registry.refresh_availability().await;
         Ok(self.registry.list_all().await)
     }
-
 }
 
 // ACP related operations

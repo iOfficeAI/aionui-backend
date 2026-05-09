@@ -48,7 +48,11 @@ impl AgentService {
         self.upsert_custom_row(&id, &req, /* keep_enabled = */ true).await
     }
 
-    pub async fn update_custom_agent(&self, id: &str, req: CustomAgentUpsertRequest) -> Result<AgentMetadata, AppError> {
+    pub async fn update_custom_agent(
+        &self,
+        id: &str,
+        req: CustomAgentUpsertRequest,
+    ) -> Result<AgentMetadata, AppError> {
         validate_upsert(&req)?;
         let existing = self
             .registry()
@@ -129,7 +133,9 @@ impl AgentService {
         let native_skills_dirs_json = advanced
             .native_skills_dirs
             .as_ref()
-            .map(|v| serde_json::to_string(v).map_err(|e| AppError::Internal(format!("encode native_skills_dirs: {e}"))))
+            .map(|v| {
+                serde_json::to_string(v).map_err(|e| AppError::Internal(format!("encode native_skills_dirs: {e}")))
+            })
             .transpose()?;
         let behavior_policy_json = advanced
             .behavior_policy
@@ -208,11 +214,7 @@ async fn probe_or_reject(req: &CustomAgentUpsertRequest) -> Result<(), AppError>
         return Ok(());
     }
 
-    let env_map: HashMap<String, String> = req
-        .env
-        .iter()
-        .map(|e| (e.name.clone(), e.value.clone()))
-        .collect();
+    let env_map: HashMap<String, String> = req.env.iter().map(|e| (e.name.clone(), e.value.clone())).collect();
     match probe(&req.command, &req.args, &env_map).await {
         TryConnectCustomAgentResponse::Success => Ok(()),
         TryConnectCustomAgentResponse::FailCli { error } => {

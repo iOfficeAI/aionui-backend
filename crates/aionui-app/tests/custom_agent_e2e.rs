@@ -224,13 +224,7 @@ async fn create_rejects_empty_name() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
-    let (status, json) = create_agent(
-        &mut app,
-        &token,
-        &csrf,
-        json!({ "name": "", "command": "sh" }),
-    )
-    .await;
+    let (status, json) = create_agent(&mut app, &token, &csrf, json!({ "name": "", "command": "sh" })).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(json["success"], false);
     assert!(json["error"].as_str().unwrap().to_lowercase().contains("name"));
@@ -241,13 +235,7 @@ async fn create_rejects_empty_command() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
-    let (status, json) = create_agent(
-        &mut app,
-        &token,
-        &csrf,
-        json!({ "name": "x", "command": "   " }),
-    )
-    .await;
+    let (status, json) = create_agent(&mut app, &token, &csrf, json!({ "name": "x", "command": "   " })).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(json["error"].as_str().unwrap().to_lowercase().contains("command"));
 }
@@ -312,13 +300,7 @@ async fn delete_builtin_id_returns_403() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
-    let req = json_with_token(
-        "DELETE",
-        "/api/agents/custom/2d23ff1c",
-        json!(null),
-        &token,
-        &csrf,
-    );
+    let req = json_with_token("DELETE", "/api/agents/custom/2d23ff1c", json!(null), &token, &csrf);
     let resp = app.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
 }
