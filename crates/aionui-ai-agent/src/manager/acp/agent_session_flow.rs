@@ -1,5 +1,5 @@
 use crate::manager::acp::AcpAgentManager;
-use crate::manager::acp::mode_normalize::agent_metadata_uses_claude_meta_resume;
+use crate::manager::acp::mode_normalize::agent_metadata_uses_meta_resume;
 use crate::protocol::events::{
     AgentStreamEvent, AvailableCommandsEventData, FinishEventData, SessionAssignedEventData, StartEventData,
 };
@@ -60,7 +60,7 @@ impl AcpAgentManager {
     /// - Backends that support neither: seed the aggregate and hope the CLI
     ///   still recognises the id (legacy behaviour — matches pre-refactor).
     pub(super) async fn open_session_resume(&self, session_id: &str) -> Result<String, AppError> {
-        if agent_metadata_uses_claude_meta_resume(&self.params.metadata) {
+        if agent_metadata_uses_meta_resume(&self.params.metadata) {
             let mut meta = serde_json::Map::new();
             let mut claude_code = serde_json::Map::new();
             let mut options = serde_json::Map::new();
