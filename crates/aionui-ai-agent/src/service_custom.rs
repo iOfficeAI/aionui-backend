@@ -16,10 +16,9 @@ use std::collections::HashMap;
 use aionui_api_types::{
     AgentMetadata, CustomAgentUpsertRequest, TryConnectCustomAgentRequest, TryConnectCustomAgentResponse,
 };
-use aionui_common::AppError;
+use aionui_common::{AppError, generate_short_id};
 use aionui_db::UpsertAgentMetadataParams;
 use tracing::warn;
-use uuid::Uuid;
 
 use crate::protocol::custom_agent_probe::try_connect_custom_agent as probe;
 use crate::service::AgentService;
@@ -44,7 +43,7 @@ impl AgentService {
         validate_upsert(&req)?;
         probe_or_reject(&req).await?;
 
-        let id = Uuid::new_v4().to_string();
+        let id = generate_short_id();
         self.upsert_custom_row(&id, &req, /* keep_enabled = */ true).await
     }
 
