@@ -53,9 +53,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Linux targets use `cross` so the resulting binary links against the
+          # older GLIBC baked into the cross docker image (currently GLIBC 2.31,
+          # manylinux_2_31 equivalent) instead of whatever GLIBC happens to be
+          # on the GitHub Actions runner. This keeps the release binaries
+          # compatible with Debian 11+/Ubuntu 20.04+/RHEL 9 users regardless of
+          # whether `ubuntu-latest` points at 22.04 or 24.04.
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             binary_name: aionui-backend
+            use_cross: true
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
             binary_name: aionui-backend
@@ -93,7 +100,7 @@ jobs:
         with:
           shared-key: release-${{ matrix.target }}
 
-      - name: Install cross (Linux aarch64)
+      - name: Install cross (Linux targets)
         if: matrix.use_cross == true
         run: cargo install cross --git https://github.com/cross-rs/cross
 
