@@ -53,16 +53,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Linux targets use `cross` so the resulting binary links against the
-          # older GLIBC baked into the cross docker image (currently GLIBC 2.31,
-          # manylinux_2_31 equivalent) instead of whatever GLIBC happens to be
-          # on the GitHub Actions runner. This keeps the release binaries
-          # compatible with Debian 11+/Ubuntu 20.04+/RHEL 9 users regardless of
-          # whether `ubuntu-latest` points at 22.04 or 24.04.
-          - os: ubuntu-latest
+          # Linux x86_64: build natively on ubuntu-22.04 (GLIBC 2.35) so the
+          # release binary runs on Debian 12 / Ubuntu 22.04+ / RHEL 9 /
+          # CentOS Stream 9. We cannot use `cross` here because the default
+          # cross docker image ships a gcc that aws-lc-sys's memcmp safety
+          # check rejects. Pinning the runner is simpler and covers the
+          # target audience — Debian 11 (GLIBC 2.31) is entering ELTS so we
+          # deliberately drop it.
+          - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             binary_name: aionui-backend
-            use_cross: true
+          # Linux aarch64: keep `cross` (its image happens to not trip the
+          # aws-lc-sys check and also yields an older GLIBC baseline).
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
             binary_name: aionui-backend
