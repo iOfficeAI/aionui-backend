@@ -101,10 +101,7 @@ impl ChannelStreamRelay {
                         // a silent/non-text event (tool call), flush any pending
                         // assistant text to the user as an independent message so
                         // it doesn't get overwritten or deferred until Finish.
-                        if is_weixin_platform(self.config.platform)
-                            && has_content
-                            && !text_buffer.trim().is_empty()
-                        {
+                        if is_weixin_platform(self.config.platform) && has_content && !text_buffer.trim().is_empty() {
                             let formatted = format_text_for_platform(&text_buffer, self.config.platform);
                             let flush_msg = ChannelMessageService::build_streaming_message(&formatted);
                             let _ = self
