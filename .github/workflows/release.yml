@@ -100,10 +100,13 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          # Cross vs native builds must never share a cache — proc-macro .so
-          # files are produced for the host GLIBC and break when the linker
-          # switches to the (older) GLIBC in the cross docker image.
-          shared-key: release-${{ matrix.target }}${{ matrix.use_cross == true && '-cross' || '' }}
+          # Include runner OS image and use_cross flag in the cache key.
+          # Proc-macro .so files link against the host GLIBC, so switching
+          # the runner (ubuntu-24.04 ↔ 22.04) or flipping native ↔ cross
+          # must fall into a different cache bucket — otherwise the cached
+          # .so is loaded against an incompatible GLIBC and cargo panics
+          # with "can't find crate" / "GLIBC_* not found" errors.
+          shared-key: release-${{ matrix.target }}-${{ matrix.os }}${{ matrix.use_cross == true && '-cross' || '' }}
 
       - name: Install cross (Linux targets)
         if: matrix.use_cross == true
