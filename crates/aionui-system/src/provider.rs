@@ -240,7 +240,9 @@ fn validate_update_request(req: &UpdateProviderRequest) -> Result<(), AppError> 
     {
         return Err(AppError::BadRequest("name cannot be empty".into()));
     }
-    if let Some(ref url) = req.base_url {
+    if let Some(ref url) = req.base_url
+        && !url.trim().is_empty()
+    {
         validate_base_url(url)?;
     }
     Ok(())
@@ -424,6 +426,24 @@ mod tests {
     #[test]
     fn validate_update_empty_request_ok() {
         assert!(validate_update_request(&UpdateProviderRequest::default()).is_ok());
+    }
+
+    #[test]
+    fn validate_update_empty_base_url_ok() {
+        let req = UpdateProviderRequest {
+            base_url: Some("".into()),
+            ..Default::default()
+        };
+        assert!(validate_update_request(&req).is_ok());
+    }
+
+    #[test]
+    fn validate_update_invalid_base_url_rejected() {
+        let req = UpdateProviderRequest {
+            base_url: Some("not-a-url".into()),
+            ..Default::default()
+        };
+        assert!(validate_update_request(&req).is_err());
     }
 
     #[test]
