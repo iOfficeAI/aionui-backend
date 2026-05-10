@@ -51,6 +51,11 @@ struct Advertised {
 pub struct AcpSession {
     session_id: Option<SessionId>,
     opened: bool,
+    /// Whether the first real user message still needs preset_context /
+    /// skill-index injection. Starts `true` and is consumed (set to `false`)
+    /// on the first `prompt` call. Separate from `opened` because `warmup`
+    /// may open the session before any message is sent.
+    needs_first_message_injection: bool,
     desired: Desired,
     observed: Observed,
     advertised: Advertised,
@@ -73,6 +78,7 @@ impl AcpSession {
         Self {
             session_id: None,
             opened: false,
+            needs_first_message_injection: true,
             desired: Desired {
                 mode_id: initial_mode,
                 model_id: initial_model,
@@ -119,6 +125,12 @@ impl AcpSession {
             self.opened = true;
             self.pending_events.push(AcpSessionEvent::SessionOpened);
         }
+    }
+
+    /// Returns `true` exactly once: on the first real user message.
+    /// After this call the flag is consumed and future calls return `false`.
+    pub fn take_needs_first_message_injection(&mut self) -> bool {
+        std::mem::replace(&mut self.needs_first_message_injection, false)
     }
 }
 

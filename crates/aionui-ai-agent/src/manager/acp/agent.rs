@@ -391,9 +391,13 @@ impl AcpAgentManager {
     /// brand new and still needs `session/load` (or claude-meta-resume) to
     /// re-attach to the persisted session before the next prompt. Subsequent
     /// turns — once the resume handshake has run — take the short path.
+    ///
+    /// Also consumes the first-message injection flag: resumed sessions already
+    /// have the preset_context baked into the prior conversation history.
     pub async fn set_session_id(&self, sid: String) {
         let mut session = self.session.write().await;
         session.set_session_id(DomainSessionId::new(sid));
+        session.take_needs_first_message_injection();
         // Discarded — the session_id already came from DB, no need to re-persist.
         session.drain_events();
     }
@@ -447,20 +451,21 @@ impl AcpAgentManager {
 
     /// Initialize or resume a session, then send the user message.
     ///
-    /// For brand-new sessions (no prior session id and CLI has not opened
-    /// one) the first prompt is augmented with `[Assistant Rules]` /
-    /// skill-index injection. Resume paths skip injection — the prior
-    /// context is already present in the CLI session.
+    /// The first real user message is augmented with `[Assistant Rules]` /
+    /// skill-index injection via a one-shot flag in `AcpSession`. This is
+    /// independent of whether `warmup` already opened the session, avoiding
+    /// a race where warmup marks the session opened before the first message
+    /// arrives.
     async fn ensure_session_and_send(&self, data: &SendMessageData) -> Result<(), AppError> {
-        let is_brand_new = {
-            let s = self.session.read().await;
-            s.session_id().is_none() && !s.is_opened()
-        };
-
         let sid = self.ensure_session_opened().await?;
         self.runtime.transition_to(ConversationStatus::Running);
 
-        if is_brand_new {
+        let needs_injection = {
+            let mut s = self.session.write().await;
+            s.take_needs_first_message_injection()
+        };
+
+        if needs_injection {
             let injected_content = inject_first_message_prefix(
                 &data.content,
                 &self.skill_manager,
