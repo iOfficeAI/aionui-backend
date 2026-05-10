@@ -98,7 +98,10 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: release-${{ matrix.target }}
+          # Cross vs native builds must never share a cache — proc-macro .so
+          # files are produced for the host GLIBC and break when the linker
+          # switches to the (older) GLIBC in the cross docker image.
+          shared-key: release-${{ matrix.target }}${{ matrix.use_cross == true && '-cross' || '' }}
 
       - name: Install cross (Linux targets)
         if: matrix.use_cross == true
