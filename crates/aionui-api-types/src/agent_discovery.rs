@@ -288,8 +288,7 @@ mod behavior_policy_tests {
         let empty: BehaviorPolicy = serde_json::from_str("{}").unwrap();
         assert!(!empty.supports_team);
 
-        let with_team: BehaviorPolicy =
-            serde_json::from_str(r#"{"supports_team":true}"#).unwrap();
+        let with_team: BehaviorPolicy = serde_json::from_str(r#"{"supports_team":true}"#).unwrap();
         assert!(with_team.supports_team);
 
         let serialized = serde_json::to_string(&with_team).unwrap();

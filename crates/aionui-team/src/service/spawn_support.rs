@@ -157,9 +157,7 @@ impl TeamSessionService {
         providers
             .into_iter()
             .filter(|p| p.enabled)
-            .flat_map(|p| {
-                serde_json::from_str::<Vec<String>>(&p.models).unwrap_or_default()
-            })
+            .flat_map(|p| serde_json::from_str::<Vec<String>>(&p.models).unwrap_or_default())
             .collect()
     }
 

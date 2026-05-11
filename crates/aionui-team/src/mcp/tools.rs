@@ -452,7 +452,6 @@ pub fn build_list_models_from_rows(
     json!({ "agent_types": agent_types })
 }
 
-
 /// Phase-1 minimal `team_describe_assistant` handler. Backend has no preset
 /// assistants wired yet, so every call returns the not-found text.
 pub fn handle_team_describe_assistant(_args: &Value) -> String {
@@ -869,7 +868,10 @@ mod tests {
             .filter_map(|e| e["type"].as_str())
             .collect();
         assert!(types.contains(&"claude"));
-        assert!(types.contains(&"aionrs"), "aionrs with backend=NULL but supports_team=true must be included");
+        assert!(
+            types.contains(&"aionrs"),
+            "aionrs with backend=NULL but supports_team=true must be included"
+        );
     }
 
     #[test]
@@ -931,7 +933,11 @@ mod tests {
             "gpt-5.2".to_owned(),
         ];
         let rows = vec![
-            make_agent_row("claude", true, r#"{"available_models":[{"id":"claude-sonnet-4","label":"Sonnet 4"}]}"#),
+            make_agent_row(
+                "claude",
+                true,
+                r#"{"available_models":[{"id":"claude-sonnet-4","label":"Sonnet 4"}]}"#,
+            ),
             aionrs_row,
         ];
         let value = build_list_models_from_rows(&rows, None, &provider_models);
