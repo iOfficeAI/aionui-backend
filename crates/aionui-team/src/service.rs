@@ -473,6 +473,22 @@ impl TeamSessionService {
             .ok_or_else(|| TeamError::TeamNotFound(team_id.into()))?;
         let mut team = Team::from_row(&row)?;
 
+        let normalized = crate::scheduler::normalize_name(name);
+        if normalized.is_empty() {
+            return Err(TeamError::InvalidRequest(
+                "rename_agent.name is empty after normalization".into(),
+            ));
+        }
+
+        // Uniqueness check against all other agents in the team.
+        let has_conflict = team
+            .agents
+            .iter()
+            .any(|a| a.slot_id != slot_id && crate::scheduler::normalize_name(&a.name) == normalized);
+        if has_conflict {
+            return Err(TeamError::DuplicateAgentName(name.to_owned()));
+        }
+
         let agent = team
             .agents
             .iter_mut()

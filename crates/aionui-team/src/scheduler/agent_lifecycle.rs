@@ -49,10 +49,27 @@ impl TeammateManager {
     }
 
     pub async fn rename_agent(&self, slot_id: &str, new_name: &str) -> Result<(), TeamError> {
+        let normalized = super::normalize_name(new_name);
+        if normalized.is_empty() {
+            return Err(TeamError::InvalidRequest(
+                "rename_agent.new_name is empty after normalization".into(),
+            ));
+        }
+
         let mut slots = self.slots.lock().await;
-        let slot = slots
-            .get_mut(slot_id)
+        let _target = slots
+            .get(slot_id)
             .ok_or_else(|| TeamError::AgentNotFound(slot_id.to_owned()))?;
+
+        // Check all other agents for name collision (exclude self).
+        let conflict = slots
+            .iter()
+            .any(|(id, s)| id != slot_id && super::normalize_name(&s.agent.name) == normalized);
+        if conflict {
+            return Err(TeamError::DuplicateAgentName(new_name.to_owned()));
+        }
+
+        let slot = slots.get_mut(slot_id).unwrap();
         slot.agent.name = new_name.to_owned();
         drop(slots);
         self.events.broadcast_agent_renamed(slot_id, new_name);

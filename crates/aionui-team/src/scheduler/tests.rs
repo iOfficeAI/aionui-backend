@@ -426,6 +426,38 @@ async fn rename_agent_broadcasts_renamed_event() {
     assert_eq!(renamed_events[0].data["name"], "Renamed Worker");
 }
 
+#[tokio::test]
+async fn rename_agent_rejects_duplicate_name() {
+    let agents = make_team_agents();
+    let (mgr, _) = make_manager(&agents);
+
+    // "Worker2" already exists (from make_team_agents). Renaming worker-1
+    // to " Worker2 " should collide after normalization.
+    let err = mgr
+        .rename_agent("worker-1", " Worker2 ")
+        .await
+        .expect_err("duplicate name must be rejected");
+    assert!(
+        matches!(&err, TeamError::DuplicateAgentName(_)),
+        "expected DuplicateAgentName, got {err:?}"
+    );
+
+    // Original name must be preserved.
+    let agent = mgr.get_agent("worker-1").await.unwrap();
+    assert_eq!(agent.name, "Worker1");
+}
+
+#[tokio::test]
+async fn rename_agent_allows_same_agent_own_name() {
+    let agents = make_team_agents();
+    let (mgr, _) = make_manager(&agents);
+
+    // Renaming worker-1 to its own name (different casing) is not a conflict.
+    mgr.rename_agent("worker-1", "WORKER1").await.unwrap();
+    let agent = mgr.get_agent("worker-1").await.unwrap();
+    assert_eq!(agent.name, "WORKER1");
+}
+
 // -- execute_action: SendMessage -----------------------------------------
 
 #[tokio::test]
