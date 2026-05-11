@@ -25,6 +25,10 @@ struct Cli {
     #[arg(long, default_value = "data")]
     data_dir: String,
 
+    /// Host application version used for extension engine compatibility.
+    #[arg(long, default_value_t = env!("CARGO_PKG_VERSION").to_string())]
+    app_version: String,
+
     /// Run in local embedded mode (skip authentication, use system_default_user).
     #[arg(long)]
     local: bool,
@@ -73,8 +77,17 @@ fn init_tracing(log_dir: &Path, log_level: Option<&str>) -> tracing_appender::no
     guard
 }
 
-#[tokio::main]
-async fn main() -> Result<ExitCode> {
+fn main() -> Result<ExitCode> {
+    // SAFETY: called before any worker thread exists (including the tokio
+    // runtime constructed below). Rust 2024 requires `unsafe` for
+    // `std::env::set_var` invoked inside `enhance_process_path`.
+    let merged_path = unsafe { aionui_runtime::enhance_process_path() };
+
+    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
+    runtime.block_on(async_main(merged_path))
+}
+
+async fn async_main(merged_path: String) -> Result<ExitCode> {
     // mcp-bridge / mcp-guide-stdio subcommands: live entirely outside the main
     // HTTP server and must not touch the database, logging setup, or `AppServices`.
     let mut argv = std::env::args();
@@ -91,18 +104,27 @@ async fn main() -> Result<ExitCode> {
     let log_dir = cli.log_dir.unwrap_or_else(|| Path::new(&cli.data_dir).join("logs"));
     let _log_guard = init_tracing(&log_dir, cli.log_level.as_deref());
 
+    tracing::info!(
+        path_segments = merged_path.split(if cfg!(windows) { ';' } else { ':' }).count(),
+        path_len = merged_path.len(),
+        "startup: PATH ready"
+    );
+
     let config = AppConfig {
         host: cli.host,
         port: cli.port,
         data_dir: cli.data_dir,
+        app_version: cli.app_version,
         local: cli.local,
     };
 
     let boot = Instant::now();
 
     // Initialize database and all services
-    info!("Initializing database at {}", config.database_path().display());
-    let database = aionui_db::init_database(&config.database_path()).await?;
+    let db_path = config.database_path();
+    aionui_db::maybe_copy_legacy_database(&db_path)?;
+    info!("Initializing database at {}", db_path.display());
+    let database = aionui_db::init_database(&db_path).await?;
     info!(elapsed_ms = boot.elapsed().as_millis(), "startup: database initialized");
 
     // Materialize the embedded builtin-skills corpus to disk before any
@@ -146,7 +168,13 @@ async fn main() -> Result<ExitCode> {
         "startup: builtin skills materialized"
     );
 
-    let services = AppServices::from_database_with_data_dir(database, config.data_dir.clone(), config.local).await?;
+    let services = AppServices::from_database_with_data_dir_and_app_version(
+        database,
+        config.data_dir.clone(),
+        config.local,
+        config.app_version.clone(),
+    )
+    .await?;
     info!(elapsed_ms = boot.elapsed().as_millis(), "startup: services constructed");
 
     if config.local {

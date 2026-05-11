@@ -39,8 +39,9 @@ impl Database {
 /// configures pragmas (foreign_keys, busy_timeout, journal_mode=WAL),
 /// runs migrations, and ensures the system default user exists.
 ///
-/// If initialization fails on an existing file, attempts corruption recovery
-/// by backing up the corrupted file and creating a fresh database.
+/// If initialization fails on an existing file, only explicit corruption-like
+/// failures attempt recovery by backing up the corrupted file and creating a
+/// fresh database. Migration mismatches and lock contention fail fast.
 pub async fn init_database(path: &Path) -> Result<Database, DbError> {
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
@@ -51,7 +52,7 @@ pub async fn init_database(path: &Path) -> Result<Database, DbError> {
 
     match try_init_file(path).await {
         Ok(db) => Ok(db),
-        Err(e) if path.exists() => {
+        Err(e) if path.exists() && should_attempt_recovery(&e) => {
             warn!("Database initialization failed, attempting recovery: {e}");
             recover_and_retry(path, e).await
         }
@@ -80,6 +81,32 @@ pub async fn init_database_memory() -> Result<Database, DbError> {
 
     info!("In-memory database initialized");
     Ok(Database { pool })
+}
+
+/// Copy the legacy `aionui.db` to the new target path if the target does not exist.
+///
+/// This enables safe upgrades: the old database remains untouched and the backend
+/// operates exclusively on the copy. The copy is atomic (write to `.tmp`, then rename)
+/// so a crash mid-copy leaves no half-written target file.
+pub fn maybe_copy_legacy_database(target: &Path) -> Result<(), DbError> {
+    if target.exists() {
+        return Ok(());
+    }
+
+    let legacy = target.with_file_name("aionui.db");
+    if !legacy.exists() {
+        return Ok(());
+    }
+
+    let tmp = target.with_extension("db.tmp");
+    std::fs::copy(&legacy, &tmp).map_err(|e| DbError::Init(format!("Failed to copy legacy database: {e}")))?;
+    std::fs::rename(&tmp, target).map_err(|e| DbError::Init(format!("Failed to rename temp database: {e}")))?;
+
+    let _ = std::fs::remove_file(target.with_extension("db-wal"));
+    let _ = std::fs::remove_file(target.with_extension("db-shm"));
+
+    info!("Copied legacy database {} -> {}", legacy.display(), target.display());
+    Ok(())
 }
 
 async fn try_init_file(path: &Path) -> Result<Database, DbError> {
@@ -142,6 +169,8 @@ async fn ensure_schema_columns(pool: &SqlitePool) -> Result<(), DbError> {
 ///
 /// Uses INSERT OR IGNORE so it is safe to call on every startup.
 /// The system user has an empty password hash, which signals "needs setup".
+/// Username defaults to `admin` — matches the legacy web-host login flow so
+/// users upgrading from pre-M6 builds keep the same login username.
 async fn ensure_system_user(pool: &SqlitePool) -> Result<(), DbError> {
     let now = aionui_common::now_ms();
     sqlx::query(
@@ -149,7 +178,7 @@ async fn ensure_system_user(pool: &SqlitePool) -> Result<(), DbError> {
          VALUES (?, ?, ?, ?, ?)",
     )
     .bind("system_default_user")
-    .bind("system")
+    .bind("admin")
     .bind("")
     .bind(now)
     .bind(now)
@@ -178,5 +207,62 @@ async fn recover_and_retry(path: &Path, original_error: DbError) -> Result<Datab
         Err(retry_err) => Err(DbError::Init(format!(
             "Recovery failed after backup: {retry_err}. Original error: {original_error}"
         ))),
+    }
+}
+
+fn should_attempt_recovery(err: &DbError) -> bool {
+    match err {
+        DbError::Migration(_) => false,
+        DbError::NotFound(_) | DbError::Conflict(_) => false,
+        DbError::Query(_) | DbError::Init(_) => is_corruption_like_error(err),
+    }
+}
+
+fn is_corruption_like_error(err: &DbError) -> bool {
+    let message = err.to_string().to_ascii_lowercase();
+
+    [
+        "sqlite_corrupt",
+        "database disk image is malformed",
+        "file is not a database",
+        "sqlite_notadb",
+        "malformed database schema",
+    ]
+    .iter()
+    .any(|needle| message.contains(needle))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recovery_skips_migration_version_mismatch() {
+        let err = DbError::Migration(sqlx::migrate::MigrateError::VersionMismatch(6));
+
+        assert!(
+            !should_attempt_recovery(&err),
+            "migration checksum mismatch must not trigger recovery"
+        );
+    }
+
+    #[test]
+    fn recovery_skips_lock_contention_errors() {
+        let err = DbError::Init("database is locked".into());
+
+        assert!(
+            !should_attempt_recovery(&err),
+            "lock contention must not trigger recovery"
+        );
+    }
+
+    #[test]
+    fn recovery_allows_corruption_like_errors() {
+        let err = DbError::Init("database disk image is malformed".into());
+
+        assert!(
+            should_attempt_recovery(&err),
+            "corruption-like failures should trigger recovery"
+        );
     }
 }

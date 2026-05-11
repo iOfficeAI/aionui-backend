@@ -346,6 +346,15 @@ async fn t9_1_keyword_match() {
     let result = svc.search_messages(USER_ID, query).await.unwrap();
     assert_eq!(result.items.len(), 1);
     assert_eq!(result.total, 1);
+
+    let item = &result.items[0];
+    assert_eq!(item.message_type, "text");
+    assert!(item.message_created_at > 0);
+    assert!(item.preview_text.contains("Rust review report"));
+
+    assert_eq!(item.conversation.id, conv.id);
+    assert_eq!(item.conversation.name, conv.name);
+    assert_eq!(item.conversation.extra["workspace"], "/home/user/project");
 }
 
 #[tokio::test]
@@ -399,6 +408,81 @@ async fn t9_4_empty_keyword() {
     };
     let err = svc.search_messages(USER_ID, query).await.unwrap_err();
     assert!(matches!(err, aionui_common::AppError::BadRequest(_)));
+}
+
+#[tokio::test]
+async fn t9_5_preview_text_extracts_from_json_content() {
+    let (svc, repo, _b) = setup().await;
+    let conv = svc.create(USER_ID, make_create_req()).await.unwrap();
+
+    let complex_msg = MessageRow {
+        id: generate_prefixed_id("msg"),
+        conversation_id: conv.id.clone(),
+        msg_id: None,
+        r#type: "text".to_string(),
+        content: r#"[{"type":"text","content":"Design document for search"},{"type":"text","content":"feature implementation"}]"#.to_string(),
+        position: Some("right".to_string()),
+        status: Some("finish".to_string()),
+        hidden: false,
+        created_at: now_ms(),
+    };
+    repo.insert_message(&complex_msg).await.unwrap();
+
+    let query = SearchMessagesQuery {
+        keyword: "search".into(),
+        page: None,
+        page_size: None,
+    };
+    let result = svc.search_messages(USER_ID, query).await.unwrap();
+    assert_eq!(result.items.len(), 1);
+
+    let item = &result.items[0];
+    assert!(!item.preview_text.contains('{'));
+    assert!(!item.preview_text.contains('['));
+    assert!(item.preview_text.contains("Design document for search"));
+    assert!(item.preview_text.contains("feature implementation"));
+}
+
+#[tokio::test]
+async fn t9_6_search_result_includes_conversation_model() {
+    let (svc, repo, _b) = setup().await;
+    let conv = svc.create(USER_ID, make_create_req()).await.unwrap();
+
+    repo.insert_message(&make_message(&conv.id, "model test keyword", 0))
+        .await
+        .unwrap();
+
+    let query = SearchMessagesQuery {
+        keyword: "model test".into(),
+        page: None,
+        page_size: None,
+    };
+    let result = svc.search_messages(USER_ID, query).await.unwrap();
+    assert_eq!(result.items.len(), 1);
+
+    let item = &result.items[0];
+    let model = item.conversation.model.as_ref().unwrap();
+    assert_eq!(model.provider_id, "p1");
+    assert_eq!(model.model, "claude-sonnet-4-20250514");
+}
+
+#[tokio::test]
+async fn t9_7_search_does_not_leak_other_users_messages() {
+    let (svc, repo, _b) = setup().await;
+
+    let conv = svc.create(USER_ID, make_create_req()).await.unwrap();
+    repo.insert_message(&make_message(&conv.id, "secret keyword data", 0))
+        .await
+        .unwrap();
+
+    let query = SearchMessagesQuery {
+        keyword: "secret".into(),
+        page: None,
+        page_size: None,
+    };
+    let result = svc.search_messages("other_user_id", query).await.unwrap();
+    assert!(result.items.is_empty());
+    assert_eq!(result.total, 0);
 }
 
 // ── T10: Associated conversations ──────────────────────────────────

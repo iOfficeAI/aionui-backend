@@ -437,11 +437,21 @@ impl IConversationRepository for SqliteConversationRepository {
         let rows = sqlx::query_as::<_, MessageSearchRow>(
             "SELECT \
                 m.id AS message_id, \
-                m.conversation_id, \
-                c.name AS conversation_name, \
                 m.type, \
                 m.content, \
-                m.created_at \
+                m.created_at, \
+                c.id AS conversation_id, \
+                c.name AS conversation_name, \
+                c.type AS conversation_type, \
+                c.extra AS conversation_extra, \
+                c.model AS conversation_model, \
+                c.status AS conversation_status, \
+                c.source AS conversation_source, \
+                c.channel_chat_id AS conversation_channel_chat_id, \
+                c.pinned AS conversation_pinned, \
+                c.pinned_at AS conversation_pinned_at, \
+                c.created_at AS conversation_created_at, \
+                c.updated_at AS conversation_updated_at \
              FROM messages m \
              INNER JOIN conversations c ON m.conversation_id = c.id \
              WHERE c.user_id = ? AND m.content LIKE ? \

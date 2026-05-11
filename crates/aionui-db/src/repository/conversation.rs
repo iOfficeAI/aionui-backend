@@ -204,13 +204,26 @@ pub struct MessageRowUpdate {
 }
 
 /// A single result row from cross-conversation message search.
+/// Includes full conversation fields for building nested response.
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct MessageSearchRow {
+    // Message fields
     pub message_id: String,
-    pub conversation_id: String,
-    pub conversation_name: String,
     #[sqlx(rename = "type")]
     pub r#type: String,
     pub content: String,
     pub created_at: TimestampMs,
+    // Conversation fields
+    pub conversation_id: String,
+    pub conversation_name: String,
+    pub conversation_type: String,
+    pub conversation_extra: String,
+    pub conversation_model: Option<String>,
+    pub conversation_status: Option<String>,
+    pub conversation_source: Option<String>,
+    pub conversation_channel_chat_id: Option<String>,
+    pub conversation_pinned: bool,
+    pub conversation_pinned_at: Option<TimestampMs>,
+    pub conversation_created_at: TimestampMs,
+    pub conversation_updated_at: TimestampMs,
 }

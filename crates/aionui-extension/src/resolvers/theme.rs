@@ -2,6 +2,7 @@ use std::path::Path;
 
 use tracing::warn;
 
+use crate::asset_paths::resolve_extension_asset_url;
 use crate::error::ExtensionError;
 use crate::types::{ExtTheme, ResolvedTheme};
 
@@ -19,8 +20,8 @@ pub fn resolve_theme(theme: &ExtTheme, extension_name: &str, ext_dir: &Path) -> 
 
     let cover_image = theme
         .cover_image
-        .as_ref()
-        .map(|img| ext_dir.join(img).to_string_lossy().into_owned());
+        .as_deref()
+        .and_then(|img| resolve_extension_asset_url(extension_name, img));
 
     Ok(ResolvedTheme {
         extension_name: extension_name.to_owned(),

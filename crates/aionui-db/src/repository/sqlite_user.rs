@@ -326,13 +326,15 @@ mod tests {
         let (repo, _db) = setup().await;
         let user = repo.get_system_user().await.unwrap().unwrap();
         assert_eq!(user.id, "system_default_user");
-        assert_eq!(user.username, "system");
+        assert_eq!(user.username, "admin");
     }
 
     #[tokio::test]
     async fn get_primary_webui_user_returns_system_user_first() {
         let (repo, _db) = setup().await;
-        repo.create_user("admin", "hash").await.unwrap();
+        // Can't use "admin" here: the seeded system_default_user already owns that
+        // username after the M6 default change. Any fresh user gets a different name.
+        repo.create_user("other", "hash").await.unwrap();
 
         let user = repo.get_primary_webui_user().await.unwrap().unwrap();
         assert_eq!(user.id, "system_default_user");

@@ -8,8 +8,8 @@ use aionui_api_types::{
     ApiResponse, ApprovalCheckQuery, ApprovalCheckResponse, CloneConversationRequest, ConfirmRequest,
     ConfirmationListResponse, ConversationArtifactListResponse, ConversationArtifactResponse, ConversationListResponse,
     ConversationResponse, CreateConversationRequest, ListConversationsQuery, ListMessagesQuery, MessageListResponse,
-    MessageSearchResponse, SearchMessagesQuery, SendMessageRequest, UpdateConversationArtifactRequest,
-    UpdateConversationRequest,
+    MessageSearchResponse, SearchMessagesQuery, SendMessageRequest, SendMessageResponse,
+    UpdateConversationArtifactRequest, UpdateConversationRequest,
 };
 use aionui_auth::CurrentUser;
 use aionui_common::AppError;
@@ -139,13 +139,16 @@ async fn send_message(
     Extension(user): Extension<CurrentUser>,
     Path(id): Path<String>,
     body: Result<Json<SendMessageRequest>, JsonRejection>,
-) -> Result<(StatusCode, Json<ApiResponse<()>>), AppError> {
+) -> Result<(StatusCode, Json<ApiResponse<SendMessageResponse>>), AppError> {
     let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
-    state
+    let msg_id = state
         .conversation_service
         .send_message(&user.id, &id, req, &state.worker_task_manager)
         .await?;
-    Ok((StatusCode::ACCEPTED, Json(ApiResponse::success())))
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(ApiResponse::ok(SendMessageResponse { msg_id })),
+    ))
 }
 
 async fn list_artifacts(

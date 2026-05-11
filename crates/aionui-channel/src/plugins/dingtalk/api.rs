@@ -139,12 +139,21 @@ impl DingtalkApi {
     }
 
     /// Register for WebSocket Stream and get the connection endpoint.
+    ///
+    /// Note: This endpoint uses clientId/clientSecret in the request body,
+    /// NOT the access token header. The Accept header is required to get
+    /// JSON instead of XML.
     pub async fn register_stream(&self) -> Result<RegisterStreamResponse, ChannelError> {
         let url = format!("{DINGTALK_API_BASE}/v1.0/gateway/connections/open");
-        let token = self.get_token().await?;
 
         let body = RegisterStreamRequest {
+            client_id: self.client_id.clone(),
+            client_secret: self.client_secret.clone(),
             subscriptions: vec![
+                StreamSubscription {
+                    sub_type: "EVENT".into(),
+                    topic: "*".into(),
+                },
                 StreamSubscription {
                     sub_type: "CALLBACK".into(),
                     topic: "/v1.0/im/bot/messages/get".into(),
@@ -154,19 +163,31 @@ impl DingtalkApi {
                     topic: "/v1.0/card/instances/callback".into(),
                 },
             ],
+            ua: Some("aionui-backend".into()),
         };
 
-        let resp: RegisterStreamResponse = self
+        let raw_resp = self
             .client
             .post(&url)
-            .header("x-acs-dingtalk-access-token", &token)
+            .header("Accept", "application/json")
             .json(&body)
             .send()
             .await
-            .map_err(|e| ChannelError::ConnectionFailed(format!("DingTalk stream registration failed: {e}")))?
-            .json()
-            .await
-            .map_err(|e| ChannelError::ConnectionFailed(format!("DingTalk stream registration parse failed: {e}")))?;
+            .map_err(|e| ChannelError::ConnectionFailed(format!("DingTalk stream registration failed: {e}")))?;
+
+        let status = raw_resp.status();
+        let body_text = raw_resp.text().await.map_err(|e| {
+            ChannelError::ConnectionFailed(format!("DingTalk stream registration read body failed: {e}"))
+        })?;
+
+        debug!(status = %status, body_len = body_text.len(), "DingTalk stream registration response received");
+
+        let resp: RegisterStreamResponse = serde_json::from_str(&body_text).map_err(|e| {
+            ChannelError::ConnectionFailed(format!(
+                "DingTalk stream registration parse failed: {e}, body: {}",
+                &body_text[..body_text.len().min(200)]
+            ))
+        })?;
 
         Ok(resp)
     }
@@ -273,7 +294,12 @@ impl DingtalkApi {
         request: &SendRobotMessageRequest,
     ) -> Result<SendRobotMessageResponse, ChannelError> {
         let token = self.get_token().await?;
-        let url = format!("{DINGTALK_API_BASE}/v1.0/robot/oToMessages/batchSend");
+
+        let url = if request.open_conversation_id.is_some() {
+            format!("{DINGTALK_API_BASE}/v1.0/robot/groupMessages/send")
+        } else {
+            format!("{DINGTALK_API_BASE}/v1.0/robot/oToMessages/batchSend")
+        };
 
         let resp: SendRobotMessageResponse = self
             .client

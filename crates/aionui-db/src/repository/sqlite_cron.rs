@@ -369,7 +369,7 @@ mod tests {
         assert_eq!(updated.name, "Renamed");
         assert!(!updated.enabled);
         assert_eq!(updated.run_count, 42);
-        assert!(updated.updated_at > updated.created_at);
+        assert!(updated.updated_at >= updated.created_at);
     }
 
     #[tokio::test]

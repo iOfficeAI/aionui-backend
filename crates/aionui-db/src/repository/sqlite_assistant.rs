@@ -255,21 +255,34 @@ impl IAssistantOverrideRepository for SqliteAssistantOverrideRepository {
         let now = now_ms();
         let last_used_at: Option<TimestampMs> = params.last_used_at;
 
+        // `preset_agent_type` has three-way semantics in the params struct
+        // (see `UpsertOverrideParams`). At the SQL layer we flatten it into a
+        // `(write?, value)` pair: on CONFLICT, if the caller did not specify
+        // a new value, `COALESCE(new_flag, 0)` keeps the existing column.
+        let (pat_write, pat_value): (bool, Option<&str>) = match params.preset_agent_type {
+            Some(v) => (true, v),
+            None => (false, None),
+        };
+
         sqlx::query(
             "INSERT INTO assistant_overrides \
-                (assistant_id, enabled, sort_order, last_used_at, updated_at) \
-             VALUES (?, ?, ?, ?, ?) \
+                (assistant_id, enabled, sort_order, last_used_at, preset_agent_type, updated_at) \
+             VALUES (?, ?, ?, ?, ?, ?) \
              ON CONFLICT(assistant_id) DO UPDATE SET \
                 enabled = excluded.enabled, \
                 sort_order = excluded.sort_order, \
                 last_used_at = COALESCE(excluded.last_used_at, assistant_overrides.last_used_at), \
+                preset_agent_type = CASE WHEN ? THEN ? ELSE assistant_overrides.preset_agent_type END, \
                 updated_at = excluded.updated_at",
         )
         .bind(params.assistant_id)
         .bind(params.enabled)
         .bind(params.sort_order)
         .bind(last_used_at)
+        .bind(pat_value)
         .bind(now)
+        .bind(pat_write)
+        .bind(pat_value)
         .execute(&self.pool)
         .await?;
 
@@ -486,6 +499,7 @@ mod tests {
                 enabled: false,
                 sort_order: 5,
                 last_used_at: Some(1000),
+                ..Default::default()
             })
             .await
             .unwrap();
@@ -503,6 +517,7 @@ mod tests {
             enabled: true,
             sort_order: 0,
             last_used_at: Some(1000),
+            ..Default::default()
         })
         .await
         .unwrap();
@@ -513,6 +528,7 @@ mod tests {
                 enabled: false,
                 sort_order: 3,
                 last_used_at: None,
+                ..Default::default()
             })
             .await
             .unwrap();
@@ -531,6 +547,7 @@ mod tests {
             enabled: true,
             sort_order: 0,
             last_used_at: None,
+            ..Default::default()
         })
         .await
         .unwrap();
@@ -539,6 +556,7 @@ mod tests {
             enabled: false,
             sort_order: 1,
             last_used_at: None,
+            ..Default::default()
         })
         .await
         .unwrap();
@@ -555,6 +573,7 @@ mod tests {
             enabled: true,
             sort_order: 0,
             last_used_at: None,
+            ..Default::default()
         })
         .await
         .unwrap();
@@ -571,6 +590,7 @@ mod tests {
                 enabled: true,
                 sort_order: 0,
                 last_used_at: None,
+                ..Default::default()
             })
             .await
             .unwrap();
@@ -591,6 +611,7 @@ mod tests {
             enabled: true,
             sort_order: 0,
             last_used_at: None,
+            ..Default::default()
         })
         .await
         .unwrap();

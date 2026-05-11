@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use aionui_ai_agent::{BuildTaskOptions, ICronService, IWorkerTaskManager, SendMessageData};
+use aionui_ai_agent::IWorkerTaskManager;
+use aionui_ai_agent::types::{BuildTaskOptions, SendMessageData};
+
+use crate::response_middleware::ICronService;
 use aionui_api_types::{
     ApprovalCheckResponse, CloneConversationRequest, ConfirmRequest, ConfirmationListResponse,
     ConversationArtifactKind, ConversationArtifactListResponse, ConversationArtifactResponse,
@@ -10,8 +13,7 @@ use aionui_api_types::{
     WebSocketMessage,
 };
 use aionui_common::{
-    AgentType, AppError, ConversationSource, ConversationStatus, PaginatedResult, generate_id, generate_short_id,
-    now_ms,
+    AgentType, AppError, ConversationSource, ConversationStatus, PaginatedResult, generate_short_id, now_ms,
 };
 use aionui_db::models::MessageRow;
 use aionui_db::{
@@ -26,6 +28,7 @@ use crate::convert::{
     string_to_enum,
 };
 use crate::skill_resolver::SkillResolver;
+use crate::skill_snapshot::{backfill_skills_if_missing, compute_initial_skills};
 use crate::stream_relay::StreamRelay;
 
 const MAX_CRON_CONTINUATIONS_PER_TURN: usize = 4;
@@ -46,6 +49,8 @@ pub struct ConversationService {
     agent_metadata_repo: Arc<dyn IAgentMetadataRepository>,
     acp_session_repo: Arc<dyn IAcpSessionRepository>,
 }
+
+// ── Construction & Dependency Injection ──────────────────────────────
 
 impl ConversationService {
     pub fn new(
@@ -113,6 +118,28 @@ impl ConversationService {
         }
     }
 
+    /// The single source of truth for `msg_id` values across the backend.
+    ///
+    /// Every `msg_id` — user message id, assistant message id, cron/tips WS
+    /// event id, agent correlation id (`SendMessageData.msg_id`), etc. — must
+    /// be produced here. This keeps the ID space uniform and prevents
+    /// downstream modules from accidentally forking their own format.
+    ///
+    /// The value is purely functional (no state), exposed as an associated
+    /// function so callers that hold only `ConversationService::mint_msg_id`
+    /// (or none of the service at all, via re-export) can use it.
+    pub fn mint_msg_id() -> String {
+        generate_short_id()
+    }
+
+    pub fn repo(&self) -> &Arc<dyn IConversationRepository> {
+        &self.repo
+    }
+}
+
+// ── Conversation CRUD ───────────────────────────────────────────────
+
+impl ConversationService {
     /// Create a new conversation.
     ///
     /// Generates a UUID v7, sets status to `pending`, defaults source
@@ -194,8 +221,7 @@ impl ConversationService {
         };
 
         let auto_inject_names = self.skill_resolver.auto_inject_names().await;
-        let initial_skills =
-            crate::skill_snapshot::compute_initial_skills(&auto_inject_names, &preset_enabled, &exclude_auto_inject);
+        let initial_skills = compute_initial_skills(&auto_inject_names, &preset_enabled, &exclude_auto_inject);
 
         // Wire skill symlinks into the auto-provisioned workspace so the
         // agent CLI picks them up via its native skills dir (e.g.
@@ -636,7 +662,11 @@ impl ConversationService {
             .map(|row| row_to_response(row, &self.workspace_root))
             .collect()
     }
+}
 
+// ── Messages & Artifacts ────────────────────────────────────────────
+
+impl ConversationService {
     /// List messages for a conversation with page-based pagination.
     pub async fn list_messages(
         &self,
@@ -764,7 +794,11 @@ impl ConversationService {
             .search_messages(user_id, &query.keyword, page, page_size)
             .await?;
 
-        let items = result.items.into_iter().map(search_row_to_item).collect();
+        let items = result
+            .items
+            .into_iter()
+            .map(|row| search_row_to_item(row, &self.workspace_root))
+            .collect::<Result<Vec<_>, _>>()?;
 
         Ok(PaginatedResult {
             items,
@@ -772,9 +806,11 @@ impl ConversationService {
             has_more: result.has_more,
         })
     }
+}
 
-    // ── Confirmation System ──────────────────────────────────────────
+// ── Confirmation System ─────────────────────────────────────────────
 
+impl ConversationService {
     /// Get the list of pending confirmations for a conversation.
     pub async fn list_confirmations(
         &self,
@@ -859,9 +895,11 @@ impl ConversationService {
 
         Ok(ApprovalCheckResponse { approved })
     }
+}
 
-    // ── Message Flow ─────────────────────────────────────────────────
+// ── Message Flow (send / stop / warmup) ─────────────────────────────
 
+impl ConversationService {
     /// Send a user message to the conversation.
     ///
     /// 1. Validates the conversation belongs to the user
@@ -876,7 +914,7 @@ impl ConversationService {
         conversation_id: &str,
         req: SendMessageRequest,
         task_manager: &Arc<dyn IWorkerTaskManager>,
-    ) -> Result<(), AppError> {
+    ) -> Result<String, AppError> {
         if req.content.trim().is_empty() {
             return Err(AppError::BadRequest("Message content must not be empty".into()));
         }
@@ -914,11 +952,15 @@ impl ConversationService {
             ));
         }
 
-        // Store user message
+        // Store user message. `msg_id` is server-generated so the WebSocket
+        // stream, DB row, and client-side message index all agree on the same
+        // key. We reuse the same value for `id` (primary key) and `msg_id`
+        // to preserve legacy callers that still rely on `id == msg_id`.
+        let user_msg_id = Self::mint_msg_id();
         let user_msg = aionui_db::models::MessageRow {
-            id: generate_id(),
+            id: user_msg_id.clone(),
             conversation_id: conversation_id.to_owned(),
-            msg_id: Some(req.msg_id.clone()),
+            msg_id: Some(user_msg_id.clone()),
             r#type: "text".into(),
             content: serde_json::json!({ "content": req.content }).to_string(),
             position: Some("right".into()),
@@ -928,81 +970,65 @@ impl ConversationService {
         };
         self.repo.insert_message(&user_msg).await?;
 
+        self.broadcaster.broadcast(WebSocketMessage::new(
+            "message.userCreated",
+            serde_json::json!({
+                "conversation_id": conversation_id,
+                "msg_id": &user_msg_id,
+                "content": &req.content,
+                "position": "right",
+                "status": "finish",
+                "hidden": req.hidden,
+                "created_at": user_msg.created_at,
+            }),
+        ));
+
         // Build task options from conversation row
         let build_opts = self.build_task_options(&row)?;
         let stored_workspace = build_opts.workspace.clone();
-        let agent = task_manager.get_or_build_task(conversation_id, build_opts)?;
+        let agent = task_manager.get_or_build_task(conversation_id, build_opts).await?;
 
         // If the factory resolved a different workspace (e.g. auto-created temp
         // dir for a legacy conversation with empty workspace), persist it back.
         self.maybe_persist_workspace(conversation_id, &stored_workspace, agent.workspace())
             .await?;
 
-        // Update conversation status to running
+        // TODO: 好蠢的设计, status 写数据库, 最好干掉啦
         let update = ConversationRowUpdate {
             status: Some(enum_to_db(&ConversationStatus::Running)?),
             updated_at: Some(now_ms()),
             ..Default::default()
         };
-        self.repo.update(conversation_id, &update).await?;
 
-        // Send message to the agent in a background task.
-        // prompt() blocks until the PromptResponse arrives (turn completed),
-        // but the HTTP handler should return 202 immediately.
-        let msg_id_log = req.msg_id.clone();
-        let send_data = SendMessageData {
-            content: req.content,
-            msg_id: req.msg_id,
-            files: req.files,
-            inject_skills: req.inject_skills,
-        };
+        self.repo.update(conversation_id, &update).await?;
         let conv_id = conversation_id.to_owned();
         let repo = Arc::clone(&self.repo);
         let broadcaster = Arc::clone(&self.broadcaster);
         let cron_service = self.current_cron_service();
         let user_id_owned = user_id.to_owned();
+
+        // Send message to the agent in a background task.
+        // prompt() blocks until the PromptResponse arrives (turn completed),
+        // but the HTTP handler should return 202 immediately.
+        //
+        // Every turn mints a fresh msg_id and passes it as the agent
+        // correlation id so DB row, WebSocket stream events, and
+        // agent-internal tracing all share one identifier per turn.
+        let user_msg_id_ret = user_msg_id.clone();
         tokio::spawn(async move {
-            let mut pending_send = Some(send_data);
+            let first_turn_msg_id = Self::mint_msg_id();
+            let mut pending_send = Some((
+                SendMessageData {
+                    content: req.content,
+                    msg_id: first_turn_msg_id.clone(),
+                    files: req.files,
+                    inject_skills: req.inject_skills,
+                },
+                first_turn_msg_id,
+            ));
             let mut continuation_count = 0usize;
 
-            loop {
-                let Some(current_send) = pending_send.take() else {
-                    break;
-                };
-
-                let relay = StreamRelay::new(
-                    conv_id.clone(),
-                    generate_id(),
-                    user_id_owned.clone(),
-                    Arc::clone(&repo),
-                    Arc::clone(&broadcaster),
-                    cron_service.clone(),
-                )
-                .with_turn_completion(false);
-
-                let rx = agent.subscribe();
-                let send_agent = Arc::clone(&agent);
-                let send_task = tokio::spawn(async move { send_agent.send_message(current_send).await });
-                let outcome = relay.run(rx).await;
-
-                match send_task.await {
-                    Ok(Ok(())) => {}
-                    Ok(Err(e)) => {
-                        tracing::error!(conversation_id = %conv_id, error = %e, "Agent send_message failed");
-                    }
-                    Err(e) => {
-                        tracing::error!(conversation_id = %conv_id, error = %e, "Agent send task join failed");
-                    }
-                }
-
-                if let Some(session_key) = agent.get_session_key() {
-                    persist_session_key(&repo, &conv_id, &session_key).await;
-                }
-
-                if outcome.system_responses.is_empty() {
-                    break;
-                }
-
+            while let Some((current_send, msg_id)) = pending_send.take() {
                 if continuation_count >= MAX_CRON_CONTINUATIONS_PER_TURN {
                     warn!(
                         conversation_id = %conv_id,
@@ -1012,20 +1038,53 @@ impl ConversationService {
                     break;
                 }
 
-                continuation_count += 1;
-                pending_send = Some(SendMessageData {
-                    content: outcome.system_responses.join("\n"),
-                    msg_id: generate_id(),
-                    files: vec![],
-                    inject_skills: vec![],
+                let relay = StreamRelay::new(
+                    conv_id.clone(),
+                    msg_id,
+                    user_id_owned.clone(),
+                    Arc::clone(&repo),
+                    Arc::clone(&broadcaster),
+                    cron_service.clone(),
+                )
+                .with_turn_completion(false);
+
+                let rx = agent.subscribe();
+                let send_agent = agent.clone();
+                let conv_id_send = conv_id.clone();
+                // 1. Send the message to the agent and concurrently run the relay to stream events.
+                tokio::spawn(async move {
+                    if let Err(e) = send_agent.send_message(current_send).await {
+                        tracing::error!(conversation_id = %conv_id_send, error = %e, "Agent send_message failed");
+                    }
                 });
+                // 2. Wait for the agent to process the message and complete the turn, while the relay streams events in real time.
+                let outcome = relay.consume(rx).await;
+
+                if let Some(session_key) = agent.get_session_key() {
+                    persist_session_key(&repo, &conv_id, &session_key).await;
+                }
+
+                if outcome.system_responses.is_empty() {
+                    break;
+                }
+                continuation_count += 1;
+                let next_turn_msg_id = Self::mint_msg_id();
+                pending_send = Some((
+                    SendMessageData {
+                        content: outcome.system_responses.join("\n"),
+                        msg_id: next_turn_msg_id.clone(),
+                        files: vec![],
+                        inject_skills: vec![],
+                    },
+                    next_turn_msg_id,
+                ));
             }
 
             StreamRelay::complete_conversation(&repo, &broadcaster, &conv_id).await;
         });
 
-        info!(conversation_id, msg_id = %msg_id_log, "Message dispatched, stream relay started");
-        Ok(())
+        info!(conversation_id, msg_id = %user_msg_id_ret, "Message dispatched, stream relay started");
+        Ok(user_msg_id_ret)
     }
 
     /// Insert a pre-built `MessageRow` into the conversation's message history
@@ -1039,8 +1098,8 @@ impl ConversationService {
         self.repo.insert_message(row).await?;
 
         let msg_id = row.msg_id.clone().unwrap_or_else(|| row.id.clone());
-        let content_value: serde_json::Value = serde_json::from_str(&row.content)
-            .unwrap_or_else(|_| serde_json::Value::String(row.content.clone()));
+        let content_value: serde_json::Value =
+            serde_json::from_str(&row.content).unwrap_or_else(|_| serde_json::Value::String(row.content.clone()));
         let payload = serde_json::json!({
             "conversation_id": row.conversation_id,
             "msg_id": msg_id,
@@ -1074,9 +1133,9 @@ impl ConversationService {
             .get_task(conversation_id)
             .ok_or_else(|| AppError::Conflict("No active agent for this conversation".into()))?;
 
-        agent.stop().await?;
+        agent.cancel().await?;
 
-        info!(conversation_id, "Stream stopped");
+        info!(conversation_id, "Stream canceled");
         Ok(())
     }
 
@@ -1099,7 +1158,7 @@ impl ConversationService {
 
         let build_opts = self.build_task_options(&row)?;
         let stored_workspace = build_opts.workspace.clone();
-        let agent = task_manager.get_or_build_task(conversation_id, build_opts)?;
+        let agent = task_manager.get_or_build_task(conversation_id, build_opts).await?;
 
         // Persist auto-resolved workspace if factory picked a different path.
         self.maybe_persist_workspace(conversation_id, &stored_workspace, agent.workspace())
@@ -1108,7 +1167,11 @@ impl ConversationService {
         debug!(conversation_id, "Agent warmed up");
         Ok(())
     }
+}
 
+// ── Internal Helpers ────────────────────────────────────────────────
+
+impl ConversationService {
     /// Build [`BuildTaskOptions`] from a conversation database row.
     fn build_task_options(&self, row: &aionui_db::models::ConversationRow) -> Result<BuildTaskOptions, AppError> {
         let agent_type = string_to_enum(&row.r#type)?;
@@ -1125,8 +1188,15 @@ impl ConversationService {
                 use_model: None,
             });
 
-        let extra: serde_json::Value =
+        let mut extra: serde_json::Value =
             serde_json::from_str(&row.extra).map_err(|e| AppError::Internal(format!("Invalid extra JSON: {e}")))?;
+
+        // Inject user_id into extra so the Guide MCP bridge can pass it to
+        // aion_create_team without a separate lookup. Harmless for non-ACP types.
+        if let Some(obj) = extra.as_object_mut() {
+            obj.entry("user_id")
+                .or_insert_with(|| serde_json::Value::String(row.user_id.clone()));
+        }
 
         // Extract workspace from extra (common across agent types)
         let workspace = extra.get("workspace").and_then(|v| v.as_str()).unwrap_or("").to_owned();
@@ -1208,7 +1278,7 @@ impl ConversationService {
     /// failure.
     async fn backfill_extra_inplace(&self, conversation_id: &str, extra: &mut serde_json::Value) {
         let auto_inject = self.skill_resolver.auto_inject_names().await;
-        let mut mutated = crate::skill_snapshot::backfill_skills_if_missing(extra, &auto_inject);
+        let mut mutated = backfill_skills_if_missing(extra, &auto_inject);
         mutated |= backfill_cron_job_id_alias(extra);
         if !mutated {
             return;

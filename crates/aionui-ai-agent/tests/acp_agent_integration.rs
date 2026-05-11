@@ -16,9 +16,10 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-use aionui_ai_agent::acp_agent::AcpAgentManager;
-use aionui_ai_agent::agent_registry::AgentRegistry;
-use aionui_ai_agent::{AgentStreamEvent, IAgentManager};
+use aionui_ai_agent::factory::acp_assembler::{WorkspaceInfo, assemble_acp_params};
+use aionui_ai_agent::manager::acp::AcpAgentManager;
+use aionui_ai_agent::registry::AgentRegistry;
+use aionui_ai_agent::{AgentStreamEvent, IAgentTask};
 use aionui_common::ConversationStatus;
 use aionui_db::{SqliteAgentMetadataRepository, init_database_memory};
 use tokio::sync::broadcast;
@@ -66,6 +67,7 @@ async fn make_mock_agent(script: &str, backend: &str) -> (Arc<AcpAgentManager>, 
         cron_job_id: None,
         team_mcp_stdio_config: None,
         guide_mcp_config: None,
+        user_id: None,
     };
 
     let tmp_skills = tempfile::TempDir::new().unwrap();
@@ -73,7 +75,7 @@ async fn make_mock_agent(script: &str, backend: &str) -> (Arc<AcpAgentManager>, 
         tmp_skills.path(),
         tmp_skills.path(),
     ));
-    let skill_manager = aionui_ai_agent::skill_manager::AcpSkillManager::new(skill_paths);
+    let skill_manager = aionui_ai_agent::AcpSkillManager::new(skill_paths);
 
     let db = init_database_memory().await.unwrap();
     let repo = Arc::new(SqliteAgentMetadataRepository::new(db.pool().clone()));
@@ -86,25 +88,29 @@ async fn make_mock_agent(script: &str, backend: &str) -> (Arc<AcpAgentManager>, 
         .expect("seeded backend row must exist");
     let catalog_tx = registry.catalog_sender();
 
-    let manager = AcpAgentManager::new(
-        "test-conv-1".into(),
-        metadata,
-        "/tmp".into(),
-        // This fixture uses an explicit workspace path, matching the
-        // production case where the caller supplied `extra.workspace`.
-        true,
-        aionui_common::CommandSpec {
-            command: script_path.into(),
-            args: vec![],
-            env: vec![],
-            cwd: None,
-        },
-        config,
-        skill_manager,
-        catalog_tx,
-    )
-    .await
-    .expect("Failed to spawn mock ACP agent");
+    let params = Arc::new(
+        assemble_acp_params(
+            "test-conv-1".into(),
+            WorkspaceInfo {
+                path: "/tmp".into(),
+                is_custom: true,
+            },
+            metadata,
+            aionui_common::CommandSpec {
+                command: script_path.into(),
+                args: vec![],
+                env: vec![],
+                cwd: None,
+            },
+            config,
+            None,
+        )
+        .await,
+    );
+
+    let (manager, _, _) = AcpAgentManager::build(params, skill_manager, &catalog_tx)
+        .await
+        .expect("Failed to spawn mock ACP agent");
 
     let arc = Arc::new(manager);
 
@@ -293,7 +299,7 @@ async fn acp_agent_model_info_captured() {
 
     wait_for_event(&mut rx, |e| matches!(e, AgentStreamEvent::AcpModelInfo(_))).await;
 
-    let info = agent.model_info().await;
+    let info = agent.model().await;
     assert!(info.is_some(), "Model info should be captured");
     let info = info.unwrap();
     assert_eq!(&*info.current_model_id.0, "claude-sonnet-4");

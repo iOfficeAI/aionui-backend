@@ -17,9 +17,9 @@ use crate::types::{
 use super::api::DingtalkApi;
 use super::types::{
     BotMessageCallback, CardActionCallback, CardData, CreateCardInstanceRequest, DeliverCardRequest,
-    ImGroupDeliverModel, ImRobotDeliverModel, SendRobotMessageRequest, StreamAck, StreamFrame, StreamingWriteRequest,
-    SystemEvent, UpdateCardRequest, build_open_space_id, decode_chat_id, encode_chat_id, format_dingtalk_callback,
-    parse_dingtalk_callback,
+    ImGroupDeliverModel, ImRobotDeliverModel, SendRobotMessageRequest, SpaceModel, StreamAck, StreamFrame,
+    StreamingWriteRequest, SystemEvent, UpdateCardRequest, build_open_space_id, decode_chat_id, encode_chat_id,
+    format_dingtalk_callback, parse_dingtalk_callback,
 };
 
 /// Maximum reconnect attempts before giving up.
@@ -29,7 +29,7 @@ const MAX_RECONNECT_ATTEMPTS: u32 = 10;
 const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(30);
 
 /// DingTalk standard AI card template ID.
-const AI_CARD_TEMPLATE_ID: &str = "StandardCard";
+const AI_CARD_TEMPLATE_ID: &str = "382e4302-551d-4880-bf29-a30acfab2e71.schema";
 
 /// DingTalk platform plugin.
 ///
@@ -172,11 +172,14 @@ impl ChannelPlugin for DingtalkPlugin {
 
         let text = truncate_message(message.text.as_deref().unwrap_or(""), DINGTALK_MESSAGE_LIMIT);
 
-        // Try AI Card first
-        match send_via_ai_card(api, chat_id, &text, message.buttons.as_deref()).await {
-            Ok(card_id) => return Ok(card_id),
-            Err(e) => {
-                warn!(error = %e, "AI Card send failed, falling back to Open API");
+        // Only use AI Card for streaming (messages without buttons).
+        // Messages with buttons are one-shot and should go via Open API.
+        if message.buttons.is_none() {
+            match send_via_ai_card(api, chat_id).await {
+                Ok(card_id) => return Ok(card_id),
+                Err(e) => {
+                    warn!(error = %e, "AI Card send failed, falling back to Open API");
+                }
             }
         }
 
@@ -200,20 +203,22 @@ impl ChannelPlugin for DingtalkPlugin {
         // Presence of buttons signals the final message in a streaming sequence.
         let is_final = message.buttons.is_some();
 
-        // AI Card streaming write
+        // AI Card streaming write (always send full content, not deltas)
         let req = StreamingWriteRequest {
             out_track_id: message_id.to_string(),
-            key: "content".into(),
-            content: text,
-            is_eof: is_final,
-            is_last: is_final,
+            key: "msgContent".into(),
+            content: text.clone(),
+            is_full: true,
+            is_finalize: is_final,
+            is_error: false,
+            guid: generate_guid(),
         };
 
         api.streaming_write(&req).await?;
 
-        // When finalizing, update the card with button actions.
-        if let Some(ref button_rows) = message.buttons {
-            let card_param_map = build_card_param_map("", Some(button_rows));
+        // When finalizing, update the card status to FINISHED.
+        if is_final {
+            let card_param_map = build_final_card_param_map(&text, message.buttons.as_deref());
             let update_req = UpdateCardRequest {
                 out_track_id: message_id.to_string(),
                 card_data: CardData {
@@ -251,50 +256,34 @@ impl ChannelPlugin for DingtalkPlugin {
 // AI Card operations
 // ---------------------------------------------------------------------------
 
-/// Send a message via AI Card (create + deliver).
-async fn send_via_ai_card(
-    api: &Arc<DingtalkApi>,
-    chat_id: &str,
-    text: &str,
-    buttons: Option<&[Vec<crate::types::ActionButton>]>,
-) -> Result<String, ChannelError> {
+/// Create an empty AI Card for streaming (create + deliver + set INPUTING).
+///
+/// Returns the `outTrackId` which is used as the message ID for subsequent streaming writes.
+async fn send_via_ai_card(api: &Arc<DingtalkApi>, chat_id: &str) -> Result<String, ChannelError> {
     let (is_group, _) = decode_chat_id(chat_id);
 
-    let card_param_map = build_card_param_map(text, buttons);
+    let out_track_id = generate_out_track_id();
 
     let create_req = CreateCardInstanceRequest {
         card_template_id: AI_CARD_TEMPLATE_ID.into(),
+        out_track_id: out_track_id.clone(),
+        callback_type: "STREAM".into(),
         card_data: CardData {
-            card_param_map: Some(card_param_map),
+            card_param_map: Some(serde_json::json!({})),
         },
-        im_group_open_deliver_model: if is_group {
-            Some(ImGroupDeliverModel {
-                robot_code: api.client_id().to_string(),
-            })
-        } else {
-            None
-        },
-        im_robot_open_deliver_model: if !is_group {
-            Some(ImRobotDeliverModel {
-                robot_code: api.client_id().to_string(),
-            })
-        } else {
-            None
-        },
+        im_group_open_space_model: Some(SpaceModel { support_forward: true }),
+        im_robot_open_space_model: Some(SpaceModel { support_forward: true }),
     };
 
-    let create_resp = api.create_card_instance(&create_req).await?;
-    let card_id = create_resp
-        .result
-        .and_then(|r| r.out_track_id)
-        .ok_or_else(|| ChannelError::MessageSendFailed("DingTalk card create returned no outTrackId".into()))?;
+    api.create_card_instance(&create_req).await?;
 
     // Deliver the card
     let open_space_id = build_open_space_id(chat_id);
 
     let deliver_req = DeliverCardRequest {
-        out_track_id: card_id.clone(),
+        out_track_id: out_track_id.clone(),
         open_space_id,
+        user_id_type: 1,
         im_group_open_deliver_model: if is_group {
             Some(ImGroupDeliverModel {
                 robot_code: api.client_id().to_string(),
@@ -304,7 +293,7 @@ async fn send_via_ai_card(
         },
         im_robot_open_deliver_model: if !is_group {
             Some(ImRobotDeliverModel {
-                robot_code: api.client_id().to_string(),
+                space_type: "IM_ROBOT".into(),
             })
         } else {
             None
@@ -313,8 +302,22 @@ async fn send_via_ai_card(
 
     api.deliver_card(&deliver_req).await?;
 
-    debug!(card_id = %card_id, "DingTalk AI Card delivered");
-    Ok(card_id)
+    // Transition card to INPUTING state so streaming writes are accepted.
+    let inputing_req = UpdateCardRequest {
+        out_track_id: out_track_id.clone(),
+        card_data: CardData {
+            card_param_map: Some(serde_json::json!({
+                "flowStatus": "2",
+                "msgContent": "",
+                "staticMsgContent": "",
+                "sys_full_json_obj": serde_json::json!({"order": ["msgContent"]}).to_string(),
+            })),
+        },
+    };
+    api.update_card(&inputing_req).await?;
+
+    debug!(card_id = %out_track_id, "DingTalk AI Card delivered");
+    Ok(out_track_id)
 }
 
 /// Send a message via DingTalk Open API (fallback).
@@ -322,8 +325,8 @@ async fn send_via_open_api(api: &Arc<DingtalkApi>, chat_id: &str, text: &str) ->
     let (is_group, raw_id) = decode_chat_id(chat_id);
 
     let req = SendRobotMessageRequest {
-        msg_key: "sampleText".into(),
-        msg_param: serde_json::json!({ "content": text }).to_string(),
+        msg_key: "sampleMarkdown".into(),
+        msg_param: serde_json::json!({ "title": "Message", "text": text }).to_string(),
         robot_code: api.client_id().to_string(),
         open_conversation_id: if is_group { Some(raw_id.to_string()) } else { None },
         user_ids: if !is_group {
@@ -340,10 +343,13 @@ async fn send_via_open_api(api: &Arc<DingtalkApi>, chat_id: &str, text: &str) ->
     Ok(msg_id)
 }
 
-/// Build the card_param_map for an AI Card.
-fn build_card_param_map(text: &str, buttons: Option<&[Vec<crate::types::ActionButton>]>) -> serde_json::Value {
+/// Build the card_param_map for finalizing an AI Card (status = FINISHED).
+fn build_final_card_param_map(text: &str, buttons: Option<&[Vec<crate::types::ActionButton>]>) -> serde_json::Value {
     let mut map = serde_json::json!({
-        "content": text
+        "flowStatus": "3",
+        "msgContent": text,
+        "staticMsgContent": "",
+        "sys_full_json_obj": serde_json::json!({"order": ["msgContent"]}).to_string(),
     });
 
     if let Some(button_rows) = buttons {
@@ -363,6 +369,32 @@ fn build_card_param_map(text: &str, buttons: Option<&[Vec<crate::types::ActionBu
     }
 
     map
+}
+
+/// Generate a unique outTrackId for AI Card instances.
+fn generate_out_track_id() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("aion_{}_{}", ts, seq)
+}
+
+/// Generate a unique GUID for streaming write operations.
+fn generate_guid() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("{}_{}", ts, seq)
 }
 
 // ---------------------------------------------------------------------------
@@ -391,6 +423,7 @@ async fn ws_stream_loop(
         let stream_info = match api.register_stream().await {
             Ok(info) => {
                 consecutive_errors = 0;
+                info!(endpoint = %info.endpoint, "DingTalk stream registered successfully");
                 info
             }
             Err(e) => {
@@ -410,7 +443,7 @@ async fn ws_stream_loop(
 
         let ws_url = format!("{}?ticket={}", stream_info.endpoint, stream_info.ticket);
 
-        debug!(url = %ws_url, "Connecting to DingTalk WebSocket Stream");
+        info!(url = %ws_url, "Connecting to DingTalk WebSocket Stream");
 
         match connect_and_listen(&ws_url, &message_tx, &confirm_tx, &mut shutdown_rx).await {
             Ok(()) => {
@@ -524,16 +557,34 @@ async fn handle_stream_frame(
 
     match frame.frame_type.as_str() {
         "SYSTEM" => {
-            if let Some(ref data_str) = frame.data
-                && let Ok(sys) = serde_json::from_str::<SystemEvent>(data_str)
-            {
-                debug!(
-                    code = sys.code,
-                    message = sys.message.as_deref().unwrap_or(""),
-                    "DingTalk system event"
-                );
+            let topic = frame.headers.topic.as_deref().unwrap_or("");
+            match topic {
+                "ping" => {
+                    debug!("DingTalk system ping received, sending pong");
+                    Some(StreamAck {
+                        code: 200,
+                        headers: super::types::AckHeaders {
+                            content_type: "application/json".into(),
+                            message_id: message_id.clone(),
+                        },
+                        message: "OK".into(),
+                        data: frame.data.unwrap_or_else(|| "{}".into()),
+                    })
+                }
+                _ => {
+                    if let Some(ref data_str) = frame.data
+                        && let Ok(sys) = serde_json::from_str::<SystemEvent>(data_str)
+                    {
+                        debug!(
+                            code = sys.code,
+                            message = sys.message.as_deref().unwrap_or(""),
+                            topic,
+                            "DingTalk system event"
+                        );
+                    }
+                    None
+                }
             }
-            None
         }
         "CALLBACK" => {
             let topic = frame.headers.topic.as_deref().unwrap_or("");
@@ -574,10 +625,17 @@ async fn handle_bot_message(data_str: &str, message_tx: &mpsc::Sender<UnifiedInc
     let cb: BotMessageCallback = match serde_json::from_str(data_str) {
         Ok(c) => c,
         Err(e) => {
-            warn!(error = %e, "Failed to parse DingTalk bot message");
+            warn!(error = %e, raw = %&data_str[..data_str.len().min(200)], "Failed to parse DingTalk bot message");
             return;
         }
     };
+
+    debug!(
+        msg_id = cb.msg_id.as_deref().unwrap_or(""),
+        sender = cb.sender_nick.as_deref().unwrap_or(""),
+        msgtype = cb.msgtype.as_deref().unwrap_or(""),
+        "DingTalk bot message received"
+    );
 
     let sender_staff_id = cb
         .sender_staff_id
@@ -585,7 +643,11 @@ async fn handle_bot_message(data_str: &str, message_tx: &mpsc::Sender<UnifiedInc
         .or(cb.sender_id.as_deref())
         .unwrap_or("unknown");
 
-    let chat_id = encode_chat_id(cb.conversation_id.as_deref(), sender_staff_id);
+    let chat_id = encode_chat_id(
+        cb.conversation_type.as_deref(),
+        cb.conversation_id.as_deref(),
+        sender_staff_id,
+    );
 
     let user = UnifiedUser {
         id: sender_staff_id.to_string(),
@@ -630,6 +692,11 @@ async fn handle_card_action(
             return;
         }
     };
+
+    debug!(
+        user_id = cb.user_id.as_deref().unwrap_or(""),
+        "DingTalk card action received"
+    );
 
     // Extract action string from content field
     let action_str = cb
@@ -750,7 +817,7 @@ fn build_ack(message_id: &str) -> StreamAck {
             message_id: message_id.to_string(),
         },
         message: "OK".into(),
-        data: "{}".into(),
+        data: r#"{"response":"SUCCESS"}"#.into(),
     }
 }
 
@@ -921,25 +988,27 @@ mod tests {
         assert!(text.contains("Unsupported"));
     }
 
-    // -- build_card_param_map -----------------------------------------------
+    // -- build_final_card_param_map -------------------------------------------
 
     #[test]
-    fn build_card_param_map_text_only() {
-        let map = build_card_param_map("Hello", None);
-        assert_eq!(map["content"], "Hello");
+    fn build_final_card_param_map_text_only() {
+        let map = build_final_card_param_map("Hello", None);
+        assert_eq!(map["flowStatus"], "3");
+        assert_eq!(map["msgContent"], "Hello");
         assert!(map.get("actions").is_none());
     }
 
     #[test]
-    fn build_card_param_map_with_buttons() {
+    fn build_final_card_param_map_with_buttons() {
         use crate::types::ActionButton;
         let buttons = vec![vec![ActionButton {
             label: "Yes".into(),
             action: "system.confirm".into(),
             params: None,
         }]];
-        let map = build_card_param_map("Choose:", Some(&buttons));
-        assert_eq!(map["content"], "Choose:");
+        let map = build_final_card_param_map("Choose:", Some(&buttons));
+        assert_eq!(map["flowStatus"], "3");
+        assert_eq!(map["msgContent"], "Choose:");
         let actions = map["actions"].as_array().unwrap();
         assert_eq!(actions[0]["label"], "Yes");
         assert!(actions[0]["action"].as_str().unwrap().contains("system.confirm"));
@@ -953,20 +1022,31 @@ mod tests {
         assert_eq!(ack.code, 200);
         assert_eq!(ack.headers.message_id, "msg_123");
         assert_eq!(ack.message, "OK");
+        assert_eq!(ack.data, r#"{"response":"SUCCESS"}"#);
     }
 
-    // -- build_card_param_map for update (empty text, buttons only) ----------
+    #[test]
+    fn build_ack_data_contains_response_success() {
+        let ack = build_ack("msg_456");
+        assert_eq!(ack.code, 200);
+        assert_eq!(ack.headers.message_id, "msg_456");
+        let data: serde_json::Value = serde_json::from_str(&ack.data).unwrap();
+        assert_eq!(data["response"], "SUCCESS");
+    }
+
+    // -- build_final_card_param_map for update (empty text, buttons only) ----
 
     #[test]
-    fn build_card_param_map_empty_text_with_buttons() {
+    fn build_final_card_param_map_empty_text_with_buttons() {
         use crate::types::ActionButton;
         let buttons = vec![vec![ActionButton {
             label: "Confirm".into(),
             action: "system.confirm".into(),
             params: None,
         }]];
-        let map = build_card_param_map("", Some(&buttons));
-        assert_eq!(map["content"], "");
+        let map = build_final_card_param_map("", Some(&buttons));
+        assert_eq!(map["flowStatus"], "3");
+        assert_eq!(map["msgContent"], "");
         let actions = map["actions"].as_array().unwrap();
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0]["label"], "Confirm");
@@ -1018,6 +1098,115 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("not initialized"), "expected init error: {err}");
+    }
+
+    // -- handle_stream_frame: SYSTEM ping -----------------------------------
+
+    #[tokio::test]
+    async fn handle_stream_frame_system_ping_returns_ack() {
+        let (msg_tx, _msg_rx) = tokio::sync::mpsc::channel(16);
+        let (confirm_tx, _confirm_rx) = tokio::sync::mpsc::channel(16);
+
+        let ping_frame = serde_json::json!({
+            "type": "SYSTEM",
+            "headers": {
+                "contentType": "application/json",
+                "messageId": "ping_001",
+                "topic": "ping"
+            },
+            "data": "{}"
+        });
+
+        let result = handle_stream_frame(&ping_frame.to_string(), &msg_tx, &confirm_tx).await;
+
+        assert!(result.is_some(), "SYSTEM ping should return an ack");
+        let ack = result.unwrap();
+        assert_eq!(ack.code, 200);
+        assert_eq!(ack.headers.message_id, "ping_001");
+    }
+
+    #[tokio::test]
+    async fn handle_stream_frame_system_connected_returns_none() {
+        let (msg_tx, _msg_rx) = tokio::sync::mpsc::channel(16);
+        let (confirm_tx, _confirm_rx) = tokio::sync::mpsc::channel(16);
+
+        let connected_frame = serde_json::json!({
+            "type": "SYSTEM",
+            "headers": { "topic": "CONNECTED" },
+            "data": "{\"code\":200,\"message\":\"OK\"}"
+        });
+
+        let result = handle_stream_frame(&connected_frame.to_string(), &msg_tx, &confirm_tx).await;
+
+        assert!(result.is_none(), "Non-ping SYSTEM frames should not return ack");
+    }
+
+    // -- handle_stream_frame: CALLBACK flow ---------------------------------
+
+    #[tokio::test]
+    async fn handle_stream_frame_callback_emits_message() {
+        let (msg_tx, mut msg_rx) = tokio::sync::mpsc::channel(16);
+        let (confirm_tx, _confirm_rx) = tokio::sync::mpsc::channel(16);
+
+        let callback_frame = serde_json::json!({
+            "type": "CALLBACK",
+            "headers": {
+                "contentType": "application/json",
+                "messageId": "cb_msg_001",
+                "topic": "/v1.0/im/bot/messages/get"
+            },
+            "data": serde_json::json!({
+                "msgId": "dt_msg_123",
+                "msgtype": "text",
+                "text": { "content": "hello bot" },
+                "senderStaffId": "staff_abc",
+                "senderNick": "Alice",
+                "conversationType": "1",
+                "createAt": 1700000000000_i64
+            }).to_string()
+        });
+
+        let result = handle_stream_frame(&callback_frame.to_string(), &msg_tx, &confirm_tx).await;
+
+        assert!(result.is_some());
+        let ack = result.unwrap();
+        assert_eq!(ack.code, 200);
+        assert_eq!(ack.headers.message_id, "cb_msg_001");
+
+        let msg = msg_rx.try_recv().unwrap();
+        assert_eq!(msg.id, "dt_msg_123");
+        assert_eq!(msg.chat_id, "user:staff_abc");
+        assert_eq!(msg.content.text, "hello bot");
+        assert_eq!(msg.user.display_name, "Alice");
+        assert_eq!(msg.platform, PluginType::Dingtalk);
+    }
+
+    #[tokio::test]
+    async fn handle_stream_frame_card_action_emits_confirm() {
+        let (msg_tx, _msg_rx) = tokio::sync::mpsc::channel(16);
+        let (confirm_tx, mut confirm_rx) = tokio::sync::mpsc::channel(16);
+
+        let card_frame = serde_json::json!({
+            "type": "CALLBACK",
+            "headers": {
+                "contentType": "application/json",
+                "messageId": "cb_card_001",
+                "topic": "/v1.0/card/instances/callback"
+            },
+            "data": serde_json::json!({
+                "userId": "user_xyz",
+                "openConversationId": "",
+                "content": r#"{"action":"chat:system.confirm:callId=call_123,value=yes"}"#
+            }).to_string()
+        });
+
+        let result = handle_stream_frame(&card_frame.to_string(), &msg_tx, &confirm_tx).await;
+
+        assert!(result.is_some());
+
+        let (call_id, value) = confirm_rx.try_recv().unwrap();
+        assert_eq!(call_id, "call_123");
+        assert_eq!(value, "yes");
     }
 
     // -- DingtalkPlugin constructor -----------------------------------------

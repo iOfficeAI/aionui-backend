@@ -1,10 +1,12 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/aionui-assets",
     "crates/aionui-common",
     "crates/aionui-db",
     "crates/aionui-api-types",
     "crates/aionui-realtime",
+    "crates/aionui-runtime",
     "crates/aionui-auth",
     "crates/aionui-system",
     "crates/aionui-file",
@@ -29,9 +31,11 @@ license = "MIT"
 [workspace.dependencies]
 # Internal crates
 aionui-common = { path = "crates/aionui-common" }
+aionui-assets = { path = "crates/aionui-assets" }
 aionui-db = { path = "crates/aionui-db" }
 aionui-api-types = { path = "crates/aionui-api-types" }
 aionui-realtime = { path = "crates/aionui-realtime" }
+aionui-runtime = { path = "crates/aionui-runtime" }
 aionui-auth = { path = "crates/aionui-auth" }
 aionui-system = { path = "crates/aionui-system" }
 aionui-file = { path = "crates/aionui-file" }
@@ -47,17 +51,18 @@ aionui-cron = { path = "crates/aionui-cron" }
 aionui-assistant = { path = "crates/aionui-assistant" }
 aionui-app = { path = "crates/aionui-app" }
 
-aion-agent = { git = "ssh://git@github.com/iOfficeAI/aionrs.git", branch = "main" }
-aion-types = { git = "ssh://git@github.com/iOfficeAI/aionrs.git", branch = "main" }
-aion-protocol = { git = "ssh://git@github.com/iOfficeAI/aionrs.git", branch = "main" }
-aion-config = { git = "ssh://git@github.com/iOfficeAI/aionrs.git", branch = "main" }
-aion-mcp = { git = "ssh://git@github.com/iOfficeAI/aionrs.git", branch = "main" }
+aion-agent = { git = "https://github.com/iOfficeAI/aionrs.git", tag = "v0.1.21" }
+aion-types = { git = "https://github.com/iOfficeAI/aionrs.git", tag = "v0.1.21" }
+aion-protocol = { git = "https://github.com/iOfficeAI/aionrs.git", tag = "v0.1.21" }
+aion-config = { git = "https://github.com/iOfficeAI/aionrs.git", tag = "v0.1.21" }
+aion-mcp = { git = "https://github.com/iOfficeAI/aionrs.git", tag = "v0.1.21" }
 
 # Core framework
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.8", features = ["multipart", "ws"] }
 tower = { version = "0.5" }
 tower-http = { version = "0.6", features = ["cors", "trace"] }
+http = "1"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -92,14 +97,17 @@ aes-gcm = "0.10"
 # UUID
 uuid = { version = "1", features = ["v7"] }
 
-# HTTP client
-reqwest = { version = "0.12", features = ["json", "multipart"] }
+# HTTP client — use rustls to avoid native OpenSSL dep during cross-compilation
+reqwest = { version = "0.12", features = ["json", "multipart", "rustls-tls"], default-features = false }
 
 # Concurrency
 dashmap = "6"
 
 # WebSocket
-tokio-tungstenite = "0.26"
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-native-roots"] }
+
+# Protobuf
+prost = "0.13"
 
 # Semver
 semver = "1"
@@ -116,8 +124,13 @@ notify = "8"
 walkdir = "2"
 ignore = "0.4"
 zip = "2"
-git2 = "0.20"
+git2 = { version = "0.20", default-features = false }
 mime_guess = "2"
+rust-embed = "8"
+
+# Runtime embedding
+fs2 = "0.4"
+zstd = "0.13"
 
 # Cron
 cron = "0.15"
@@ -136,8 +149,11 @@ sha2 = "0.10"
 
 # AWS
 aws-config = { version = "1", features = ["behavior-version-latest"] }
-aws-sdk-bedrock = "1"
-aws-sdk-bedrockruntime = "1"
+aws-sdk-bedrock = { version = "1", default-features = false, features = ["rt-tokio", "default-https-client"] }
+aws-sdk-bedrockruntime = { version = "1", default-features = false, features = ["rt-tokio", "default-https-client"] }
+
+# Pin rustls-webpki to fix RUSTSEC-2026-{0098,0099,0104}
+rustls-webpki = "0.103.13"
 
 # OAuth / MCP
 oauth2 = "5.0.0-rc.1"

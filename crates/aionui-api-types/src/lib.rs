@@ -1,5 +1,6 @@
 //! All HTTP request/response DTOs shared across the API surface.
 mod acp;
+mod agent_build_extra;
 mod agent_discovery;
 mod assistant;
 mod auth;
@@ -8,6 +9,7 @@ mod confirmation;
 mod connection_test;
 mod conversation;
 mod cron;
+mod custom_agent;
 mod extension;
 mod file;
 mod lifecycle;
@@ -27,8 +29,12 @@ pub use acp::{
     AcpEnvResponse, AcpHealthCheckRequest, AcpHealthCheckResponse, AgentModeResponse, DetectCliRequest,
     DetectCliResponse, GetModelInfoResponse, ModelInfoEntry, ModelInfoPayload, ProbeModelRequest,
     SessionConfigOptionUpdate, SetConfigOptionRequest, SetConfigOptionsRequest, SetModeRequest, SetModelRequest,
-    SideQuestionRequest, SideQuestionResponse, TestCustomAgentRequest, TestCustomAgentResponse, WorkspaceBrowseQuery,
-    WorkspaceEntry,
+    SideQuestionRequest, SideQuestionResponse, TryConnectCustomAgentRequest, TryConnectCustomAgentResponse,
+    WorkspaceBrowseQuery, WorkspaceEntry,
+};
+pub use agent_build_extra::{
+    AcpBuildExtra, AcpModelInfo, AcpSessionConfigOption, AionrsBuildExtra, OpenClawBuildExtra, OpenClawGatewayConfig,
+    RemoteBuildExtra, SlashCommandItem,
 };
 pub use agent_discovery::{AgentEnvEntry, AgentHandshake, AgentMetadata, AgentSource, AgentSourceInfo, BehaviorPolicy};
 pub use assistant::{
@@ -37,7 +43,8 @@ pub use assistant::{
 };
 pub use auth::{
     AuthStatusResponse, ChangePasswordRequest, LoginRequest, LoginResponse, PublicUser, QrLoginRequest,
-    RefreshResponse, RefreshTokenRequest, UserInfoResponse, WsTokenResponse,
+    RefreshResponse, RefreshTokenRequest, UserInfoResponse, WebuiChangePasswordRequest, WebuiChangeUsernameRequest,
+    WebuiChangeUsernameResponse, WebuiGenerateQrTokenResponse, WebuiResetPasswordResponse, WsTokenResponse,
 };
 pub use channel::{
     ApprovePairingRequest, BridgeResponse, ChannelSessionResponse, ChannelUserResponse, DisablePluginRequest,
@@ -51,13 +58,16 @@ pub use conversation::{
     CloneConversationRequest, ConversationArtifactKind, ConversationArtifactListResponse, ConversationArtifactResponse,
     ConversationArtifactStatus, ConversationListResponse, ConversationResponse, CreateConversationRequest,
     ListConversationsQuery, ListMessagesQuery, MessageListResponse, MessageResponse, MessageSearchItem,
-    MessageSearchResponse, SearchMessagesQuery, SendMessageRequest, UpdateConversationArtifactRequest,
-    UpdateConversationRequest,
+    MessageSearchResponse, SearchMessagesQuery, SendMessageRequest, SendMessageResponse,
+    UpdateConversationArtifactRequest, UpdateConversationRequest,
 };
 pub use cron::{
     CreateCronJobRequest, CronAgentConfigDto, CronJobExecutedEvent, CronJobMetadataDto, CronJobPayloadDto,
     CronJobRemovedPayload, CronJobResponse, CronJobStateDto, CronJobTargetDto, CronScheduleDto, HasSkillResponse,
     ListCronJobsQuery, RunNowResponse, SaveCronSkillRequest, UpdateCronJobRequest,
+};
+pub use custom_agent::{
+    CustomAgentAdvancedOverrides, CustomAgentUpsertRequest, DeleteCustomAgentResponse, SetEnabledRequest,
 };
 pub use extension::{
     DisableExtensionRequest, EnableExtensionRequest, ExtensionSummaryResponse, GetI18nRequest, GetPermissionsRequest,

@@ -53,6 +53,12 @@ pub trait ITeamRepository: Send + Sync {
     /// and marks them as read. Uses `BEGIN IMMEDIATE` for atomicity.
     async fn read_unread_and_mark(&self, team_id: &str, to_agent_id: &str) -> Result<Vec<MailboxMessageRow>, DbError>;
 
+    /// Reads all unread messages for `to_agent_id` without marking them as read.
+    async fn peek_unread(&self, team_id: &str, to_agent_id: &str) -> Result<Vec<MailboxMessageRow>, DbError>;
+
+    /// Marks the given message IDs as read. IDs that don't exist are silently ignored.
+    async fn mark_read_batch(&self, ids: &[String]) -> Result<(), DbError>;
+
     /// Returns message history for an agent, optionally limited.
     /// Messages are ordered by `created_at` ascending.
     async fn get_history(

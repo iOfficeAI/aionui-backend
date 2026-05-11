@@ -1,8 +1,8 @@
 //! Application entry point: assembles all crates into an Axum server with DI and middleware.
 pub mod bridge;
 pub mod guide_stdio;
-pub mod team_stdio;
 mod state_builders;
+pub mod team_stdio;
 
 use std::sync::Arc;
 
@@ -16,10 +16,12 @@ use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
 use aionui_ai_agent::{
-    AcpAgentService, AcpRouterState, AcpSkillManager, AgentFactoryDeps, AgentRegistry, AgentRouterState,
-    AuxiliaryRouterState, ConnectionTestRouterState, IWorkerTaskManager, RemoteAgentRouterState, WorkerTaskManagerImpl,
-    acp_routes, agent_routes, auxiliary_routes, build_agent_factory, connection_test_routes, remote_agent_routes,
+    AcpRouterState, AcpSessionSyncService, AcpSkillManager, AgentFactoryDeps, AgentRegistry, AgentRouterState,
+    IWorkerTaskManager, RemoteAgentRouterState, SessionRouterState, WorkerTaskManagerImpl, acp_routes, agent_routes,
+    build_agent_factory, remote_agent_routes, session_routes,
 };
+use aionui_api_types::GuideMcpConfig;
+use aionui_assets::{AssetRouterState, asset_routes};
 use aionui_assistant::{AssistantRouterState, assistant_routes};
 use aionui_auth::{
     AuthRouterState, AuthState, CookieConfig, JwtService, QrTokenStore, auth_middleware, auth_routes, csrf_middleware,
@@ -31,8 +33,9 @@ use aionui_channel::{ChannelRouterState, channel_routes};
 use aionui_conversation::{ConversationRouterState, conversation_routes};
 use aionui_cron::{CronRouterState, cron_routes};
 use aionui_db::{
-    Database, IAcpSessionRepository, IAgentMetadataRepository, IUserRepository, SqliteAcpSessionRepository,
-    SqliteAgentMetadataRepository, SqliteProviderRepository, SqliteRemoteAgentRepository, SqliteUserRepository,
+    Database, IAcpSessionRepository, IAgentMetadataRepository, IConversationRepository, IUserRepository,
+    SqliteAcpSessionRepository, SqliteAgentMetadataRepository, SqliteConversationRepository, SqliteProviderRepository,
+    SqliteRemoteAgentRepository, SqliteUserRepository,
 };
 use aionui_extension::{
     ExtensionRouterState, HubRouterState, SkillRouterState, extension_routes, hub_routes, skill_routes,
@@ -42,9 +45,8 @@ use aionui_mcp::{McpRouterState, mcp_routes};
 use aionui_office::{OfficeRouterState, office_proxy_routes, office_routes};
 use aionui_realtime::{BroadcastEventBus, WebSocketManager, WsHandlerState, ws_upgrade_handler};
 use aionui_shell::{ShellRouterState, shell_routes};
-use aionui_system::{SystemRouterState, system_routes};
+use aionui_system::{ConnectionTestRouterState, SystemRouterState, connection_test_routes, system_routes};
 use aionui_team::{GuideMcpServer, TeamRouterState, team_routes};
-use aionui_api_types::GuideMcpConfig;
 
 pub use state_builders::{
     ChannelOrchestratorComponents, build_assistant_state, build_extension_states, build_module_states, build_ws_state,
@@ -56,6 +58,7 @@ pub struct AppConfig {
     pub host: String,
     pub port: u16,
     pub data_dir: String,
+    pub app_version: String,
     /// Run in local embedded mode (skip authentication, use system_default_user).
     pub local: bool,
 }
@@ -68,7 +71,7 @@ impl AppConfig {
 
     /// Path to the SQLite database file.
     pub fn database_path(&self) -> std::path::PathBuf {
-        std::path::Path::new(&self.data_dir).join("aionui.db")
+        std::path::Path::new(&self.data_dir).join("aionui-backend.db")
     }
 }
 
@@ -78,6 +81,7 @@ impl Default for AppConfig {
             host: aionui_common::constants::DEFAULT_HOST.to_string(),
             port: aionui_common::constants::DEFAULT_PORT,
             data_dir: "data".to_string(),
+            app_version: env!("CARGO_PKG_VERSION").to_string(),
             local: false,
         }
     }
@@ -94,11 +98,14 @@ pub struct AppServices {
     pub event_bus: Arc<BroadcastEventBus>,
     pub worker_task_manager: Arc<dyn IWorkerTaskManager>,
     pub agent_registry: Arc<AgentRegistry>,
+    pub conversation_repo: Arc<dyn IConversationRepository>,
+    pub acp_session_sync: Arc<AcpSessionSyncService>,
     /// Raw JWT secret string, used to derive encryption keys.
     pub jwt_secret_raw: String,
     pub data_dir: String,
     /// When `true`, skip JWT authentication and use a fixed default user.
     pub local: bool,
+    pub app_version: String,
     /// Resolved skill paths. Shared with the `ConversationService` for
     /// snapshot resolution at create time.
     pub skill_paths: Arc<aionui_extension::SkillPaths>,
@@ -132,13 +139,34 @@ impl AppServices {
     /// Resolves JWT secret (env → db → generate), constructs all shared
     /// services, and persists a newly generated secret to the database.
     pub async fn from_database(database: Database) -> anyhow::Result<Self> {
-        Self::from_database_with_data_dir(database, "data".to_string(), false).await
+        Self::from_database_with_data_dir_and_app_version(
+            database,
+            "data".to_string(),
+            false,
+            env!("CARGO_PKG_VERSION").to_string(),
+        )
+        .await
     }
 
     pub async fn from_database_with_data_dir(
         database: Database,
         data_dir: String,
         local: bool,
+    ) -> anyhow::Result<Self> {
+        Self::from_database_with_data_dir_and_app_version(
+            database,
+            data_dir,
+            local,
+            env!("CARGO_PKG_VERSION").to_string(),
+        )
+        .await
+    }
+
+    pub async fn from_database_with_data_dir_and_app_version(
+        database: Database,
+        data_dir: String,
+        local: bool,
+        app_version: String,
     ) -> anyhow::Result<Self> {
         let user_repo: Arc<dyn IUserRepository> = Arc::new(SqliteUserRepository::new(database.pool().clone()));
 
@@ -180,7 +208,10 @@ impl AppServices {
 
         let acp_session_repo: Arc<dyn IAcpSessionRepository> =
             Arc::new(SqliteAcpSessionRepository::new(database.pool().clone()));
-        let acp_agent_service = AcpAgentService::new(acp_session_repo.clone());
+        let acp_agent_service = AcpSessionSyncService::new(acp_session_repo.clone());
+
+        let conversation_repo: Arc<dyn IConversationRepository> =
+            Arc::new(SqliteConversationRepository::new(database.pool().clone()));
 
         // Skill paths need app resource dir (for builtin rules) + data dir
         // (for user skills + materialized views). AcpSkillManager uses these
@@ -246,9 +277,12 @@ impl AppServices {
             event_bus: Arc::new(BroadcastEventBus::new(256)),
             worker_task_manager,
             agent_registry,
+            conversation_repo,
+            acp_session_sync: acp_agent_service,
             jwt_secret_raw: secret,
             data_dir,
             local,
+            app_version,
             skill_paths,
             guide_mcp_config: guide_mcp_config.clone(),
             _guide_server: guide_server,
@@ -313,7 +347,7 @@ pub struct ModuleStates {
     pub remote_agent: RemoteAgentRouterState,
     pub acp: AcpRouterState,
     pub connection_test: ConnectionTestRouterState,
-    pub auxiliary: AuxiliaryRouterState,
+    pub session: SessionRouterState,
     pub file: FileRouterState,
     pub mcp: McpRouterState,
     pub extension: ExtensionRouterState,
@@ -348,7 +382,9 @@ pub async fn create_router(services: &AppServices) -> Router {
     let (states, channel_components) = build_module_states(services).await;
 
     // Wire TeamSessionService into Guide MCP server now that both are available.
-    services.inject_guide_service(Arc::downgrade(&states.team.service)).await;
+    services
+        .inject_guide_service(Arc::downgrade(&states.team.service))
+        .await;
 
     // Start channel orchestrator (message loop)
     tokio::spawn(
@@ -431,6 +467,7 @@ pub fn create_router_with_all_state(services: &AppServices, states: ModuleStates
         user_repo: services.user_repo.clone(),
         cookie_config: services.cookie_config.clone(),
         qr_token_store: services.qr_token_store.clone(),
+        local: services.local,
     };
 
     let auth_mw_state = AuthState {
@@ -463,9 +500,10 @@ pub fn create_router_with_all_state(services: &AppServices, states: ModuleStates
     let connection_test_authenticated = connection_test_routes(states.connection_test)
         .route_layer(from_fn_with_state(auth_mw_state.clone(), auth_middleware));
 
-    // Auxiliary routes (workspace, side-question, reload-context, slash-commands, openclaw runtime)
-    let auxiliary_authenticated =
-        auxiliary_routes(states.auxiliary).route_layer(from_fn_with_state(auth_mw_state.clone(), auth_middleware));
+    // Session routes (workspace, side-question, reload-context, slash-commands,
+    // mode/model/config/usage/agent-capabilities, openclaw runtime)
+    let session_authenticated =
+        session_routes(states.session).route_layer(from_fn_with_state(auth_mw_state.clone(), auth_middleware));
 
     // File routes protected by auth middleware
     let file_authenticated =
@@ -523,6 +561,7 @@ pub fn create_router_with_all_state(services: &AppServices, states: ModuleStates
 
     // Office proxy routes — exempt from auth (serve iframe content)
     let office_proxy = office_proxy_routes(states.office);
+    let public_assets = asset_routes(AssetRouterState::default());
 
     // WebSocket upgrade route — exempt from CSRF (no cookie-based
     // double-submit) but still gets security response headers.
@@ -537,7 +576,7 @@ pub fn create_router_with_all_state(services: &AppServices, states: ModuleStates
         .merge(acp_authenticated)
         .merge(agent_authenticated)
         .merge(connection_test_authenticated)
-        .merge(auxiliary_authenticated)
+        .merge(session_authenticated)
         .merge(file_authenticated)
         .merge(mcp_authenticated)
         .merge(extension_authenticated)
@@ -565,6 +604,7 @@ pub fn create_router_with_all_state(services: &AppServices, states: ModuleStates
     }
     .merge(ws_routes)
     .merge(office_proxy)
+    .merge(public_assets)
     .layer(middleware::from_fn(security_headers_middleware));
 
     let router = with_access_log(router);
@@ -597,6 +637,7 @@ mod tests {
         assert_eq!(config.host, "127.0.0.1");
         assert_eq!(config.port, 25808);
         assert_eq!(config.data_dir, "data");
+        assert_eq!(config.app_version, env!("CARGO_PKG_VERSION"));
     }
 
     #[test]
@@ -605,6 +646,7 @@ mod tests {
             host: "0.0.0.0".to_string(),
             port: 3000,
             data_dir: "data".to_string(),
+            app_version: "1.2.3".to_string(),
             local: false,
         };
         assert_eq!(config.socket_addr(), "0.0.0.0:3000");
@@ -616,11 +658,12 @@ mod tests {
             host: "127.0.0.1".to_string(),
             port: 25808,
             data_dir: "/tmp/aionui".to_string(),
+            app_version: "1.2.3".to_string(),
             local: false,
         };
         assert_eq!(
             config.database_path(),
-            std::path::PathBuf::from("/tmp/aionui/aionui.db")
+            std::path::PathBuf::from("/tmp/aionui/aionui-backend.db")
         );
     }
 
@@ -651,6 +694,23 @@ mod tests {
         let jwt_secret = system_user.unwrap().jwt_secret;
         assert!(jwt_secret.is_some());
         assert!(!jwt_secret.unwrap().is_empty());
+
+        services.database.close().await;
+    }
+
+    #[tokio::test]
+    async fn test_app_services_uses_supplied_app_version() {
+        let db = aionui_db::init_database_memory().await.unwrap();
+        let services = AppServices::from_database_with_data_dir_and_app_version(
+            db,
+            "data".to_string(),
+            false,
+            "9.9.9".to_string(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(services.app_version, "9.9.9");
 
         services.database.close().await;
     }

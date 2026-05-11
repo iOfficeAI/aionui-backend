@@ -86,6 +86,51 @@ pub struct WsTokenResponse {
     pub expires_in: u64,
 }
 
+// ---------------------------------------------------------------------------
+// WebUI admin credential endpoints (local-only)
+// ---------------------------------------------------------------------------
+
+/// Change password request body for `POST /api/webui/change-password`.
+///
+/// No current_password field — this endpoint is local-mode only and assumes
+/// the caller is the trusted Electron main process.
+#[derive(Debug, Deserialize)]
+pub struct WebuiChangePasswordRequest {
+    pub new_password: String,
+}
+
+/// Change username request body for `POST /api/webui/change-username`.
+#[derive(Debug, Deserialize)]
+pub struct WebuiChangeUsernameRequest {
+    pub new_username: String,
+}
+
+/// Response for `POST /api/webui/change-username`.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct WebuiChangeUsernameResponse {
+    pub username: String,
+}
+
+/// Response for `POST /api/webui/reset-password`.
+///
+/// Returns the freshly generated plaintext password. This is the only time
+/// the caller sees it — subsequent reads hit the bcrypt hash only.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct WebuiResetPasswordResponse {
+    pub new_password: String,
+}
+
+/// Response for `POST /api/webui/generate-qr-token`.
+///
+/// Only the token and expiry are returned. URL assembly (host + port) is the
+/// caller's responsibility, since only the Electron main process knows which
+/// lanIP/port the WebUI is exposed on.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct WebuiGenerateQrTokenResponse {
+    pub token: String,
+    pub expires_at_ms: i64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

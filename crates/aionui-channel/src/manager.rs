@@ -175,6 +175,45 @@ impl ChannelManager {
         Ok(())
     }
 
+    /// Enables an extension-contributed plugin in metadata-only mode.
+    ///
+    /// The backend does not yet execute extension channel runtime JS, but we
+    /// still persist the plugin configuration and enabled flag so Settings UI
+    /// can behave consistently and survive restarts.
+    pub async fn enable_extension_plugin(
+        &self,
+        plugin_id: &str,
+        plugin_name: &str,
+        config: &PluginConfig,
+    ) -> Result<(), ChannelError> {
+        if self.plugins.contains_key(plugin_id) {
+            self.stop_plugin(plugin_id).await;
+        }
+
+        let config_json = serde_json::to_string(config)?;
+        let encrypted_config = encrypt_string(&config_json, &self.encryption_key)
+            .map_err(|e| ChannelError::EncryptionFailed(e.to_string()))?;
+
+        let now = now_ms();
+        let existing = self.repo.get_plugin(plugin_id).await?;
+        let row = ChannelPluginRow {
+            id: plugin_id.to_owned(),
+            r#type: plugin_id.to_owned(),
+            name: plugin_name.to_owned(),
+            enabled: true,
+            config: encrypted_config,
+            status: Some(PluginStatus::Stopped.to_string()),
+            last_connected: existing.as_ref().and_then(|row| row.last_connected),
+            created_at: existing.as_ref().map(|row| row.created_at).unwrap_or(now),
+            updated_at: now,
+        };
+        self.repo.upsert_plugin(&row).await?;
+
+        info!(plugin_id = %plugin_id, "extension plugin enabled (metadata-only mode)");
+        self.broadcast_status_change(plugin_id).await;
+        Ok(())
+    }
+
     /// Disables a plugin: stops the connection, updates DB, and removes
     /// the active instance.
     ///
@@ -247,6 +286,15 @@ impl ChannelManager {
         info!(count = enabled.len(), "restoring enabled plugins");
 
         for row in enabled {
+            if PluginType::from_str_opt(&row.r#type).is_none() {
+                info!(
+                    plugin_id = %row.id,
+                    plugin_type = %row.r#type,
+                    "skipping extension plugin runtime restore; metadata-only mode"
+                );
+                self.broadcast_status_change(&row.id).await;
+                continue;
+            }
             if let Err(e) = self.restore_single_plugin(&row, factory).await {
                 warn!(
                     plugin_id = %row.id,

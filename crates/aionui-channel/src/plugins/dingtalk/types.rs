@@ -46,10 +46,17 @@ pub(crate) struct RobotInfoResponse {
 // ---------------------------------------------------------------------------
 
 /// Request body for registering a WebSocket Stream connection.
+///
+/// Note: This endpoint uses clientId/clientSecret directly in the body,
+/// NOT the access token header used by other DingTalk APIs.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RegisterStreamRequest {
+    pub client_id: String,
+    pub client_secret: String,
     pub subscriptions: Vec<StreamSubscription>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ua: Option<String>,
 }
 
 /// A subscription entry for stream registration.
@@ -240,16 +247,20 @@ pub(crate) struct CardPrivateData {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CreateCardInstanceRequest {
-    /// Card template ID (use "StandardCard" for AI streaming cards).
+    /// Card template ID.
     pub card_template_id: String,
-    /// Card data (markdown content, buttons, etc.).
+    /// Client-generated tracking ID for the card instance.
+    pub out_track_id: String,
+    /// Callback type — must be "STREAM" for streaming cards.
+    pub callback_type: String,
+    /// Card data (initially empty for streaming cards).
     pub card_data: CardData,
-    /// IM group setting for card delivery.
+    /// IM group space model (for group chats).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub im_group_open_deliver_model: Option<ImGroupDeliverModel>,
-    /// IM robot setting for card delivery.
+    pub im_group_open_space_model: Option<SpaceModel>,
+    /// IM robot space model (for single chats).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub im_robot_open_deliver_model: Option<ImRobotDeliverModel>,
+    pub im_robot_open_space_model: Option<SpaceModel>,
 }
 
 /// Card data containing dynamic fields.
@@ -259,6 +270,13 @@ pub(crate) struct CardData {
     /// Content body for the card (markdown).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub card_param_map: Option<serde_json::Value>,
+}
+
+/// Space model for card creation (supportForward flag).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SpaceModel {
+    pub support_forward: bool,
 }
 
 /// IM group delivery settings.
@@ -273,8 +291,8 @@ pub(crate) struct ImGroupDeliverModel {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ImRobotDeliverModel {
-    /// Robot code (App Key).
-    pub robot_code: String,
+    /// Space type for robot delivery.
+    pub space_type: String,
 }
 
 /// Response from creating an AI Card instance.
@@ -284,18 +302,6 @@ pub(crate) struct CreateCardInstanceResponse {
     /// Whether the request succeeded.
     #[serde(default)]
     pub success: Option<bool>,
-    /// Result containing the card instance ID.
-    #[serde(default)]
-    pub result: Option<CardInstanceResult>,
-}
-
-/// Result payload from card instance creation.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct CardInstanceResult {
-    /// The created card instance ID.
-    #[serde(default)]
-    pub out_track_id: Option<String>,
 }
 
 /// Request to deliver a card instance to a chat.
@@ -306,6 +312,8 @@ pub(crate) struct DeliverCardRequest {
     pub out_track_id: String,
     /// Open space ID: `dtv1.card//IM_ROBOT.userId` or `dtv1.card//IM_GROUP.conversationId`.
     pub open_space_id: String,
+    /// User ID type (1 = staffId).
+    pub user_id_type: u8,
     /// IM group delivery model (for group chats).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub im_group_open_deliver_model: Option<ImGroupDeliverModel>,
@@ -331,14 +339,18 @@ pub(crate) struct DeliverCardResponse {
 pub(crate) struct StreamingWriteRequest {
     /// Card instance ID.
     pub out_track_id: String,
-    /// Streaming content key.
+    /// Streaming content key (use "msgContent" for AI Card streaming).
     pub key: String,
-    /// Content to append.
+    /// Content to write.
     pub content: String,
-    /// Whether this is the final write (marks card as complete).
-    pub is_eof: bool,
-    /// Whether this is the final write for this key.
-    pub is_last: bool,
+    /// Whether this is a full replacement (true) or append (false).
+    pub is_full: bool,
+    /// Whether this is the final write (marks card streaming as complete).
+    pub is_finalize: bool,
+    /// Whether this is an error state.
+    pub is_error: bool,
+    /// Unique identifier for this write operation.
+    pub guid: String,
 }
 
 /// Response from streaming write.
@@ -502,11 +514,21 @@ pub(crate) fn parse_dingtalk_callback(data: &str) -> Option<ParsedCallback> {
 
 /// Encode a chat ID for DingTalk.
 ///
-/// - Private chat: `user:{staffId}`
-/// - Group chat: `group:{conversationId}`
-pub(crate) fn encode_chat_id(conversation_id: Option<&str>, sender_staff_id: &str) -> String {
-    match conversation_id {
-        Some(cid) if !cid.is_empty() => format!("group:{cid}"),
+/// - Private chat (`conversationType == "1"`): `user:{staffId}`
+/// - Group chat (`conversationType == "2"`): `group:{conversationId}`
+///
+/// DingTalk sends a `conversationId` for BOTH private and group chats,
+/// so we must rely on `conversationType` to distinguish them.
+pub(crate) fn encode_chat_id(
+    conversation_type: Option<&str>,
+    conversation_id: Option<&str>,
+    sender_staff_id: &str,
+) -> String {
+    match conversation_type {
+        Some("2") => {
+            let cid = conversation_id.unwrap_or("");
+            format!("group:{cid}")
+        }
         _ => format!("user:{sender_staff_id}"),
     }
 }
@@ -703,7 +725,6 @@ mod tests {
         });
         let resp: CreateCardInstanceResponse = serde_json::from_value(raw).unwrap();
         assert_eq!(resp.success, Some(true));
-        assert_eq!(resp.result.unwrap().out_track_id.as_deref(), Some("card_inst_1"));
     }
 
     // -- DeliverCardResponse --------------------------------------------------
@@ -749,14 +770,46 @@ mod tests {
     #[test]
     fn register_stream_request_serializes() {
         let req = RegisterStreamRequest {
+            client_id: "key_1".into(),
+            client_secret: "secret_1".into(),
             subscriptions: vec![StreamSubscription {
-                sub_type: "EVENT".into(),
+                sub_type: "CALLBACK".into(),
                 topic: "/v1.0/im/bot/messages/get".into(),
             }],
+            ua: None,
         };
         let json = serde_json::to_value(&req).unwrap();
-        assert_eq!(json["subscriptions"][0]["type"], "EVENT");
+        assert_eq!(json["clientId"], "key_1");
+        assert_eq!(json["clientSecret"], "secret_1");
+        assert_eq!(json["subscriptions"][0]["type"], "CALLBACK");
         assert_eq!(json["subscriptions"][0]["topic"], "/v1.0/im/bot/messages/get");
+        assert!(json.get("ua").is_none());
+    }
+
+    #[test]
+    fn register_stream_request_includes_credentials() {
+        let req = RegisterStreamRequest {
+            client_id: "my_client_id".into(),
+            client_secret: "my_secret".into(),
+            subscriptions: vec![
+                StreamSubscription {
+                    sub_type: "EVENT".into(),
+                    topic: "*".into(),
+                },
+                StreamSubscription {
+                    sub_type: "CALLBACK".into(),
+                    topic: "/v1.0/im/bot/messages/get".into(),
+                },
+            ],
+            ua: Some("aionui-backend".into()),
+        };
+        let json = serde_json::to_value(&req).unwrap();
+        assert_eq!(json["clientId"], "my_client_id");
+        assert_eq!(json["clientSecret"], "my_secret");
+        assert_eq!(json["ua"], "aionui-backend");
+        assert_eq!(json["subscriptions"][0]["type"], "EVENT");
+        assert_eq!(json["subscriptions"][0]["topic"], "*");
+        assert_eq!(json["subscriptions"][1]["type"], "CALLBACK");
     }
 
     #[test]
@@ -779,36 +832,42 @@ mod tests {
     #[test]
     fn create_card_instance_request_serializes() {
         let req = CreateCardInstanceRequest {
-            card_template_id: "StandardCard".into(),
+            card_template_id: "382e4302-551d-4880-bf29-a30acfab2e71.schema".into(),
+            out_track_id: "aion_123_0".into(),
+            callback_type: "STREAM".into(),
             card_data: CardData {
-                card_param_map: Some(json!({"content": "Hello"})),
+                card_param_map: Some(json!({})),
             },
-            im_group_open_deliver_model: None,
-            im_robot_open_deliver_model: Some(ImRobotDeliverModel {
-                robot_code: "app_key_1".into(),
-            }),
+            im_group_open_space_model: Some(SpaceModel { support_forward: true }),
+            im_robot_open_space_model: Some(SpaceModel { support_forward: true }),
         };
         let json = serde_json::to_value(&req).unwrap();
-        assert_eq!(json["cardTemplateId"], "StandardCard");
-        assert_eq!(json["cardData"]["cardParamMap"]["content"], "Hello");
-        assert!(json.get("imGroupOpenDeliverModel").is_none());
-        assert_eq!(json["imRobotOpenDeliverModel"]["robotCode"], "app_key_1");
+        assert_eq!(json["cardTemplateId"], "382e4302-551d-4880-bf29-a30acfab2e71.schema");
+        assert_eq!(json["outTrackId"], "aion_123_0");
+        assert_eq!(json["callbackType"], "STREAM");
+        assert_eq!(json["imGroupOpenSpaceModel"]["supportForward"], true);
+        assert_eq!(json["imRobotOpenSpaceModel"]["supportForward"], true);
     }
 
     #[test]
     fn streaming_write_request_serializes() {
         let req = StreamingWriteRequest {
             out_track_id: "card_1".into(),
-            key: "content".into(),
+            key: "msgContent".into(),
             content: "chunk text".into(),
-            is_eof: false,
-            is_last: false,
+            is_full: true,
+            is_finalize: false,
+            is_error: false,
+            guid: "123_abc".into(),
         };
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["outTrackId"], "card_1");
-        assert_eq!(json["key"], "content");
+        assert_eq!(json["key"], "msgContent");
         assert_eq!(json["content"], "chunk text");
-        assert_eq!(json["isEof"], false);
+        assert_eq!(json["isFull"], true);
+        assert_eq!(json["isFinalize"], false);
+        assert_eq!(json["isError"], false);
+        assert_eq!(json["guid"], "123_abc");
     }
 
     #[test]
@@ -892,19 +951,19 @@ mod tests {
 
     #[test]
     fn encode_chat_id_group() {
-        let result = encode_chat_id(Some("conv_123"), "staff_1");
+        let result = encode_chat_id(Some("2"), Some("conv_123"), "staff_1");
         assert_eq!(result, "group:conv_123");
     }
 
     #[test]
     fn encode_chat_id_private() {
-        let result = encode_chat_id(None, "staff_1");
+        let result = encode_chat_id(Some("1"), Some("cid_private_xyz"), "staff_1");
         assert_eq!(result, "user:staff_1");
     }
 
     #[test]
-    fn encode_chat_id_empty_conversation() {
-        let result = encode_chat_id(Some(""), "staff_1");
+    fn encode_chat_id_no_conversation_type() {
+        let result = encode_chat_id(None, Some("cid_whatever"), "staff_1");
         assert_eq!(result, "user:staff_1");
     }
 

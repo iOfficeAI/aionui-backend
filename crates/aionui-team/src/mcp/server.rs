@@ -20,7 +20,7 @@ use super::protocol::{
 };
 use super::tools::{
     RenameAgentInput, SendMessageInput, ShutdownAgentInput, SpawnAgentInput, TaskCreateInput, TaskUpdateInput,
-    all_tool_descriptors, handle_team_describe_assistant, handle_team_list_models, is_whitelisted_backend,
+    all_tool_descriptors, handle_team_describe_assistant, handle_team_list_models,
 };
 
 // ---------------------------------------------------------------------------
@@ -395,7 +395,9 @@ async fn handle_tools_call(
 
     match &result {
         Ok(_) => info!(team_id = %team_id, tool = %tool_name, caller = %caller_slot_id, "MCP tool call succeeded"),
-        Err(e) => warn!(team_id = %team_id, tool = %tool_name, caller = %caller_slot_id, error = %e, "MCP tool call failed"),
+        Err(e) => {
+            warn!(team_id = %team_id, tool = %tool_name, caller = %caller_slot_id, error = %e, "MCP tool call failed")
+        }
     }
 
     match result {
@@ -419,7 +421,7 @@ async fn handle_tools_call(
 // Tool dispatch
 // ---------------------------------------------------------------------------
 
-async fn dispatch_tool(
+pub(crate) async fn dispatch_tool(
     tool_name: &str,
     arguments: &Value,
     scheduler: &TeammateManager,
@@ -436,7 +438,9 @@ async fn dispatch_tool(
         "team_task_list" => exec_task_list(scheduler).await,
         "team_members" => exec_members(scheduler).await,
         "team_rename_agent" => exec_rename_agent(arguments, scheduler).await,
-        "team_shutdown_agent" => exec_shutdown_agent(arguments, scheduler, caller_slot_id, caller_role).await,
+        "team_shutdown_agent" => {
+            exec_shutdown_agent(arguments, scheduler, service, team_id, caller_slot_id, caller_role).await
+        }
         "team_list_models" => exec_list_models(arguments).await,
         "team_describe_assistant" => exec_describe_assistant(arguments).await,
         _ => Err(format!("Unknown tool: {tool_name}")),
@@ -456,6 +460,20 @@ async fn exec_describe_assistant(args: &Value) -> Result<String, String> {
 // Individual tool handlers
 // ---------------------------------------------------------------------------
 
+async fn resolve_agent_target(scheduler: &TeammateManager, target: &str) -> Result<String, String> {
+    let agents = scheduler.list_agents().await;
+    if agents.iter().any(|a| a.slot_id == target) {
+        return Ok(target.to_owned());
+    }
+    let query = target.to_lowercase();
+    let hits: Vec<_> = agents.iter().filter(|a| a.name.to_lowercase() == query).collect();
+    match hits.len() {
+        0 => Err(format!("No agent matches '{target}'")),
+        1 => Ok(hits[0].slot_id.clone()),
+        _ => Err(format!("Multiple agents match '{target}'")),
+    }
+}
+
 async fn exec_send_message(
     args: &Value,
     scheduler: &TeammateManager,
@@ -469,6 +487,24 @@ async fn exec_send_message(
     if trimmed == "shutdown_approved" {
         debug!(from = caller_slot_id, "shutdown_approved intercepted");
         scheduler.notify_shutdown_acknowledged(caller_slot_id);
+
+        // Deferred cleanup: kill process, delete conversation, remove from team DB.
+        // Spawned so the MCP response can be sent back before the process is killed.
+        let slot = caller_slot_id.to_owned();
+        let tid = team_id.to_owned();
+        let svc_weak = service.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            if let Some(svc) = svc_weak.upgrade() {
+                let user_id = svc.get_session_user_id(&tid).await.unwrap_or_default();
+                if let Err(e) = svc.remove_agent(&user_id, &tid, &slot).await {
+                    warn!(slot_id = %slot, error = %e, "shutdown cleanup failed");
+                } else {
+                    info!(slot_id = %slot, "agent fully removed after shutdown_approved");
+                }
+            }
+        });
+
         return Ok(json!({"status": "shutdown_approved_received"}).to_string());
     }
     if let Some(rest) = trimmed.strip_prefix("shutdown_rejected:") {
@@ -481,9 +517,14 @@ async fn exec_send_message(
         return Ok(format!("shutdown_rejected: {reason}"));
     }
 
-    let to_target = input.to.clone();
+    let resolved_to = if input.to == "*" {
+        "*".to_owned()
+    } else {
+        resolve_agent_target(scheduler, &input.to).await?
+    };
+
     let action = crate::scheduler::SchedulerAction::SendMessage {
-        to: input.to.clone(),
+        to: resolved_to.clone(),
         message: input.message,
     };
     scheduler
@@ -491,24 +532,34 @@ async fn exec_send_message(
         .await
         .map_err(|e| e.to_string())?;
 
-    // Wake target agent(s) so they process the new mailbox message.
+    // Wake target agent(s) only if they are currently Idle.
+    // If Working, the message stays in the mailbox and will be drained
+    // when the current turn finishes (on_agent_finish re-wake pattern).
     if let Some(svc) = service.upgrade() {
-        let targets = if input.to == "*" {
-            scheduler.list_agents().await.iter()
+        let targets = if resolved_to == "*" {
+            scheduler
+                .list_agents()
+                .await
+                .iter()
                 .filter(|a| a.slot_id != caller_slot_id)
                 .map(|a| a.slot_id.clone())
                 .collect::<Vec<_>>()
         } else {
-            vec![input.to]
+            vec![resolved_to.clone()]
         };
         for target in &targets {
+            let status = scheduler.get_status(target).await.unwrap_or(TeammateStatus::Idle);
+            if status != TeammateStatus::Idle {
+                debug!(team_id, target = target.as_str(), %status, "skip wake: target not idle, message queued in mailbox");
+                continue;
+            }
             if let Err(e) = svc.wake_agent_in_session(team_id, target).await {
                 debug!(team_id, target = target.as_str(), error = %e, "wake after send_message failed (non-fatal)");
             }
         }
     }
 
-    Ok(format!("Message sent to {to_target}"))
+    Ok(format!("Message sent to {}", input.to))
 }
 
 async fn exec_spawn_agent(
@@ -536,16 +587,8 @@ async fn exec_spawn_agent(
     // caller) is accepted.
     let agent_type = input.agent_type.or(input.backend);
 
-    // Dispatch-layer whitelist gate for explicitly provided backends. Keeps
-    // the "not allowed" user-visible phrasing that existing clients depend
-    // on and avoids a pointless round-trip into the session for obvious
-    // bad input. `TeamSession::spawn_agent` re-checks (including the
-    // empty/unset-inherits-from-caller path) so this is pure defense-in-depth.
-    if let Some(bk) = agent_type.as_deref()
-        && !is_whitelisted_backend(bk)
-    {
-        return Err(format!("Backend '{bk}' not allowed. Whitelist: claude, codex"));
-    }
+    // Dynamic capability check happens in `TeamSession::spawn_agent` which
+    // queries both the hard whitelist and persisted MCP capabilities.
 
     let req = SpawnAgentRequest {
         name: requested_name.clone(),
@@ -648,8 +691,9 @@ async fn exec_members(scheduler: &TeammateManager) -> Result<String, String> {
 async fn exec_rename_agent(args: &Value, scheduler: &TeammateManager) -> Result<String, String> {
     let input: RenameAgentInput = serde_json::from_value(args.clone()).map_err(|e| format!("Invalid params: {e}"))?;
 
+    let resolved_slot = resolve_agent_target(scheduler, &input.slot_id).await?;
     scheduler
-        .rename_agent(&input.slot_id, &input.new_name)
+        .rename_agent(&resolved_slot, &input.new_name)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -659,6 +703,8 @@ async fn exec_rename_agent(args: &Value, scheduler: &TeammateManager) -> Result<
 async fn exec_shutdown_agent(
     args: &Value,
     scheduler: &TeammateManager,
+    service: &Weak<TeamSessionService>,
+    team_id: &str,
     caller_slot_id: &str,
     caller_role: TeammateRole,
 ) -> Result<String, String> {
@@ -667,8 +713,9 @@ async fn exec_shutdown_agent(
     }
     let input: ShutdownAgentInput = serde_json::from_value(args.clone()).map_err(|e| format!("Invalid params: {e}"))?;
 
+    let target_slot_id = resolve_agent_target(scheduler, &input.slot_id).await?;
     let action = crate::scheduler::SchedulerAction::ShutdownAgent {
-        slot_id: input.slot_id.clone(),
+        slot_id: target_slot_id.clone(),
         reason: input.reason,
     };
     scheduler
@@ -676,7 +723,14 @@ async fn exec_shutdown_agent(
         .await
         .map_err(|e| e.to_string())?;
 
-    Ok(format!("Shutdown request sent to agent '{}'", input.slot_id))
+    // Wake the target agent so it reads the shutdown_request from its mailbox.
+    if let Some(svc) = service.upgrade()
+        && let Err(e) = svc.wake_agent_in_session(team_id, &target_slot_id).await
+    {
+        debug!(team_id, target = %target_slot_id, error = %e, "wake after shutdown_request failed (non-fatal)");
+    }
+
+    Ok(format!("Shutdown request sent to agent '{}'", target_slot_id))
 }
 
 // ---------------------------------------------------------------------------

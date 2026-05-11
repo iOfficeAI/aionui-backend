@@ -20,7 +20,8 @@ pub use jwt::{JwtService, TokenPayload, generate_random_secret_string, resolve_j
 
 // Password service
 pub use password::{
-    dummy_password_hash, generate_user_credentials, hash_password, verify_password, verify_password_timed,
+    dummy_password_hash, generate_password, generate_user_credentials, hash_password, verify_password,
+    verify_password_timed,
 };
 
 // Validation

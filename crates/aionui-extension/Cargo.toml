@@ -8,6 +8,7 @@ aionui-common.workspace = true
 aionui-db.workspace = true
 aionui-api-types.workspace = true
 aionui-realtime.workspace = true
+aionui-runtime.workspace = true
 async-trait.workspace = true
 axum.workspace = true
 dirs.workspace = true
@@ -19,6 +20,7 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+mime_guess.workspace = true
 
 [dev-dependencies]
 async-trait.workspace = true

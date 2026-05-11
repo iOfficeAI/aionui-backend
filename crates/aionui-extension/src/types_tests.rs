@@ -170,15 +170,36 @@ fn test_ext_settings_tab_with_position() {
         id: "ext-settings".into(),
         label: "Extension Settings".into(),
         icon: None,
-        url: "aion-asset://ext/settings.html".into(),
+        url: "settings/index.html".into(),
         position: Some(SettingsTabPosition {
             relative_to: "general".into(),
             placement: "after".into(),
         }),
+        order: 80,
     };
     let json = serde_json::to_value(&tab).unwrap();
-    assert_eq!(json["position"]["relative_to"], "general");
+    assert_eq!(json["position"]["relativeTo"], "general");
     assert_eq!(json["position"]["placement"], "after");
+    assert_eq!(json["order"], 80);
+}
+
+#[test]
+fn test_ext_settings_tab_accepts_legacy_field_aliases() {
+    let raw = json!({
+        "id": "legacy-settings",
+        "name": "Legacy Settings",
+        "entryPoint": "settings/legacy.html",
+        "position": {
+            "anchor": "general",
+            "placement": "after"
+        }
+    });
+
+    let tab: ExtSettingsTab = serde_json::from_value(raw).unwrap();
+    assert_eq!(tab.label, "Legacy Settings");
+    assert_eq!(tab.url, "settings/legacy.html");
+    assert_eq!(tab.position.unwrap().relative_to, "general");
+    assert_eq!(tab.order, 100);
 }
 
 // -- ExtMcpServer flatten roundtrip (M-50) --
@@ -387,6 +408,27 @@ fn test_lifecycle_payload_without_data() {
     };
     let json = serde_json::to_value(&payload).unwrap();
     assert!(json.get("data").is_none());
+}
+
+#[test]
+fn test_resolved_settings_tab_serializes_backend_contract_keys() {
+    let tab = ResolvedSettingsTab {
+        extension_name: "hello".into(),
+        id: "ext-hello-settings".into(),
+        label: "Hello Settings".into(),
+        icon: Some("/api/extensions/hello/assets/icons/gear.svg".into()),
+        url: "/api/extensions/hello/assets/settings/index.html".into(),
+        position: Some(SettingsTabPosition {
+            relative_to: "general".into(),
+            placement: "after".into(),
+        }),
+        order: 80,
+    };
+
+    let json = serde_json::to_value(&tab).unwrap();
+    assert_eq!(json["extensionName"], "hello");
+    assert_eq!(json["position"]["relativeTo"], "general");
+    assert_eq!(json["order"], 80);
 }
 
 // -- Hub --

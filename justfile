@@ -2,9 +2,14 @@
 default:
     @just --list
 
+# Enable pre-commit hooks (run once after clone)
+setup:
+    git config core.hooksPath .githooks
+    @echo "✅ Git hooks enabled"
+
 # Build in release mode and install to ~/.cargo/bin
 # Use `just build --force` to skip cache check
-build *FLAGS: lint fmt
+build *FLAGS: lint-fix fmt
     #!/usr/bin/env bash
     set -euo pipefail
     cargo build --release
@@ -54,11 +59,15 @@ build-debug *FLAGS:
 
 # Run all tests
 test:
-    cargo test --workspace
+    cargo nextest run --workspace
 
 # Lint (warnings = errors)
 lint:
     cargo clippy --workspace -- -D warnings
+
+lint-fix:
+    cargo fix --allow-dirty --allow-staged
+    cargo clippy --fix --workspace --allow-dirty --allow-staged -- -D warnings
 
 # Format code
 fmt:
@@ -78,6 +87,26 @@ run *ARGS:
 # Run the server (release)
 run-release *ARGS:
     cargo run --release --bin aionui-backend -- {{ARGS}}
+
+# Pre-push gate: format, lint, test, then push
+push *ARGS: lint-fix fmt test
+    git push {{ ARGS }}
+
+# Update aionrs dependency (e.g. just update-aionrs or just update-aionrs v0.1.19)
+update-aionrs *TAG:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tag="{{ TAG }}"
+    if [ -z "$tag" ]; then
+        tag=$(git ls-remote --tags https://github.com/iOfficeAI/aionrs.git | awk -F/ '{print $NF}' | grep -v '\\^{}' | sort -V | tail -1)
+        echo "Using latest tag: $tag"
+    fi
+    sed -i '' "s|git = \"https://github.com/iOfficeAI/aionrs.git\", tag = \"[^\"]*\"|git = \"https://github.com/iOfficeAI/aionrs.git\", tag = \"$tag\"|g" Cargo.toml
+    cargo check --workspace
+
+# Security audit
+audit:
+    cargo audit
 
 # Clean build artifacts
 clean:

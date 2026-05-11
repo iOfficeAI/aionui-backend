@@ -8,9 +8,9 @@ async-trait.workspace = true
 aionui-auth.workspace = true
 aionui-common.workspace = true
 aionui-db.workspace = true
+aionui-runtime.workspace = true
 aionui-extension.workspace = true
 aionui-api-types.workspace = true
-aionui-realtime.workspace = true
 aionui-system.workspace = true
 axum.workspace = true
 base64.workspace = true
@@ -21,11 +21,7 @@ sha2.workspace = true
 hex.workspace = true
 dirs.workspace = true
 getrandom.workspace = true
-reqwest.workspace = true
 regex.workspace = true
-aws-config.workspace = true
-aws-sdk-bedrock.workspace = true
-aws-sdk-bedrockruntime.workspace = true
 dashmap.workspace = true
 futures-util.workspace = true
 serde.workspace = true
@@ -42,5 +38,20 @@ uuid.workspace = true
 agent-client-protocol = { version = "0.11.1", features = ["unstable_session_model", "unstable_session_close", "unstable_session_usage", "unstable_session_fork", "unstable_session_additional_directories", "unstable_session_resume"] }
 tokio-util = { version = "0.7", features = ["compat"] }
 
+[features]
+# Enables the `AgentInstance::Mock` variant used by downstream test harnesses
+# (conversation/cron/team/app) to inject trait-object stubs without having to
+# spawn a real agent process. Production builds must NOT turn this on — it
+# introduces a `dyn IAgentTask` branch that defeats the enum's zero-dispatch
+# guarantee.
+test-support = []
+
 [dev-dependencies]
 tempfile = "3"
+
+# Integration tests under `tests/` need the `AgentInstance::Mock` variant.
+# Unlike unit tests (which see `cfg(test)` on the library), integration
+# tests compile as separate binaries and must opt in via a feature.
+[[test]]
+name = "agent_types_integration"
+required-features = ["test-support"]

@@ -170,16 +170,78 @@ pub fn row_to_artifact_response(row: ConversationArtifactRow) -> Result<Conversa
     })
 }
 
-/// Convert a search result row into an API search item DTO.
-pub fn search_row_to_item(row: MessageSearchRow) -> MessageSearchItem {
-    MessageSearchItem {
-        message_id: row.message_id,
-        conversation_id: row.conversation_id,
-        conversation_name: row.conversation_name,
-        r#type: row.r#type,
-        content: row.content,
-        created_at: row.created_at,
+/// Extract plain-text preview from a message content field.
+///
+/// Message content is stored as JSON (arrays, objects with nested strings).
+/// This recursively collects all string values and joins them with spaces,
+/// producing a flat preview suitable for search snippet display.
+fn extract_preview_text(raw_content: &str) -> String {
+    fn collect_strings(value: &serde_json::Value, bucket: &mut Vec<String>) {
+        match value {
+            serde_json::Value::String(s) => {
+                let trimmed = s.trim();
+                if !trimmed.is_empty() {
+                    bucket.push(trimmed.to_owned());
+                }
+            }
+            serde_json::Value::Array(arr) => {
+                for item in arr {
+                    collect_strings(item, bucket);
+                }
+            }
+            serde_json::Value::Object(map) => {
+                for item in map.values() {
+                    collect_strings(item, bucket);
+                }
+            }
+            _ => {}
+        }
     }
+
+    match serde_json::from_str::<serde_json::Value>(raw_content) {
+        Ok(parsed) => {
+            let mut bucket = Vec::new();
+            collect_strings(&parsed, &mut bucket);
+            let joined = bucket.join(" ");
+            let normalized = joined.split_whitespace().collect::<Vec<_>>().join(" ");
+            if normalized.is_empty() {
+                raw_content.split_whitespace().collect::<Vec<_>>().join(" ")
+            } else {
+                normalized
+            }
+        }
+        Err(_) => raw_content.split_whitespace().collect::<Vec<_>>().join(" "),
+    }
+}
+
+/// Convert a search result row into an API search item DTO.
+pub fn search_row_to_item(row: MessageSearchRow, data_dir: &Path) -> Result<MessageSearchItem, AppError> {
+    let conversation_row = ConversationRow {
+        id: row.conversation_id,
+        user_id: String::new(),
+        name: row.conversation_name,
+        r#type: row.conversation_type,
+        extra: row.conversation_extra,
+        model: row.conversation_model,
+        status: row.conversation_status,
+        source: row.conversation_source,
+        channel_chat_id: row.conversation_channel_chat_id,
+        pinned: row.conversation_pinned,
+        pinned_at: row.conversation_pinned_at,
+        created_at: row.conversation_created_at,
+        updated_at: row.conversation_updated_at,
+    };
+
+    let conversation = row_to_response(conversation_row, data_dir)?;
+    let preview_text = extract_preview_text(&row.content);
+
+    Ok(MessageSearchItem {
+        message_id: row.message_id,
+        message_type: row.r#type,
+        message_created_at: row.created_at,
+        preview_text,
+        conversation,
+    })
 }
 
 #[cfg(test)]
@@ -364,5 +426,138 @@ mod tests {
         assert!(resp.pinned);
         assert_eq!(resp.pinned_at, Some(5000));
         assert_eq!(resp.channel_chat_id.as_deref(), Some("chat:1"));
+    }
+
+    // ── extract_preview_text ───────────────────────────────────────────
+
+    #[test]
+    fn test_extract_preview_text_json_array() {
+        let content = r#"[{"type":"text","content":"Hello world"},{"type":"text","content":"How are you?"}]"#;
+        let result = extract_preview_text(content);
+        assert!(result.contains("Hello world"));
+        assert!(result.contains("How are you?"));
+    }
+
+    #[test]
+    fn test_extract_preview_text_plain_string() {
+        let content = "Just plain text message";
+        let result = extract_preview_text(content);
+        assert_eq!(result, "Just plain text message");
+    }
+
+    #[test]
+    fn test_extract_preview_text_nested_object() {
+        let content = r#"{"text":"nested value","items":[{"content":"inner"}]}"#;
+        let result = extract_preview_text(content);
+        assert!(result.contains("nested value"));
+        assert!(result.contains("inner"));
+    }
+
+    #[test]
+    fn test_extract_preview_text_malformed_json() {
+        let content = "this is not { json at all";
+        let result = extract_preview_text(content);
+        assert_eq!(result, "this is not { json at all");
+    }
+
+    #[test]
+    fn test_extract_preview_text_empty_content() {
+        let result = extract_preview_text("");
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_extract_preview_text_whitespace_normalization() {
+        let content = r#"{"content":"  hello   world  "}"#;
+        let result = extract_preview_text(content);
+        assert_eq!(result, "hello world");
+    }
+
+    // ── search_row_to_item ─────────────────────────────────────────────
+
+    #[test]
+    fn test_search_row_to_item_builds_nested_conversation() {
+        let row = MessageSearchRow {
+            message_id: "msg_1".into(),
+            r#type: "text".into(),
+            content: r#"{"content":"hello world"}"#.into(),
+            created_at: 5000,
+            conversation_id: "conv_1".into(),
+            conversation_name: "Test Conv".into(),
+            conversation_type: "acp".into(),
+            conversation_extra: r#"{"workspace":"/project"}"#.into(),
+            conversation_model: None,
+            conversation_status: Some("finished".into()),
+            conversation_source: Some("aionui".into()),
+            conversation_channel_chat_id: None,
+            conversation_pinned: false,
+            conversation_pinned_at: None,
+            conversation_created_at: 1000,
+            conversation_updated_at: 2000,
+        };
+
+        let item = search_row_to_item(row, Path::new("/tmp/data")).unwrap();
+
+        assert_eq!(item.message_id, "msg_1");
+        assert_eq!(item.message_type, "text");
+        assert_eq!(item.message_created_at, 5000);
+        assert_eq!(item.preview_text, "hello world");
+
+        assert_eq!(item.conversation.id, "conv_1");
+        assert_eq!(item.conversation.name, "Test Conv");
+        assert_eq!(item.conversation.r#type, AgentType::Acp);
+        assert_eq!(item.conversation.source, Some(ConversationSource::Aionui));
+        assert_eq!(item.conversation.extra["workspace"], "/project");
+        assert_eq!(item.conversation.modified_at, 2000);
+    }
+
+    #[test]
+    fn test_search_row_to_item_invalid_conversation_type() {
+        let row = MessageSearchRow {
+            message_id: "msg_1".into(),
+            r#type: "text".into(),
+            content: "plain text".into(),
+            created_at: 5000,
+            conversation_id: "conv_1".into(),
+            conversation_name: "Test".into(),
+            conversation_type: "invalid_type".into(),
+            conversation_extra: "{}".into(),
+            conversation_model: None,
+            conversation_status: Some("finished".into()),
+            conversation_source: None,
+            conversation_channel_chat_id: None,
+            conversation_pinned: false,
+            conversation_pinned_at: None,
+            conversation_created_at: 1000,
+            conversation_updated_at: 2000,
+        };
+
+        let err = search_row_to_item(row, Path::new("/tmp/data")).unwrap_err();
+        assert!(matches!(err, AppError::Internal(_)));
+    }
+
+    #[test]
+    fn test_search_row_to_item_invalid_conversation_extra_json() {
+        let row = MessageSearchRow {
+            message_id: "msg_1".into(),
+            r#type: "text".into(),
+            content: r#"{"content":"hello"}"#.into(),
+            created_at: 5000,
+            conversation_id: "conv_1".into(),
+            conversation_name: "Test".into(),
+            conversation_type: "acp".into(),
+            conversation_extra: "not valid json".into(),
+            conversation_model: None,
+            conversation_status: Some("finished".into()),
+            conversation_source: None,
+            conversation_channel_chat_id: None,
+            conversation_pinned: false,
+            conversation_pinned_at: None,
+            conversation_created_at: 1000,
+            conversation_updated_at: 2000,
+        };
+
+        let err = search_row_to_item(row, Path::new("/tmp/data")).unwrap_err();
+        assert!(matches!(err, AppError::Internal(_)));
     }
 }

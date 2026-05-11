@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use tracing::{debug, warn};
 
 use crate::constants::{EXTENSION_API_VERSION, EXTENSION_MANIFEST_FILE, EXTENSIONS_DIR_NAME};
-use crate::manifest::parse_manifest;
+use crate::manifest::parse_manifest_in_dir;
 use crate::types::{ExtensionSource, ExtensionState, LoadedExtension};
 
 // ---------------------------------------------------------------------------
@@ -21,8 +21,8 @@ pub struct ScanPath {
 /// Resolve the default list of directories to scan for extensions.
 ///
 /// Priority (highest first):
-/// 1. `$AIONUI_EXTENSIONS_PATH` — colon-separated list of directories
-/// 2. `~/.aionui/extensions/` — user data directory
+/// 1. `$AIONUI_EXTENSIONS_PATH`
+/// 2. `~/.aionui/extensions/` — legacy user data directory
 /// 3. Platform AppData directory
 ///
 /// In E2E test mode (`AIONUI_E2E_TEST=1`), only the environment variable
@@ -30,25 +30,62 @@ pub struct ScanPath {
 pub fn resolve_scan_paths() -> Vec<ScanPath> {
     let env_path = std::env::var("AIONUI_EXTENSIONS_PATH").ok();
     let e2e_mode = is_e2e_test_mode();
-    resolve_scan_paths_inner(env_path.as_deref(), e2e_mode)
+    resolve_scan_paths_inner(env_path.as_deref(), e2e_mode, None)
+}
+
+/// Resolve scan paths using the historical Electron desktop rules for the
+/// provided `data_dir`.
+///
+/// Priority (highest first):
+/// 1. `$AIONUI_EXTENSIONS_PATH`
+/// 2. `<data_dir>/extensions`
+/// 3. Legacy appData sibling directory derived from `<data_dir>`
+///
+/// In E2E test mode (`AIONUI_E2E_TEST=1`), only the environment variable
+/// paths are returned to ensure test isolation.
+pub fn resolve_scan_paths_for_data_dir(data_dir: &Path) -> Vec<ScanPath> {
+    let env_path = std::env::var("AIONUI_EXTENSIONS_PATH").ok();
+    let e2e_mode = is_e2e_test_mode();
+    resolve_scan_paths_inner(env_path.as_deref(), e2e_mode, Some(data_dir))
+}
+
+/// Resolve the install target directory using the same priority order as
+/// `resolve_scan_paths_for_data_dir`.
+pub fn resolve_install_target_dir_for_data_dir(data_dir: &Path) -> PathBuf {
+    resolve_scan_paths_for_data_dir(data_dir)
+        .into_iter()
+        .next()
+        .map(|sp| sp.path)
+        .unwrap_or_else(|| data_dir.join(EXTENSIONS_DIR_NAME))
 }
 
 /// Inner implementation that accepts explicit parameters for testability.
 ///
 /// Production callers should use [`resolve_scan_paths`] which reads from
 /// environment variables automatically.
-fn resolve_scan_paths_inner(env_extensions_path: Option<&str>, e2e_mode: bool) -> Vec<ScanPath> {
+fn resolve_scan_paths_inner(
+    env_extensions_path: Option<&str>,
+    e2e_mode: bool,
+    explicit_data_dir: Option<&Path>,
+) -> Vec<ScanPath> {
     let mut paths = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    let mut push = |path: PathBuf, source: ExtensionSource| {
+        let normalized = path;
+        if seen.insert(normalized.clone()) {
+            paths.push(ScanPath {
+                path: normalized,
+                source,
+            });
+        }
+    };
 
     // 1. Environment variable paths (highest priority).
     if let Some(env_paths) = env_extensions_path {
-        for p in env_paths.split(':') {
-            let trimmed = p.trim();
-            if !trimmed.is_empty() {
-                paths.push(ScanPath {
-                    path: PathBuf::from(trimmed),
-                    source: ExtensionSource::Env,
-                });
+        for path in std::env::split_paths(env_paths) {
+            if !path.as_os_str().is_empty() {
+                push(path, ExtensionSource::Env);
             }
         }
     }
@@ -58,25 +95,36 @@ fn resolve_scan_paths_inner(env_extensions_path: Option<&str>, e2e_mode: bool) -
         return paths;
     }
 
-    // 2. User data directory (~/.aionui/extensions/).
-    if let Some(home) = dirs::home_dir() {
-        let user_dir = home.join(".aionui").join(EXTENSIONS_DIR_NAME);
-        paths.push(ScanPath {
-            path: user_dir,
-            source: ExtensionSource::Local,
-        });
-    }
+    // 2. User data directory (desktop data dir or historical ~/.aionui fallback).
+    if let Some(data_dir) = explicit_data_dir {
+        push(data_dir.join(EXTENSIONS_DIR_NAME), ExtensionSource::Local);
+        if let Some(appdata_dir) = derive_legacy_appdata_extensions_dir(data_dir) {
+            push(appdata_dir, ExtensionSource::Appdata);
+        }
+    } else {
+        if let Some(home) = dirs::home_dir() {
+            push(home.join(".aionui").join(EXTENSIONS_DIR_NAME), ExtensionSource::Local);
+        }
 
-    // 3. AppData directory (platform-specific).
-    if let Some(data_dir) = dirs::data_dir() {
-        let appdata_dir = data_dir.join("aionui").join(EXTENSIONS_DIR_NAME);
-        paths.push(ScanPath {
-            path: appdata_dir,
-            source: ExtensionSource::Appdata,
-        });
+        // 3. AppData directory (platform-specific).
+        if let Some(data_dir) = dirs::data_dir() {
+            push(
+                data_dir.join("aionui").join(EXTENSIONS_DIR_NAME),
+                ExtensionSource::Appdata,
+            );
+        }
     }
 
     paths
+}
+
+fn derive_legacy_appdata_extensions_dir(data_dir: &Path) -> Option<PathBuf> {
+    let resolved = std::fs::canonicalize(data_dir).unwrap_or_else(|_| data_dir.to_path_buf());
+    let leaf = resolved.file_name()?.to_str()?;
+    if leaf != "aionui" {
+        return None;
+    }
+    Some(resolved.parent()?.join(EXTENSIONS_DIR_NAME))
 }
 
 // ---------------------------------------------------------------------------
@@ -159,7 +207,7 @@ fn load_single_extension(
     source: ExtensionSource,
 ) -> Result<LoadedExtension, crate::error::ExtensionError> {
     let bytes = std::fs::read(manifest_path)?;
-    let manifest = parse_manifest(&bytes)?;
+    let manifest = parse_manifest_in_dir(&bytes, ext_dir)?;
 
     let state = ExtensionState {
         name: manifest.name.clone(),
@@ -345,6 +393,68 @@ mod tests {
         assert_eq!(result[0].manifest.version, "1.0.0");
         assert_eq!(result[0].source, ExtensionSource::Local);
         assert!(result[0].state.enabled);
+    }
+
+    #[test]
+    fn scan_loads_aionui_main_contract_extension() {
+        let tmp = TempDir::new().unwrap();
+        let ext_dir = tmp.path().join("legacy-ext");
+        fs::create_dir(&ext_dir).unwrap();
+        fs::create_dir(ext_dir.join("contributes")).unwrap();
+
+        fs::write(
+            ext_dir.join("contributes/settings-tabs.json"),
+            serde_json::to_vec_pretty(&serde_json::json!([
+                {
+                    "id": "legacy-settings",
+                    "name": "Legacy Settings",
+                    "entryPoint": "settings/legacy.html",
+                    "position": { "anchor": "display", "placement": "after" }
+                }
+            ]))
+            .unwrap(),
+        )
+        .unwrap();
+
+        fs::write(
+            ext_dir.join(EXTENSION_MANIFEST_FILE),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "name": "legacy-ext",
+                "displayName": "Legacy Extension",
+                "version": "1.0.0",
+                "i18n": {
+                    "localesDir": "i18n",
+                    "defaultLocale": "en-US"
+                },
+                "contributes": {
+                    "settingsTabs": "$file:contributes/settings-tabs.json",
+                    "webui": {
+                        "apiRoutes": [
+                            {
+                                "path": "/legacy-ext/collect",
+                                "entryPoint": "webui/collector.js"
+                            }
+                        ],
+                        "staticAssets": [
+                            {
+                                "urlPrefix": "/legacy-ext/assets",
+                                "directory": "assets"
+                            }
+                        ]
+                    }
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let result = scan_directory(tmp.path(), ExtensionSource::Local);
+        assert_eq!(result.len(), 1);
+        let manifest = &result[0].manifest;
+        assert_eq!(manifest.display_name.as_deref(), Some("Legacy Extension"));
+        assert_eq!(manifest.i18n.as_ref().unwrap().locales, vec!["en-US".to_owned()]);
+        assert_eq!(manifest.contributes.as_ref().unwrap().settings_tabs.len(), 1);
+        assert_eq!(manifest.contributes.as_ref().unwrap().webui.len(), 2);
     }
 
     #[test]
@@ -564,7 +674,7 @@ mod tests {
 
     #[test]
     fn resolve_scan_paths_includes_env_paths() {
-        let paths = resolve_scan_paths_inner(Some("/tmp/test-exts"), false);
+        let paths = resolve_scan_paths_inner(Some("/tmp/test-exts"), false, None);
         assert!(
             paths
                 .iter()
@@ -574,14 +684,14 @@ mod tests {
 
     #[test]
     fn resolve_scan_paths_e2e_mode_only_env() {
-        let paths = resolve_scan_paths_inner(Some("/tmp/e2e-exts"), true);
+        let paths = resolve_scan_paths_inner(Some("/tmp/e2e-exts"), true, None);
         assert!(paths.iter().all(|sp| sp.source == ExtensionSource::Env));
         assert!(paths.iter().any(|sp| sp.path.as_path() == Path::new("/tmp/e2e-exts")));
     }
 
     #[test]
     fn resolve_scan_paths_no_env_includes_platform_dirs() {
-        let paths = resolve_scan_paths_inner(None, false);
+        let paths = resolve_scan_paths_inner(None, false, None);
         // Should have at least one platform dir (home or appdata).
         assert!(
             paths
@@ -592,7 +702,36 @@ mod tests {
 
     #[test]
     fn resolve_scan_paths_e2e_no_env_returns_empty() {
-        let paths = resolve_scan_paths_inner(None, true);
+        let paths = resolve_scan_paths_inner(None, true, None);
         assert!(paths.is_empty());
+    }
+
+    #[test]
+    fn resolve_scan_paths_for_data_dir_prefers_env_then_data_dir_then_appdata() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let app_root = tmp.path().join("AionUi-Dev");
+        let data_dir = app_root.join("aionui");
+        std::fs::create_dir_all(&data_dir).unwrap();
+        let canonical_app_root = std::fs::canonicalize(&app_root).unwrap();
+
+        let paths = resolve_scan_paths_inner(Some("/tmp/env-exts"), false, Some(&data_dir));
+        assert_eq!(paths[0].path, PathBuf::from("/tmp/env-exts"));
+        assert_eq!(paths[0].source, ExtensionSource::Env);
+        assert_eq!(paths[1].path, data_dir.join(EXTENSIONS_DIR_NAME));
+        assert_eq!(paths[1].source, ExtensionSource::Local);
+        assert_eq!(paths[2].path, canonical_app_root.join(EXTENSIONS_DIR_NAME));
+        assert_eq!(paths[2].source, ExtensionSource::Appdata);
+    }
+
+    #[test]
+    fn resolve_scan_paths_for_data_dir_deduplicates_local_and_appdata() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let data_dir = tmp.path().join("plain-data");
+        std::fs::create_dir_all(&data_dir).unwrap();
+
+        let paths = resolve_scan_paths_inner(None, false, Some(&data_dir));
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0].path, data_dir.join(EXTENSIONS_DIR_NAME));
+        assert_eq!(paths[0].source, ExtensionSource::Local);
     }
 }

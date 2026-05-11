@@ -1,7 +1,7 @@
 //! Integration tests for agent type implementations and auxiliary features.
 //!
 //! These tests validate:
-//! - Each agent manager implements IAgentManager correctly
+//! - Each agent manager implements IAgentTask correctly
 //! - Agent factory can build all agent types
 //! - Idle scanner finds eligible tasks
 //! - Workspace browsing works with real filesystem
@@ -9,10 +9,12 @@
 
 use std::sync::Arc;
 
+use aionui_ai_agent::manager::aionrs::AionrsAgentManager;
+use aionui_ai_agent::task_manager::AgentFactory;
+use aionui_ai_agent::types::{AionrsResolvedConfig, BuildTaskOptions, SendMessageData};
 use aionui_ai_agent::*;
-use aionui_common::{
-    AgentKillReason, AgentType, Confirmation, ConversationStatus, ProviderWithModel, TimestampMs, now_ms,
-};
+use aionui_ai_agent::{SkillIndex, build_system_instructions_with_skills_index};
+use aionui_common::{AgentKillReason, AgentType, ConversationStatus, ProviderWithModel, TimestampMs, now_ms};
 use serde_json::json;
 use std::sync::atomic::{AtomicI64, Ordering};
 use tokio::sync::broadcast;
@@ -50,18 +52,18 @@ impl TypedMockAgent {
 }
 
 #[async_trait::async_trait]
-impl IAgentManager for TypedMockAgent {
+impl IAgentTask for TypedMockAgent {
     fn agent_type(&self) -> AgentType {
         self.agent_type
     }
-    fn status(&self) -> Option<ConversationStatus> {
-        self.status
+    fn conversation_id(&self) -> &str {
+        &self.conversation_id
     }
     fn workspace(&self) -> &str {
         &self.workspace
     }
-    fn conversation_id(&self) -> &str {
-        &self.conversation_id
+    fn status(&self) -> Option<ConversationStatus> {
+        self.status
     }
     fn last_activity_at(&self) -> TimestampMs {
         self.last_activity.load(Ordering::Relaxed)
@@ -72,31 +74,15 @@ impl IAgentManager for TypedMockAgent {
     async fn send_message(&self, _data: SendMessageData) -> Result<(), aionui_common::AppError> {
         Ok(())
     }
-    async fn stop(&self) -> Result<(), aionui_common::AppError> {
+    async fn cancel(&self) -> Result<(), aionui_common::AppError> {
         Ok(())
-    }
-    fn confirm(
-        &self,
-        _msg_id: &str,
-        _call_id: &str,
-        _data: serde_json::Value,
-        _always_allow: bool,
-    ) -> Result<(), aionui_common::AppError> {
-        Ok(())
-    }
-    fn get_confirmations(&self) -> Vec<Confirmation> {
-        vec![]
-    }
-    fn check_approval(&self, _action: &str, _command_type: Option<&str>) -> bool {
-        false
     }
     fn kill(&self, _reason: Option<AgentKillReason>) -> Result<(), aionui_common::AppError> {
         Ok(())
     }
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
 }
+
+impl IMockAgent for TypedMockAgent {}
 
 // ---------------------------------------------------------------------------
 // Aionrs agent tests (real implementation with AgentEngine)
@@ -114,6 +100,8 @@ fn make_aionrs_config() -> AionrsResolvedConfig {
         compat_overrides: Default::default(),
         session_directory: std::env::temp_dir().join("aionrs-test-sessions"),
         session_mode: None,
+        extra_mcp_servers: Default::default(),
+        bedrock_config: None,
     }
 }
 
@@ -131,6 +119,9 @@ async fn aionrs_agent_confirm_succeeds() {
     let agent = AionrsAgentManager::new("conv-1".into(), "/proj".into(), make_aionrs_config(), None)
         .await
         .unwrap();
+    // `confirm` is an inherent method on `AionrsAgentManager` (reached via
+    // `AgentInstance::Aionrs(..)` in production); the test calls it
+    // directly on the concrete manager.
     let result = agent.confirm("msg", "call", json!({}), false);
     assert!(result.is_ok());
 }
@@ -152,19 +143,23 @@ async fn aionrs_agent_metadata() {
 // Idle scanner: collect_idle only finds ACP tasks
 // ---------------------------------------------------------------------------
 
-#[test]
-fn collect_idle_ignores_non_acp_agent_types() {
+#[tokio::test]
+async fn collect_idle_ignores_non_acp_agent_types() {
+    use futures_util::FutureExt;
     let old_ts = now_ms() - 600_000; // 10 min ago
 
     // Build a factory that creates typed mocks (all finished + old)
     let factory: AgentFactory = Arc::new(move |opts: BuildTaskOptions| {
-        let mock = TypedMockAgent::new(
-            opts.agent_type,
-            &opts.conversation_id,
-            Some(ConversationStatus::Finished),
-        )
-        .with_last_activity(old_ts);
-        Ok(Arc::new(mock) as AgentManagerHandle)
+        async move {
+            let mock = TypedMockAgent::new(
+                opts.agent_type,
+                &opts.conversation_id,
+                Some(ConversationStatus::Finished),
+            )
+            .with_last_activity(old_ts);
+            Ok(AgentInstance::Mock(Arc::new(mock)))
+        }
+        .boxed()
     });
     let mgr = WorkerTaskManagerImpl::new(factory);
 
@@ -181,12 +176,16 @@ fn collect_idle_ignores_non_acp_agent_types() {
     };
 
     mgr.get_or_build_task("nanobot-1", make_opts(AgentType::Nanobot, "nanobot-1"))
+        .await
         .unwrap();
     mgr.get_or_build_task("openclaw-1", make_opts(AgentType::OpenclawGateway, "openclaw-1"))
+        .await
         .unwrap();
     mgr.get_or_build_task("acp-1", make_opts(AgentType::Acp, "acp-1"))
+        .await
         .unwrap();
     mgr.get_or_build_task("remote-1", make_opts(AgentType::Remote, "remote-1"))
+        .await
         .unwrap();
 
     assert_eq!(mgr.active_count(), 4);

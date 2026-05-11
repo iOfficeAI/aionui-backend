@@ -102,7 +102,9 @@ fn cr1_acp_adapter_resolved_with_env_and_avatar() {
             connection_type: Some("stdio".into()),
             endpoint: None,
             models: vec!["claude-sonnet-4-20250514".into()],
-            yolo_mode: Some(false),
+            yolo_mode: Some(serde_json::json!({
+                "type": "session"
+            })),
             health_check: None,
             api_key_fields: vec![],
         }],
@@ -173,6 +175,10 @@ fn cr3_assistant_file_reference_resolved() {
             system_prompt: Some("@file:prompts/system.md".into()),
             icon: Some("icons/code.png".into()),
             context: None,
+            preset_agent_type: Some("gemini".into()),
+            enabled_skills: vec!["code-review".into()],
+            prompts: vec!["Review this patch".into()],
+            models: vec!["gemini-2.0-flash".into()],
         }],
         ..Default::default()
     };
@@ -187,6 +193,10 @@ fn cr3_assistant_file_reference_resolved() {
         assistant.system_prompt.as_deref(),
         Some("You are a helpful coding assistant.")
     );
+    assert_eq!(assistant.preset_agent_type.as_deref(), Some("gemini"));
+    assert_eq!(assistant.enabled_skills, vec!["code-review"]);
+    assert_eq!(assistant.prompts, vec!["Review this patch"]);
+    assert_eq!(assistant.models, vec!["gemini-2.0-flash"]);
 
     std::fs::remove_dir_all(&dir).unwrap();
 }
@@ -209,6 +219,9 @@ fn cr4_agent_file_reference_resolved() {
             agent_type: Some("claude".into()),
             context: Some("@file:agent_ctx.md".into()),
             icon: None,
+            enabled_skills: vec!["ship-it".into()],
+            prompts: vec!["Fix the build".into()],
+            models: vec!["claude-sonnet-4".into()],
         }],
         ..Default::default()
     };
@@ -221,6 +234,9 @@ fn cr4_agent_file_reference_resolved() {
     assert_eq!(agent.extension_name, "agent-ext");
     assert_eq!(agent.agent_type.as_deref(), Some("claude"));
     assert_eq!(agent.context.as_deref(), Some("Agent context loaded from file."));
+    assert_eq!(agent.enabled_skills, vec!["ship-it"]);
+    assert_eq!(agent.prompts, vec!["Fix the build"]);
+    assert_eq!(agent.models, vec!["claude-sonnet-4"]);
 
     std::fs::remove_dir_all(&dir).unwrap();
 }
@@ -231,16 +247,20 @@ fn cr4_agent_file_reference_resolved() {
 
 #[test]
 fn cr5_skill_resolved_with_path() {
+    let dir = std::env::temp_dir().join("cr5_skill_resolved_with_path");
+    std::fs::create_dir_all(dir.join("skills")).unwrap();
+    std::fs::write(dir.join("skills/code-review.md"), "# review").unwrap();
+
     let contributes = ExtContributes {
         skills: vec![ExtSkill {
             name: "code-review".into(),
             description: Some("Review code for quality".into()),
-            path: Some("skills/code-review".into()),
+            path: Some("skills/code-review.md".into()),
         }],
         ..Default::default()
     };
 
-    let ext = make_loaded_extension("skill-ext", "/ext/skill-ext", contributes);
+    let ext = make_loaded_extension("skill-ext", &dir.to_string_lossy(), contributes);
     let result = resolve_extension_contributions(&ext);
 
     assert_eq!(result.skills.len(), 1);
@@ -248,6 +268,8 @@ fn cr5_skill_resolved_with_path() {
     assert_eq!(skill.extension_name, "skill-ext");
     assert_eq!(skill.name, "code-review");
     assert!(skill.path.as_ref().unwrap().contains("skills/code-review"));
+
+    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 // ---------------------------------------------------------------------------
@@ -362,12 +384,13 @@ fn cr8_settings_tab_position_preserved() {
         settings_tabs: vec![ExtSettingsTab {
             id: "ext-settings".into(),
             label: "My Extension".into(),
-            icon: Some("gear".into()),
-            url: "aion-asset://my-ext/settings.html".into(),
+            icon: Some("icons/gear.svg".into()),
+            url: "settings/index.html".into(),
             position: Some(SettingsTabPosition {
                 relative_to: "general".into(),
                 placement: "after".into(),
             }),
+            order: 80,
         }],
         ..Default::default()
     };
@@ -378,6 +401,13 @@ fn cr8_settings_tab_position_preserved() {
     assert_eq!(result.settings_tabs.len(), 1);
     let tab = &result.settings_tabs[0];
     assert_eq!(tab.extension_name, "my-ext");
+    assert_eq!(tab.id, "ext-my-ext-ext-settings");
+    assert_eq!(tab.url, "/api/extensions/my-ext/assets/settings/index.html");
+    assert_eq!(
+        tab.icon.as_deref(),
+        Some("/api/extensions/my-ext/assets/icons/gear.svg")
+    );
+    assert_eq!(tab.order, 80);
     let pos = tab.position.as_ref().unwrap();
     assert_eq!(pos.relative_to, "general");
     assert_eq!(pos.placement, "after");
@@ -473,14 +503,20 @@ fn cr10_i18n_unsupported_locale_returns_empty() {
 
 #[test]
 fn resolve_all_merges_contributions_from_multiple_extensions() {
+    let dir = std::env::temp_dir().join("resolve_all_merges_contributions_from_multiple_extensions");
+    std::fs::create_dir_all(dir.join("a/skills")).unwrap();
+    std::fs::create_dir_all(dir.join("b/skills")).unwrap();
+    std::fs::write(dir.join("a/skills/skill-a.md"), "# a").unwrap();
+    std::fs::write(dir.join("b/skills/skill-b.md"), "# b").unwrap();
+
     let ext_a = make_loaded_extension(
         "ext-a",
-        "/ext/a",
+        &dir.join("a").to_string_lossy(),
         ExtContributes {
             skills: vec![ExtSkill {
                 name: "skill-a".into(),
                 description: None,
-                path: None,
+                path: Some("skills/skill-a.md".into()),
             }],
             model_providers: vec![ExtModelProvider {
                 id: "mp-a".into(),
@@ -495,12 +531,12 @@ fn resolve_all_merges_contributions_from_multiple_extensions() {
     );
     let ext_b = make_loaded_extension(
         "ext-b",
-        "/ext/b",
+        &dir.join("b").to_string_lossy(),
         ExtContributes {
             skills: vec![ExtSkill {
                 name: "skill-b".into(),
                 description: None,
-                path: None,
+                path: Some("skills/skill-b.md".into()),
             }],
             ..Default::default()
         },
@@ -509,6 +545,8 @@ fn resolve_all_merges_contributions_from_multiple_extensions() {
     let result = resolve_all_contributions(&[ext_a, ext_b]);
     assert_eq!(result.skills.len(), 2);
     assert_eq!(result.model_providers.len(), 1);
+
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
@@ -540,6 +578,9 @@ fn channel_plugin_resolved_with_entry_point() {
             description: Some("Slack channel plugin".into()),
             platform: Some("slack".into()),
             entry_point: Some("plugins/slack.js".into()),
+            icon: Some("icons/slack.png".into()),
+            credential_fields: vec![serde_json::json!({ "key": "token" })],
+            config_fields: vec![serde_json::json!({ "key": "channel" })],
         }],
         ..Default::default()
     };
@@ -556,4 +597,6 @@ fn channel_plugin_resolved_with_entry_point() {
             .unwrap()
             .contains("plugins/slack.js")
     );
+    assert_eq!(result.channel_plugins[0].credential_fields.len(), 1);
+    assert_eq!(result.channel_plugins[0].config_fields.len(), 1);
 }

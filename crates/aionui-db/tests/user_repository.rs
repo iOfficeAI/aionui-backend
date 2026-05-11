@@ -134,12 +134,14 @@ async fn t2_8_primary_webui_user_is_system_user_when_only_system() {
 #[tokio::test]
 async fn t2_8_primary_webui_user_prefers_system_over_admin() {
     let r = repo().await;
-    r.create_user("admin", "h").await.unwrap();
+    // Can't create another user called "admin" now that seed uses it.
+    // The priority check still holds: any non-system user must not shadow system.
+    r.create_user("other", "h").await.unwrap();
 
     let user = r.get_primary_webui_user().await.unwrap().unwrap();
     assert_eq!(
         user.id, "system_default_user",
-        "system user should take priority over admin"
+        "system user should take priority over non-system users"
     );
 }
 

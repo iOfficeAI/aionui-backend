@@ -41,6 +41,14 @@ impl QrTokenStore {
     ///
     /// Returns the 64-character hex token string.
     pub fn generate(&self) -> String {
+        self.generate_with_expiry().0
+    }
+
+    /// Generate a new QR login token and return it along with its expiry timestamp (ms).
+    ///
+    /// Returns `(token, expires_at_ms)` where `expires_at_ms` is the absolute
+    /// Unix time in milliseconds when the token becomes invalid.
+    pub fn generate_with_expiry(&self) -> (String, i64) {
         let mut buf = [0u8; QR_TOKEN_BYTES];
         getrandom::getrandom(&mut buf).expect("OS entropy source unavailable");
 
@@ -49,15 +57,16 @@ impl QrTokenStore {
             let _ = write!(token, "{byte:02x}");
         }
 
+        let created_at_ms = aionui_common::now_ms();
         self.tokens.insert(
             token.clone(),
             QrTokenData {
-                created_at_ms: aionui_common::now_ms(),
+                created_at_ms,
                 used: false,
             },
         );
 
-        token
+        (token, created_at_ms + QR_TOKEN_TTL_MS)
     }
 
     /// Validate and consume a QR token (one-time use).

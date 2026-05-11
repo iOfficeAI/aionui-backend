@@ -283,6 +283,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn seed_rows_include_icon_backfill() {
+        let (repo, _db) = setup().await;
+
+        let claude = repo.get("2d23ff1c").await.unwrap().expect("seeded claude row");
+        assert_eq!(claude.icon.as_deref(), Some("/api/assets/logos/ai-major/claude.svg"));
+
+        let aionrs = repo.get("632f31d2").await.unwrap().expect("seeded aion cli row");
+        assert_eq!(aionrs.icon.as_deref(), Some("/api/assets/logos/brand/aion.svg"));
+
+        let kiro = repo.get("e044000d").await.unwrap().expect("seeded kiro row");
+        assert!(kiro.icon.is_none());
+    }
+
+    #[tokio::test]
     async fn upsert_inserts_then_updates() {
         let (repo, _db) = setup().await;
         let mut p = custom_params("custom-0001", "my-claude");
@@ -390,14 +404,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unique_source_name_enforced() {
+    async fn same_source_same_name_allowed_with_different_ids() {
         let (repo, _db) = setup().await;
         let p1 = custom_params("custom-a", "dup");
-        let mut p2 = custom_params("custom-b", "dup");
-        p2.id = "custom-b";
-        p2.name = "dup";
+        let p2 = custom_params("custom-b", "dup");
         repo.upsert(&p1).await.unwrap();
-        let err = repo.upsert(&p2).await.expect_err("unique violation");
-        assert!(matches!(err, DbError::Query(_)));
+        repo.upsert(&p2).await.unwrap();
+        let all = repo.list_all().await.unwrap();
+        let dup_count = all
+            .iter()
+            .filter(|r| r.name == "dup" && r.agent_source == "custom")
+            .count();
+        assert_eq!(
+            dup_count, 2,
+            "both rows should coexist after dropping UNIQUE(agent_source,name)"
+        );
     }
 }

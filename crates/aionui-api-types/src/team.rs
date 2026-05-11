@@ -9,6 +9,9 @@ use serde::{Deserialize, Serialize};
 ///
 /// Each agent gets its own conversation; the first agent in a create
 /// request becomes the team lead.
+///
+/// When `conversation_id` is supplied the existing conversation is adopted
+/// rather than creating a new one (single-chat → team-chat handoff).
 #[derive(Debug, Clone, Deserialize)]
 pub struct TeamAgentInput {
     pub name: String,
@@ -17,6 +20,11 @@ pub struct TeamAgentInput {
     pub model: String,
     #[serde(default)]
     pub custom_agent_id: Option<String>,
+    /// Adopt an existing conversation instead of creating a new one.
+    /// When present the conversation's `extra` is updated with `teamId`
+    /// and `backend`; no new conversation row is written.
+    #[serde(default)]
+    pub conversation_id: Option<String>,
 }
 
 /// Request body for `POST /api/teams`.
@@ -100,6 +108,8 @@ pub struct TeamAgentResponse {
     pub role: String,
     pub conversation_id: String,
     pub backend: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
     pub model: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub custom_agent_id: Option<String>,
@@ -276,6 +286,31 @@ mod tests {
     }
 
     #[test]
+    fn deserialize_team_agent_input_with_conversation_id() {
+        let raw = json!({
+            "name": "Lead",
+            "role": "lead",
+            "backend": "acp",
+            "model": "claude",
+            "conversation_id": "existing-conv-123"
+        });
+        let input: TeamAgentInput = serde_json::from_value(raw).unwrap();
+        assert_eq!(input.conversation_id.as_deref(), Some("existing-conv-123"));
+    }
+
+    #[test]
+    fn deserialize_team_agent_input_conversation_id_defaults_to_none() {
+        let raw = json!({
+            "name": "Lead",
+            "role": "lead",
+            "backend": "acp",
+            "model": "claude"
+        });
+        let input: TeamAgentInput = serde_json::from_value(raw).unwrap();
+        assert!(input.conversation_id.is_none());
+    }
+
+    #[test]
     fn deserialize_create_team_request_empty_agents() {
         let raw = json!({ "name": "Empty", "agents": [] });
         let req: CreateTeamRequest = serde_json::from_value(raw).unwrap();
@@ -409,6 +444,7 @@ mod tests {
             role: "lead".into(),
             conversation_id: "conv-1".into(),
             backend: "acp".into(),
+            icon: Some("/api/assets/logos/ai-major/claude.svg".into()),
             model: "claude".into(),
             custom_agent_id: Some("agent-x".into()),
             status: Some("idle".into()),
@@ -419,6 +455,7 @@ mod tests {
         assert_eq!(json["role"], "lead");
         assert_eq!(json["conversation_id"], "conv-1");
         assert_eq!(json["backend"], "acp");
+        assert_eq!(json["icon"], "/api/assets/logos/ai-major/claude.svg");
         assert_eq!(json["model"], "claude");
         assert_eq!(json["custom_agent_id"], "agent-x");
         assert_eq!(json["status"], "idle");
@@ -432,11 +469,13 @@ mod tests {
             role: "teammate".into(),
             conversation_id: "conv-2".into(),
             backend: "acp".into(),
+            icon: None,
             model: "claude".into(),
             custom_agent_id: None,
             status: None,
         };
         let json = serde_json::to_value(&agent).unwrap();
+        assert!(json.get("icon").is_none());
         assert!(json.get("custom_agent_id").is_none());
         assert!(json.get("status").is_none());
     }
@@ -452,6 +491,7 @@ mod tests {
                 role: "lead".into(),
                 conversation_id: "conv-1".into(),
                 backend: "acp".into(),
+                icon: Some("/api/assets/logos/ai-major/claude.svg".into()),
                 model: "claude".into(),
                 custom_agent_id: None,
                 status: None,
@@ -510,6 +550,7 @@ mod tests {
                 role: "teammate".into(),
                 conversation_id: "conv-3".into(),
                 backend: "claude".into(),
+                icon: Some("/api/assets/logos/ai-major/claude.svg".into()),
                 model: "opus".into(),
                 custom_agent_id: None,
                 status: Some("idle".into()),
@@ -557,6 +598,7 @@ mod tests {
             role: "lead".into(),
             conversation_id: "conv-1".into(),
             backend: "acp".into(),
+            icon: Some("/api/assets/logos/ai-major/claude.svg".into()),
             model: "claude".into(),
             custom_agent_id: Some("custom-1".into()),
             status: Some("working".into()),
@@ -578,6 +620,7 @@ mod tests {
                     role: "lead".into(),
                     conversation_id: "c1".into(),
                     backend: "acp".into(),
+                    icon: None,
                     model: "claude".into(),
                     custom_agent_id: None,
                     status: None,
@@ -588,6 +631,7 @@ mod tests {
                     role: "teammate".into(),
                     conversation_id: "c2".into(),
                     backend: "acp".into(),
+                    icon: Some("/api/assets/logos/tools/coding/codex.svg".into()),
                     model: "claude".into(),
                     custom_agent_id: Some("x".into()),
                     status: Some("idle".into()),
@@ -624,6 +668,7 @@ mod tests {
                 role: "teammate".into(),
                 conversation_id: "c3".into(),
                 backend: "claude".into(),
+                icon: None,
                 model: "sonnet".into(),
                 custom_agent_id: None,
                 status: None,

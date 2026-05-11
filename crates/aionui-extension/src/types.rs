@@ -115,7 +115,7 @@ pub struct ExtAcpAdapter {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub models: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub yolo_mode: Option<bool>,
+    pub yolo_mode: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health_check: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -146,6 +146,14 @@ pub struct ExtAssistant {
     pub icon: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "presetAgentType")]
+    pub preset_agent_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty", alias = "enabledSkills")]
+    pub enabled_skills: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prompts: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<String>,
 }
 
 /// Autonomous agent contributed by an extension.
@@ -161,6 +169,12 @@ pub struct ExtAgent {
     pub context: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty", alias = "enabledSkills")]
+    pub enabled_skills: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prompts: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<String>,
 }
 
 /// Skill contributed by an extension.
@@ -197,6 +211,12 @@ pub struct ExtChannelPlugin {
     pub platform: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub entry_point: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty", alias = "credentialFields")]
+    pub credential_fields: Vec<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty", alias = "configFields")]
+    pub config_fields: Vec<serde_json::Value>,
 }
 
 /// WebUI route definition.
@@ -219,20 +239,29 @@ pub struct ExtWebui {
 /// Settings tab position relative to a built-in tab.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SettingsTabPosition {
+    #[serde(rename = "relativeTo", alias = "anchor", alias = "relative_to")]
     pub relative_to: String,
     pub placement: String,
+}
+
+fn default_settings_tab_order() -> u32 {
+    100
 }
 
 /// Settings tab contributed by an extension.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ExtSettingsTab {
     pub id: String,
+    #[serde(alias = "name")]
     pub label: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    #[serde(alias = "entryPoint")]
     pub url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<SettingsTabPosition>,
+    #[serde(default = "default_settings_tab_order")]
+    pub order: u32,
 }
 
 /// Model provider contributed by an extension.
@@ -474,7 +503,7 @@ pub struct ResolvedAcpAdapter {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub models: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub yolo_mode: Option<bool>,
+    pub yolo_mode: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health_check: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -507,6 +536,14 @@ pub struct ResolvedAssistant {
     pub icon: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preset_agent_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub enabled_skills: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prompts: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<String>,
 }
 
 /// Resolved agent (after @file: and env template resolution).
@@ -523,6 +560,12 @@ pub struct ResolvedAgent {
     pub context: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub enabled_skills: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prompts: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub models: Vec<String>,
 }
 
 /// Resolved skill contributed by an extension.
@@ -561,6 +604,12 @@ pub struct ResolvedChannelPlugin {
     pub platform: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub entry_point: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub credential_fields: Vec<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub config_fields: Vec<serde_json::Value>,
 }
 
 /// Resolved WebUI contribution (after route validation).
@@ -576,6 +625,7 @@ pub struct WebuiContribution {
 /// Resolved settings tab (after position parsing).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ResolvedSettingsTab {
+    #[serde(rename = "extensionName")]
     pub extension_name: String,
     pub id: String,
     pub label: String,
@@ -584,6 +634,7 @@ pub struct ResolvedSettingsTab {
     pub url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub position: Option<SettingsTabPosition>,
+    pub order: u32,
 }
 
 /// Resolved model provider.

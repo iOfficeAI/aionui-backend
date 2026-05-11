@@ -64,6 +64,22 @@ pub struct AgentSourceInfo {
 pub struct BehaviorPolicy {
     #[serde(default)]
     pub supports_side_question: bool,
+
+    /// The agent's CLI bakes the model identity into its session
+    /// system prompt at launch time and does not refresh it when
+    /// `session/set_model` is called. Callers should inject a
+    /// `<system-reminder>` before the next prompt so the model
+    /// answers with the user-selected identity rather than the
+    /// stale cached one.
+    #[serde(default)]
+    pub self_identity_sticky: bool,
+
+    /// The agent does not implement the generic ACP `session/load`
+    /// method. To resume, callers must call `session/new` again and
+    /// pass the prior session id through a vendor-specific
+    /// `_meta.<vendor>.options.resume` field.
+    #[serde(default)]
+    pub session_load_via_meta_field: bool,
 }
 
 /// Handshake-derived fields captured from the ACP init/session-response.
@@ -151,6 +167,12 @@ pub struct AgentMetadata {
     /// scheme is documented in `007_agent_metadata_sort_order.sql`.
     pub sort_order: i64,
 
+    /// Whether this agent supports team mode. Derived at hydrate time from
+    /// the hard whitelist + persisted `agent_capabilities` MCP declarations.
+    /// Not a persisted column.
+    #[serde(default)]
+    pub team_capable: bool,
+
     #[serde(default)]
     pub handshake: AgentHandshake,
 }
@@ -198,6 +220,7 @@ mod tests {
             behavior_policy: BehaviorPolicy::default(),
             yolo_id: None,
             sort_order: 3100,
+            team_capable: true,
             handshake: AgentHandshake::default(),
         };
         let v = serde_json::to_value(&meta).unwrap();
@@ -206,6 +229,7 @@ mod tests {
         assert!(v.get("resolved_command").is_none());
         assert_eq!(v["backend"], "claude");
         assert_eq!(v["available"], true);
+        assert_eq!(v["team_capable"], true);
         assert!(v.get("command").is_none());
         assert!(v.get("icon").is_none());
     }
@@ -227,5 +251,31 @@ mod tests {
         assert!(!meta.available);
         assert!(!meta.behavior_policy.supports_side_question);
         assert!(meta.handshake.agent_capabilities.is_none());
+    }
+}
+
+#[cfg(test)]
+mod behavior_policy_tests {
+    use super::BehaviorPolicy;
+
+    #[test]
+    fn deserializes_new_capability_flags() {
+        let json = serde_json::json!({
+            "supports_side_question": true,
+            "self_identity_sticky": true,
+            "session_load_via_meta_field": true,
+        });
+        let policy: BehaviorPolicy = serde_json::from_value(json).unwrap();
+        assert!(policy.supports_side_question);
+        assert!(policy.self_identity_sticky);
+        assert!(policy.session_load_via_meta_field);
+    }
+
+    #[test]
+    fn defaults_to_false_when_flags_omitted() {
+        let policy: BehaviorPolicy = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert!(!policy.supports_side_question);
+        assert!(!policy.self_identity_sticky);
+        assert!(!policy.session_load_via_meta_field);
     }
 }

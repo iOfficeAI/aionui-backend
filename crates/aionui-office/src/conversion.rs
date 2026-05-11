@@ -4,9 +4,9 @@ use aionui_api_types::{
     CellCoord, CellRange, ConversionResultDto, ConversionTarget, DocumentConversionResponse, ExcelSheetData,
     ExcelWorkbookData,
 };
+use aionui_runtime::Builder as CmdBuilder;
 use calamine::{DataType, Reader, Sheets, open_workbook_auto};
 use serde_json::Value;
-use tokio::process::Command;
 use tracing::warn;
 
 use crate::error::OfficeError;
@@ -59,7 +59,7 @@ impl ConversionService {
     async fn word_to_markdown(&self, file_path: &str) -> Result<Value, OfficeError> {
         validate_file_exists(file_path)?;
 
-        let pandoc = find_executable("pandoc").await;
+        let pandoc = find_executable("pandoc");
         let pandoc_path = pandoc.ok_or_else(|| {
             OfficeError::ToolNotFound(
                 "pandoc not installed. Install it via: brew install pandoc (macOS) \
@@ -68,8 +68,9 @@ impl ConversionService {
             )
         })?;
 
-        let output = Command::new(&pandoc_path)
-            .args(["-f", "docx", "-t", "markdown", "--wrap=none", file_path])
+        let mut builder = CmdBuilder::clean_cli(&pandoc_path);
+        builder.args(["-f", "docx", "-t", "markdown", "--wrap=none", file_path]);
+        let output = builder
             .output()
             .await
             .map_err(|e| OfficeError::Conversion(format!("failed to run pandoc: {e}")))?;
@@ -117,8 +118,9 @@ impl ConversionService {
 
         let officecli = resolve_officecli(&self.officecli_path).await?;
 
-        let output = Command::new(&officecli)
-            .args(["ppt2json", file_path])
+        let mut builder = CmdBuilder::clean_cli(&officecli);
+        builder.args(["ppt2json", file_path]);
+        let output = builder
             .output()
             .await
             .map_err(|e| OfficeError::Conversion(format!("failed to run officecli ppt2json: {e}")))?;
@@ -220,15 +222,8 @@ fn extract_merge_regions<RS: std::io::Read + std::io::Seek>(
     Some(ranges)
 }
 
-async fn find_executable(name: &str) -> Option<String> {
-    let output = Command::new("which").arg(name).output().await.ok()?;
-
-    if output.status.success() {
-        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if path.is_empty() { None } else { Some(path) }
-    } else {
-        None
-    }
+fn find_executable(name: &str) -> Option<String> {
+    which::which(name).ok().map(|p| p.to_string_lossy().into_owned())
 }
 
 async fn resolve_officecli(configured_path: &Option<String>) -> Result<String, OfficeError> {
@@ -238,7 +233,7 @@ async fn resolve_officecli(configured_path: &Option<String>) -> Result<String, O
         return Ok(path.clone());
     }
 
-    if let Some(found) = find_executable("officecli").await {
+    if let Some(found) = find_executable("officecli") {
         return Ok(found);
     }
 

@@ -56,6 +56,27 @@ impl ITeamRepository for MockTeamRepo {
         Ok(result)
     }
 
+    async fn peek_unread(&self, team_id: &str, to_agent_id: &str) -> Result<Vec<MailboxMessageRow>, DbError> {
+        let state = self.state.lock().unwrap();
+        let result = state
+            .messages
+            .iter()
+            .filter(|m| m.team_id == team_id && m.to_agent_id == to_agent_id && !m.read)
+            .cloned()
+            .collect();
+        Ok(result)
+    }
+
+    async fn mark_read_batch(&self, ids: &[String]) -> Result<(), DbError> {
+        let mut state = self.state.lock().unwrap();
+        for msg in &mut state.messages {
+            if ids.contains(&msg.id) {
+                msg.read = true;
+            }
+        }
+        Ok(())
+    }
+
     async fn get_history(
         &self,
         team_id: &str,

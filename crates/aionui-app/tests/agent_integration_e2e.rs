@@ -5,7 +5,6 @@
 
 mod common;
 
-use std::any::Any;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -14,8 +13,8 @@ use serde_json::{Value, json};
 use tokio::sync::broadcast;
 use tower::ServiceExt;
 
-use aionui_ai_agent::agent_manager::{AgentManagerHandle, IAgentManager};
-use aionui_ai_agent::stream_event::TextEventData;
+use aionui_ai_agent::agent_task::{AgentInstance, IAgentTask, IMockAgent};
+use aionui_ai_agent::protocol::events::TextEventData;
 use aionui_ai_agent::types::{BuildTaskOptions, SendMessageData};
 use aionui_ai_agent::{AgentStreamEvent, IWorkerTaskManager};
 use aionui_common::{AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, TimestampMs, now_ms};
@@ -49,21 +48,21 @@ impl MockAgent {
 }
 
 #[async_trait]
-impl IAgentManager for MockAgent {
+impl IAgentTask for MockAgent {
     fn agent_type(&self) -> AgentType {
         AgentType::Acp
     }
 
-    fn status(&self) -> Option<ConversationStatus> {
-        Some(ConversationStatus::Running)
+    fn conversation_id(&self) -> &str {
+        &self.conversation_id
     }
 
     fn workspace(&self) -> &str {
         &self.workspace
     }
 
-    fn conversation_id(&self) -> &str {
-        &self.conversation_id
+    fn status(&self) -> Option<ConversationStatus> {
+        Some(ConversationStatus::Running)
     }
 
     fn last_activity_at(&self) -> TimestampMs {
@@ -81,13 +80,28 @@ impl IAgentManager for MockAgent {
             content: "Mock response".into(),
         }));
         let _ = self.event_tx.send(AgentStreamEvent::Finish(
-            aionui_ai_agent::stream_event::FinishEventData::default(),
+            aionui_ai_agent::protocol::events::FinishEventData::default(),
         ));
         Ok(())
     }
 
-    async fn stop(&self) -> Result<(), AppError> {
+    async fn cancel(&self) -> Result<(), AppError> {
         Ok(())
+    }
+
+    fn kill(&self, _reason: Option<AgentKillReason>) -> Result<(), AppError> {
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl IMockAgent for MockAgent {
+    fn get_confirmations(&self) -> Vec<Confirmation> {
+        self.confirmations.lock().unwrap().clone()
+    }
+
+    fn check_approval(&self, action: &str, _command_type: Option<&str>) -> bool {
+        self.approvals.lock().unwrap().get(action).copied().unwrap_or(false)
     }
 
     fn confirm(&self, _msg_id: &str, call_id: &str, _data: Value, always_allow: bool) -> Result<(), AppError> {
@@ -98,28 +112,12 @@ impl IAgentManager for MockAgent {
         }
         Ok(())
     }
-
-    fn get_confirmations(&self) -> Vec<Confirmation> {
-        self.confirmations.lock().unwrap().clone()
-    }
-
-    fn check_approval(&self, action: &str, _command_type: Option<&str>) -> bool {
-        self.approvals.lock().unwrap().get(action).copied().unwrap_or(false)
-    }
-
-    fn kill(&self, _reason: Option<AgentKillReason>) -> Result<(), AppError> {
-        Ok(())
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
 }
 
 // ── Mock Worker Task Manager ────────────────────────────────────
 
 struct MockTaskManager {
-    agents: Mutex<std::collections::HashMap<String, AgentManagerHandle>>,
+    agents: Mutex<std::collections::HashMap<String, AgentInstance>>,
 }
 
 impl MockTaskManager {
@@ -131,28 +129,32 @@ impl MockTaskManager {
 
     fn insert(&self, conv_id: &str, workspace: &str) -> Arc<MockAgent> {
         let agent = Arc::new(MockAgent::new(conv_id, workspace));
-        self.agents.lock().unwrap().insert(conv_id.to_owned(), agent.clone());
+        self.agents
+            .lock()
+            .unwrap()
+            .insert(conv_id.to_owned(), AgentInstance::Mock(agent.clone()));
         agent
     }
 }
 
+#[async_trait::async_trait]
 impl IWorkerTaskManager for MockTaskManager {
-    fn get_task(&self, conversation_id: &str) -> Option<AgentManagerHandle> {
+    fn get_task(&self, conversation_id: &str) -> Option<AgentInstance> {
         self.agents.lock().unwrap().get(conversation_id).cloned()
     }
 
-    fn get_or_build_task(
+    async fn get_or_build_task(
         &self,
         conversation_id: &str,
         _options: BuildTaskOptions,
-    ) -> Result<AgentManagerHandle, AppError> {
+    ) -> Result<AgentInstance, AppError> {
         let mut agents = self.agents.lock().unwrap();
         if let Some(existing) = agents.get(conversation_id) {
             return Ok(existing.clone());
         }
-        let agent: AgentManagerHandle = Arc::new(MockAgent::new(conversation_id, "/mock-workspace"));
-        agents.insert(conversation_id.to_owned(), agent.clone());
-        Ok(agent)
+        let instance = AgentInstance::Mock(Arc::new(MockAgent::new(conversation_id, "/mock-workspace")));
+        agents.insert(conversation_id.to_owned(), instance.clone());
+        Ok(instance)
     }
 
     fn kill(&self, conversation_id: &str, _reason: Option<AgentKillReason>) -> Result<(), AppError> {
@@ -210,7 +212,7 @@ async fn send_message_with_mock_agent_returns_202() {
     let req = json_with_token(
         "POST",
         &format!("/api/conversations/{conv_id}/messages"),
-        json!({ "content": "Hello mock agent", "msg_id": "msg-001" }),
+        json!({ "content": "Hello mock agent" }),
         &token,
         &csrf,
     );

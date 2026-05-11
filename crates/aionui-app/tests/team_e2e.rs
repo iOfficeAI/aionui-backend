@@ -4,7 +4,10 @@ use axum::http::StatusCode;
 use serde_json::json;
 use tower::ServiceExt;
 
-use common::{body_json, build_app, delete_with_token, get_with_token, json_with_token, setup_and_login};
+use common::{
+    body_json, build_app, build_app_with_mock_agents, delete_with_token, get_with_token, json_with_token,
+    setup_and_login,
+};
 
 fn two_agent_body() -> serde_json::Value {
     json!({
@@ -522,7 +525,7 @@ async fn an3_rename_nonexistent_agent() {
 // ES-1: Ensure session
 #[tokio::test]
 async fn es1_ensure_session() {
-    let (mut app, services) = build_app().await;
+    let (mut app, services) = build_app_with_mock_agents().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
     let data = create_team(&mut app, &token, &csrf).await;
@@ -542,7 +545,7 @@ async fn es1_ensure_session() {
 // ES-2: Ensure session is idempotent
 #[tokio::test]
 async fn es2_ensure_session_idempotent() {
-    let (mut app, services) = build_app().await;
+    let (mut app, services) = build_app_with_mock_agents().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
     let data = create_team(&mut app, &token, &csrf).await;
@@ -583,7 +586,7 @@ async fn es3_ensure_session_nonexistent() {
 // SS-1: Stop session
 #[tokio::test]
 async fn ss1_stop_session() {
-    let (mut app, services) = build_app().await;
+    let (mut app, services) = build_app_with_mock_agents().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
     let data = create_team(&mut app, &token, &csrf).await;
@@ -624,7 +627,7 @@ async fn ss3_stop_session_noop() {
 // SM-1: Send message with active session
 #[tokio::test]
 async fn sm1_send_message_with_session() {
-    let (mut app, services) = build_app().await;
+    let (mut app, services) = build_app_with_mock_agents().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
     let data = create_team(&mut app, &token, &csrf).await;
@@ -691,7 +694,7 @@ async fn sm5_send_message_missing_content() {
 // SA-1: Send message to specific agent
 #[tokio::test]
 async fn sa1_send_message_to_agent() {
-    let (mut app, services) = build_app().await;
+    let (mut app, services) = build_app_with_mock_agents().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
     let data = create_team(&mut app, &token, &csrf).await;
@@ -726,7 +729,7 @@ async fn sa1_send_message_to_agent() {
 // Full CRUD lifecycle
 #[tokio::test]
 async fn full_team_lifecycle() {
-    let (mut app, services) = build_app().await;
+    let (mut app, services) = build_app_with_mock_agents().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
     // Create

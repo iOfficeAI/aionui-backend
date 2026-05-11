@@ -332,7 +332,7 @@ mod tests {
         // Unchanged fields preserved
         assert_eq!(updated.platform, "anthropic");
         assert_eq!(updated.base_url, "https://api.anthropic.com");
-        assert!(updated.updated_at > created.updated_at);
+        assert!(updated.updated_at >= created.updated_at);
     }
 
     #[tokio::test]

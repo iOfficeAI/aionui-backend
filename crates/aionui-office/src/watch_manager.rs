@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use aionui_api_types::{PreviewState, PreviewStatusEvent, WebSocketMessage};
 use aionui_realtime::EventBroadcaster;
+use aionui_runtime::Builder as CmdBuilder;
 use dashmap::DashMap;
 use tokio::sync::Mutex;
 
@@ -277,22 +278,22 @@ impl ProcessSpawner for DefaultProcessSpawner {
         port: u16,
         _doc_type: DocType,
     ) -> Result<Box<dyn ProcessHandle>, OfficeError> {
-        let child = tokio::process::Command::new("officecli")
+        let mut builder = CmdBuilder::new("officecli");
+        builder
             .arg("watch")
             .arg(file_path)
             .arg("--port")
             .arg(port.to_string())
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .map_err(|e| {
-                if e.kind() == std::io::ErrorKind::NotFound {
-                    OfficeError::OfficecliNotFound
-                } else {
-                    OfficeError::StartFailed(e.to_string())
-                }
-            })?;
+            .stderr(std::process::Stdio::null());
+        let child = builder.spawn().map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                OfficeError::OfficecliNotFound
+            } else {
+                OfficeError::StartFailed(e.to_string())
+            }
+        })?;
 
         Ok(Box::new(TokioProcessHandle {
             child: Mutex::new(Some(child)),
@@ -300,8 +301,9 @@ impl ProcessSpawner for DefaultProcessSpawner {
     }
 
     async fn install_officecli(&self) -> Result<(), OfficeError> {
-        let output = tokio::process::Command::new("npm")
-            .args(["install", "-g", "officecli"])
+        let mut builder = CmdBuilder::clean_cli("npm");
+        builder.args(["install", "-g", "officecli"]);
+        let output = builder
             .output()
             .await
             .map_err(|e| OfficeError::InstallFailed(e.to_string()))?;
@@ -314,26 +316,24 @@ impl ProcessSpawner for DefaultProcessSpawner {
     }
 
     async fn is_officecli_installed(&self) -> bool {
-        tokio::process::Command::new("officecli")
-            .arg("--version")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .await
-            .is_ok_and(|s| s.success())
+        let mut builder = CmdBuilder::clean_cli("officecli");
+        builder.arg("--version");
+        builder.output().await.is_ok_and(|o| o.status.success())
     }
 
     async fn check_update(&self, _doc_type: DocType) -> Result<(), OfficeError> {
-        let output = tokio::process::Command::new("npm")
-            .args(["outdated", "-g", "officecli"])
+        let mut builder = CmdBuilder::clean_cli("npm");
+        builder.args(["outdated", "-g", "officecli"]);
+        let output = builder
             .output()
             .await
             .map_err(|e| OfficeError::StartFailed(e.to_string()))?;
 
         if !output.status.success() {
             tracing::info!("officecli update available, installing...");
-            let install = tokio::process::Command::new("npm")
-                .args(["install", "-g", "officecli@latest"])
+            let mut install_builder = CmdBuilder::clean_cli("npm");
+            install_builder.args(["install", "-g", "officecli@latest"]);
+            let install = install_builder
                 .output()
                 .await
                 .map_err(|e| OfficeError::InstallFailed(e.to_string()))?;

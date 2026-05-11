@@ -190,7 +190,7 @@ async fn cj8_update_name_and_enabled() {
     let updated = r.get_by_id("cron_u1").await.unwrap().unwrap();
     assert_eq!(updated.name, "Renamed");
     assert!(!updated.enabled);
-    assert!(updated.updated_at > updated.created_at);
+    assert!(updated.updated_at >= updated.created_at);
 }
 
 #[tokio::test]

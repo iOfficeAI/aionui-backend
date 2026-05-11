@@ -2,6 +2,7 @@ use std::path::Path;
 
 use tracing::warn;
 
+use crate::asset_paths::resolve_extension_asset_url;
 use crate::error::ExtensionError;
 use crate::template::resolve_env_map;
 use crate::types::{ExtAcpAdapter, ResolvedAcpAdapter};
@@ -13,14 +14,14 @@ use crate::types::{ExtAcpAdapter, ResolvedAcpAdapter};
 pub fn resolve_acp_adapter(
     adapter: &ExtAcpAdapter,
     extension_name: &str,
-    ext_dir: &Path,
+    _ext_dir: &Path,
 ) -> Result<ResolvedAcpAdapter, ExtensionError> {
     let resolved_env = resolve_env_map(&adapter.env, false)?;
 
     let avatar = adapter
         .avatar
         .as_ref()
-        .map(|a| ext_dir.join(a).to_string_lossy().into_owned());
+        .and_then(|a| resolve_extension_asset_url(extension_name, a));
 
     Ok(ResolvedAcpAdapter {
         extension_name: extension_name.to_owned(),
@@ -37,7 +38,7 @@ pub fn resolve_acp_adapter(
         connection_type: adapter.connection_type.clone(),
         endpoint: adapter.endpoint.clone(),
         models: adapter.models.clone(),
-        yolo_mode: adapter.yolo_mode,
+        yolo_mode: adapter.yolo_mode.clone(),
         health_check: adapter.health_check.clone(),
         api_key_fields: adapter.api_key_fields.clone(),
     })

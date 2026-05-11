@@ -1,10 +1,12 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-use aionui_ai_agent::agent_manager::{AgentManagerHandle, IAgentManager};
-use aionui_ai_agent::stream_event::{AgentStreamEvent, FinishEventData, TextEventData};
+use aionui_ai_agent::IWorkerTaskManager;
+use aionui_ai_agent::agent_task::{AgentInstance, IAgentTask, IMockAgent};
+use aionui_ai_agent::protocol::events::{AgentStreamEvent, FinishEventData, TextEventData};
 use aionui_ai_agent::types::{BuildTaskOptions, SendMessageData};
-use aionui_ai_agent::{CronCommandResult, CronCreateParams, CronUpdateParams, ICronService, IWorkerTaskManager};
+
+use crate::response_middleware::{CronCommandResult, CronCreateParams, CronUpdateParams, ICronService};
 use aionui_api_types::ConversationArtifactKind;
 use aionui_api_types::{
     CloneConversationRequest, CreateConversationRequest, ListConversationsQuery, SearchMessagesQuery,
@@ -1196,18 +1198,18 @@ impl MockAgent {
 }
 
 #[async_trait::async_trait]
-impl IAgentManager for MockAgent {
+impl IAgentTask for MockAgent {
     fn agent_type(&self) -> AgentType {
         AgentType::Acp
     }
-    fn status(&self) -> Option<ConversationStatus> {
-        None
+    fn conversation_id(&self) -> &str {
+        &self.conversation_id
     }
     fn workspace(&self) -> &str {
         self.workspace_override.as_deref().unwrap_or("/tmp/test")
     }
-    fn conversation_id(&self) -> &str {
-        &self.conversation_id
+    fn status(&self) -> Option<ConversationStatus> {
+        None
     }
     fn last_activity_at(&self) -> TimestampMs {
         0
@@ -1218,13 +1220,30 @@ impl IAgentManager for MockAgent {
     async fn send_message(&self, _data: SendMessageData) -> Result<(), AppError> {
         // Emit finish event so the relay task completes
         let _ = self.event_tx.send(AgentStreamEvent::Finish(
-            aionui_ai_agent::stream_event::FinishEventData::default(),
+            aionui_ai_agent::protocol::events::FinishEventData::default(),
         ));
         Ok(())
     }
-    async fn stop(&self) -> Result<(), AppError> {
+    async fn cancel(&self) -> Result<(), AppError> {
         *self.stopped.lock().unwrap() = true;
         Ok(())
+    }
+    fn kill(&self, _reason: Option<AgentKillReason>) -> Result<(), AppError> {
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl IMockAgent for MockAgent {
+    fn get_confirmations(&self) -> Vec<Confirmation> {
+        self.confirmations.lock().unwrap().clone()
+    }
+    fn check_approval(&self, action: &str, command_type: Option<&str>) -> bool {
+        let key = match command_type {
+            Some(ct) => format!("{action}:{ct}"),
+            None => action.to_owned(),
+        };
+        self.approval_memory.lock().unwrap().get(&key).copied().unwrap_or(false)
     }
     fn confirm(
         &self,
@@ -1251,28 +1270,12 @@ impl IAgentManager for MockAgent {
         confs.retain(|c| c.call_id != call_id);
         Ok(())
     }
-    fn get_confirmations(&self) -> Vec<Confirmation> {
-        self.confirmations.lock().unwrap().clone()
-    }
-    fn check_approval(&self, action: &str, command_type: Option<&str>) -> bool {
-        let key = match command_type {
-            Some(ct) => format!("{action}:{ct}"),
-            None => action.to_owned(),
-        };
-        self.approval_memory.lock().unwrap().get(&key).copied().unwrap_or(false)
-    }
-    fn kill(&self, _reason: Option<AgentKillReason>) -> Result<(), AppError> {
-        Ok(())
-    }
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
 }
 
 // ── Mock WorkerTaskManager ──────────────────────────────────────
 
 struct MockTaskManager {
-    agents: Mutex<std::collections::HashMap<String, AgentManagerHandle>>,
+    agents: Mutex<std::collections::HashMap<String, AgentInstance>>,
 }
 
 impl MockTaskManager {
@@ -1282,28 +1285,29 @@ impl MockTaskManager {
         }
     }
 
-    fn insert_agent(&self, conversation_id: &str, agent: AgentManagerHandle) {
+    fn insert_agent(&self, conversation_id: &str, agent: AgentInstance) {
         self.agents.lock().unwrap().insert(conversation_id.to_owned(), agent);
     }
 }
 
+#[async_trait::async_trait]
 impl IWorkerTaskManager for MockTaskManager {
-    fn get_task(&self, conversation_id: &str) -> Option<AgentManagerHandle> {
+    fn get_task(&self, conversation_id: &str) -> Option<AgentInstance> {
         self.agents.lock().unwrap().get(conversation_id).cloned()
     }
 
-    fn get_or_build_task(
+    async fn get_or_build_task(
         &self,
         conversation_id: &str,
         _options: BuildTaskOptions,
-    ) -> Result<AgentManagerHandle, AppError> {
+    ) -> Result<AgentInstance, AppError> {
         let mut agents = self.agents.lock().unwrap();
         if let Some(existing) = agents.get(conversation_id) {
             return Ok(existing.clone());
         }
-        let agent: AgentManagerHandle = Arc::new(MockAgent::new(conversation_id));
-        agents.insert(conversation_id.to_owned(), agent.clone());
-        Ok(agent)
+        let instance = AgentInstance::Mock(Arc::new(MockAgent::new(conversation_id)));
+        agents.insert(conversation_id.to_owned(), instance.clone());
+        Ok(instance)
     }
 
     fn kill(&self, conversation_id: &str, _reason: Option<AgentKillReason>) -> Result<(), AppError> {
@@ -1327,7 +1331,7 @@ impl IWorkerTaskManager for MockTaskManager {
 /// A variant of MockTaskManager that always builds agents with a specific workspace.
 struct MockTaskManagerWithWorkspace {
     workspace: String,
-    agents: Mutex<std::collections::HashMap<String, AgentManagerHandle>>,
+    agents: Mutex<std::collections::HashMap<String, AgentInstance>>,
 }
 
 impl MockTaskManagerWithWorkspace {
@@ -1339,16 +1343,17 @@ impl MockTaskManagerWithWorkspace {
     }
 }
 
+#[async_trait::async_trait]
 impl IWorkerTaskManager for MockTaskManagerWithWorkspace {
-    fn get_task(&self, conversation_id: &str) -> Option<AgentManagerHandle> {
+    fn get_task(&self, conversation_id: &str) -> Option<AgentInstance> {
         self.agents.lock().unwrap().get(conversation_id).cloned()
     }
 
-    fn get_or_build_task(
+    async fn get_or_build_task(
         &self,
         conversation_id: &str,
         _options: BuildTaskOptions,
-    ) -> Result<AgentManagerHandle, AppError> {
+    ) -> Result<AgentInstance, AppError> {
         let workspace = self.workspace.clone();
         let mut agents = self.agents.lock().unwrap();
         if let Some(existing) = agents.get(conversation_id) {
@@ -1356,9 +1361,9 @@ impl IWorkerTaskManager for MockTaskManagerWithWorkspace {
         }
         let mut agent = MockAgent::new(conversation_id);
         agent.workspace_override = Some(workspace);
-        let handle: AgentManagerHandle = Arc::new(agent);
-        agents.insert(conversation_id.to_owned(), handle.clone());
-        Ok(handle)
+        let instance = AgentInstance::Mock(Arc::new(agent));
+        agents.insert(conversation_id.to_owned(), instance.clone());
+        Ok(instance)
     }
 
     fn kill(&self, conversation_id: &str, _reason: Option<AgentKillReason>) -> Result<(), AppError> {
@@ -1403,21 +1408,21 @@ impl ScriptedAgent {
 }
 
 #[async_trait::async_trait]
-impl IAgentManager for ScriptedAgent {
+impl IAgentTask for ScriptedAgent {
     fn agent_type(&self) -> AgentType {
         AgentType::Acp
     }
 
-    fn status(&self) -> Option<ConversationStatus> {
-        Some(ConversationStatus::Finished)
+    fn conversation_id(&self) -> &str {
+        &self.conversation_id
     }
 
     fn workspace(&self) -> &str {
         "/tmp/test"
     }
 
-    fn conversation_id(&self) -> &str {
-        &self.conversation_id
+    fn status(&self) -> Option<ConversationStatus> {
+        Some(ConversationStatus::Finished)
     }
 
     fn last_activity_at(&self) -> TimestampMs {
@@ -1442,36 +1447,16 @@ impl IAgentManager for ScriptedAgent {
         Ok(())
     }
 
-    async fn stop(&self) -> Result<(), AppError> {
+    async fn cancel(&self) -> Result<(), AppError> {
         Ok(())
-    }
-
-    fn confirm(
-        &self,
-        _msg_id: &str,
-        _call_id: &str,
-        _data: serde_json::Value,
-        _always_allow: bool,
-    ) -> Result<(), AppError> {
-        Ok(())
-    }
-
-    fn get_confirmations(&self) -> Vec<Confirmation> {
-        vec![]
-    }
-
-    fn check_approval(&self, _action: &str, _command_type: Option<&str>) -> bool {
-        false
     }
 
     fn kill(&self, _reason: Option<AgentKillReason>) -> Result<(), AppError> {
         Ok(())
     }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
 }
+
+impl IMockAgent for ScriptedAgent {}
 
 struct MockCronContinuationService;
 
@@ -1515,8 +1500,7 @@ impl ICronService for MockCronContinuationService {
 
 fn make_send_req() -> SendMessageRequest {
     serde_json::from_value(json!({
-        "content": "Hello",
-        "msg_id": "msg-1"
+        "content": "Hello"
     }))
     .unwrap()
 }
@@ -1527,9 +1511,39 @@ async fn send_message_returns_accepted() {
     let task_mgr: Arc<dyn IWorkerTaskManager> = Arc::new(MockTaskManager::new());
 
     let conv = svc.create("user_1", make_create_req()).await.unwrap();
-    let result = svc.send_message("user_1", &conv.id, make_send_req(), &task_mgr).await;
+    let msg_id = svc
+        .send_message("user_1", &conv.id, make_send_req(), &task_mgr)
+        .await
+        .unwrap();
 
-    assert!(result.is_ok());
+    assert!(!msg_id.is_empty(), "msg_id must be non-empty");
+    assert_eq!(msg_id.len(), 8, "msg_id should be an 8-char short hex ID");
+}
+
+#[tokio::test]
+async fn send_message_broadcasts_user_created_event() {
+    let (svc, broadcaster, _repo, _task_mgr) = make_service();
+    let task_mgr: Arc<dyn IWorkerTaskManager> = Arc::new(MockTaskManager::new());
+
+    let conv = svc.create("user_1", make_create_req()).await.unwrap();
+    // Clear events from create
+    broadcaster.take_events();
+
+    let msg_id = svc
+        .send_message("user_1", &conv.id, make_send_req(), &task_mgr)
+        .await
+        .unwrap();
+
+    let events = broadcaster.take_events();
+    let user_created = events
+        .iter()
+        .find(|e| e.name == "message.userCreated")
+        .expect("should broadcast message.userCreated event");
+
+    assert_eq!(user_created.data["conversation_id"], conv.id);
+    assert_eq!(user_created.data["msg_id"], msg_id);
+    assert_eq!(user_created.data["content"], "Hello");
+    assert_eq!(user_created.data["position"], "right");
 }
 
 #[tokio::test]
@@ -1540,7 +1554,6 @@ async fn send_message_persists_hidden_user_message_when_requested() {
     let conv = svc.create("user_1", make_create_req()).await.unwrap();
     let req: SendMessageRequest = serde_json::from_value(json!({
         "content": "Hidden cron prompt",
-        "msg_id": "msg-hidden",
         "hidden": true
     }))
     .unwrap();
@@ -1548,11 +1561,14 @@ async fn send_message_persists_hidden_user_message_when_requested() {
     svc.send_message("user_1", &conv.id, req, &task_mgr).await.unwrap();
 
     let messages = repo.get_messages(&conv.id, 1, 20, SortOrder::Asc).await.unwrap().items;
+    // The user message is the only hidden text row written by the service.
     let user_message = messages
         .iter()
-        .find(|message| message.msg_id.as_deref() == Some("msg-hidden"))
-        .expect("hidden user message should be persisted");
+        .find(|message| message.r#type == "text" && message.position.as_deref() == Some("right"))
+        .expect("user message should be persisted");
     assert!(user_message.hidden);
+    // msg_id is server-generated and must be non-empty for frontend routing.
+    assert!(user_message.msg_id.as_deref().is_some_and(|s| !s.is_empty()));
 }
 
 #[tokio::test]
@@ -1562,8 +1578,7 @@ async fn send_message_empty_content_returns_bad_request() {
 
     let conv = svc.create("user_1", make_create_req()).await.unwrap();
     let req: SendMessageRequest = serde_json::from_value(json!({
-        "content": "",
-        "msg_id": "msg-1"
+        "content": ""
     }))
     .unwrap();
 
@@ -1578,8 +1593,7 @@ async fn send_message_whitespace_content_returns_bad_request() {
 
     let conv = svc.create("user_1", make_create_req()).await.unwrap();
     let req: SendMessageRequest = serde_json::from_value(json!({
-        "content": "   ",
-        "msg_id": "msg-1"
+        "content": "   "
     }))
     .unwrap();
 
@@ -1697,13 +1711,12 @@ async fn send_message_continues_cron_system_responses() {
             ],
         ],
     ));
-    task_mgr.insert_agent(&conv.id, scripted_agent.clone());
+    task_mgr.insert_agent(&conv.id, AgentInstance::Mock(scripted_agent.clone()));
     svc.set_cron_service(Some(Arc::new(MockCronContinuationService)));
 
     let task_mgr_dyn: Arc<dyn IWorkerTaskManager> = task_mgr.clone();
     let req: SendMessageRequest = serde_json::from_value(json!({
-        "content": "Create the task now",
-        "msg_id": "msg-1"
+        "content": "Create the task now"
     }))
     .unwrap();
 
@@ -1869,7 +1882,10 @@ async fn list_confirmations_returns_items() {
 
     let conv = svc.create("user_1", make_create_req()).await.unwrap();
 
-    let agent: AgentManagerHandle = Arc::new(MockAgent::with_confirmations(&conv.id, make_test_confirmations()));
+    let agent = AgentInstance::Mock(Arc::new(MockAgent::with_confirmations(
+        &conv.id,
+        make_test_confirmations(),
+    )));
     task_mgr.insert_agent(&conv.id, agent);
 
     let result = svc
@@ -1911,7 +1927,10 @@ async fn confirm_removes_confirmation_and_broadcasts() {
     let conv = svc.create("user_1", make_create_req()).await.unwrap();
     broadcaster.take_events(); // clear create event
 
-    let agent: AgentManagerHandle = Arc::new(MockAgent::with_confirmations(&conv.id, make_test_confirmations()));
+    let agent = AgentInstance::Mock(Arc::new(MockAgent::with_confirmations(
+        &conv.id,
+        make_test_confirmations(),
+    )));
     task_mgr.insert_agent(&conv.id, agent);
 
     let req = aionui_api_types::ConfirmRequest {
@@ -1949,7 +1968,10 @@ async fn confirm_with_always_allow_stores_approval() {
 
     let conv = svc.create("user_1", make_create_req()).await.unwrap();
 
-    let agent: AgentManagerHandle = Arc::new(MockAgent::with_confirmations(&conv.id, make_test_confirmations()));
+    let agent = AgentInstance::Mock(Arc::new(MockAgent::with_confirmations(
+        &conv.id,
+        make_test_confirmations(),
+    )));
     task_mgr.insert_agent(&conv.id, agent);
 
     let req = aionui_api_types::ConfirmRequest {
@@ -1975,7 +1997,10 @@ async fn confirm_nonexistent_call_id_returns_not_found() {
 
     let conv = svc.create("user_1", make_create_req()).await.unwrap();
 
-    let agent: AgentManagerHandle = Arc::new(MockAgent::with_confirmations(&conv.id, make_test_confirmations()));
+    let agent = AgentInstance::Mock(Arc::new(MockAgent::with_confirmations(
+        &conv.id,
+        make_test_confirmations(),
+    )));
     task_mgr.insert_agent(&conv.id, agent);
 
     let req = aionui_api_types::ConfirmRequest {
@@ -2004,7 +2029,7 @@ async fn confirm_without_confirmation_state_still_calls_agent() {
     let conv = svc.create("user_1", make_create_req()).await.unwrap();
     broadcaster.take_events();
 
-    let agent: AgentManagerHandle = Arc::new(MockAgent::with_direct_confirm(&conv.id));
+    let agent = AgentInstance::Mock(Arc::new(MockAgent::with_direct_confirm(&conv.id)));
     task_mgr.insert_agent(&conv.id, agent);
 
     let req = aionui_api_types::ConfirmRequest {
@@ -2051,7 +2076,7 @@ async fn check_approval_returns_false_when_not_set() {
 
     let conv = svc.create("user_1", make_create_req()).await.unwrap();
 
-    let agent: AgentManagerHandle = Arc::new(MockAgent::new(&conv.id));
+    let agent = AgentInstance::Mock(Arc::new(MockAgent::new(&conv.id)));
     task_mgr.insert_agent(&conv.id, agent);
 
     let result = svc
@@ -2074,7 +2099,10 @@ async fn check_approval_returns_true_after_always_allow() {
 
     let conv = svc.create("user_1", make_create_req()).await.unwrap();
 
-    let agent: AgentManagerHandle = Arc::new(MockAgent::with_confirmations(&conv.id, make_test_confirmations()));
+    let agent = AgentInstance::Mock(Arc::new(MockAgent::with_confirmations(
+        &conv.id,
+        make_test_confirmations(),
+    )));
     task_mgr.insert_agent(&conv.id, agent);
 
     // Confirm with always_allow

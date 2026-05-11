@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use crate::asset_paths::resolve_extension_asset_url;
 use crate::types::{ExtChannelPlugin, ResolvedChannelPlugin};
 
 /// Resolve a single channel plugin contribution.
@@ -15,6 +16,10 @@ pub fn resolve_channel_plugin(
         .entry_point
         .as_ref()
         .map(|ep| ext_dir.join(ep).to_string_lossy().into_owned());
+    let icon = plugin
+        .icon
+        .as_deref()
+        .and_then(|value| resolve_extension_asset_url(extension_name, value));
 
     ResolvedChannelPlugin {
         extension_name: extension_name.to_owned(),
@@ -23,6 +28,9 @@ pub fn resolve_channel_plugin(
         description: plugin.description.clone(),
         platform: plugin.platform.clone(),
         entry_point,
+        icon,
+        credential_fields: plugin.credential_fields.clone(),
+        config_fields: plugin.config_fields.clone(),
     }
 }
 
@@ -50,6 +58,9 @@ mod tests {
             description: Some("Slack integration".into()),
             platform: Some("slack".into()),
             entry_point: Some("plugins/slack.js".into()),
+            icon: None,
+            credential_fields: vec![],
+            config_fields: vec![],
         };
 
         let result = resolve_channel_plugin(&plugin, "my-ext", Path::new("/ext/my-ext"));
@@ -68,6 +79,9 @@ mod tests {
             description: None,
             platform: None,
             entry_point: None,
+            icon: None,
+            credential_fields: vec![],
+            config_fields: vec![],
         };
 
         let result = resolve_channel_plugin(&plugin, "my-ext", Path::new("/ext/my-ext"));

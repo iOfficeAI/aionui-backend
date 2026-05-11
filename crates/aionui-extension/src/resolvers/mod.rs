@@ -43,7 +43,7 @@ pub fn resolve_extension_contributions(ext: &LoadedExtension) -> ResolvedContrib
         themes: theme::resolve_themes(&contributes.themes, ext_name, ext_dir),
         channel_plugins: channel_plugin::resolve_channel_plugins(&contributes.channel_plugins, ext_name, ext_dir),
         webui: webui::resolve_webui_contributions(&contributes.webui, ext_name, ext_dir),
-        settings_tabs: settings_tab::resolve_settings_tabs(&contributes.settings_tabs, ext_name),
+        settings_tabs: settings_tab::resolve_settings_tabs(&contributes.settings_tabs, ext_name, ext_dir),
         model_providers: model_provider::resolve_model_providers(&contributes.model_providers, ext_name),
         // i18n is resolved separately via resolve_i18n_for_locale()
         // because it requires a locale parameter at query time.
@@ -66,6 +66,10 @@ pub fn resolve_all_contributions(extensions: &[LoadedExtension]) -> ResolvedCont
         let resolved = resolve_extension_contributions(ext);
         merge_contributions(&mut merged, resolved, &ext.manifest.name);
     }
+
+    merged
+        .settings_tabs
+        .sort_by(|left, right| left.order.cmp(&right.order).then_with(|| left.label.cmp(&right.label)));
 
     merged
 }
@@ -182,6 +186,10 @@ mod tests {
 
     #[test]
     fn test_resolve_all_skips_disabled() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join("skills")).unwrap();
+        std::fs::write(dir.path().join("skills/my-skill.md"), "# skill").unwrap();
+
         let enabled = make_extension(
             "enabled-ext",
             true,
@@ -189,11 +197,15 @@ mod tests {
                 skills: vec![ExtSkill {
                     name: "my-skill".into(),
                     description: None,
-                    path: None,
+                    path: Some("skills/my-skill.md".into()),
                 }],
                 ..Default::default()
             }),
         );
+        let enabled = LoadedExtension {
+            directory: dir.path().to_string_lossy().into_owned(),
+            ..enabled
+        };
         let disabled = make_extension(
             "disabled-ext",
             false,
@@ -201,11 +213,15 @@ mod tests {
                 skills: vec![ExtSkill {
                     name: "hidden-skill".into(),
                     description: None,
-                    path: None,
+                    path: Some("skills/hidden-skill.md".into()),
                 }],
                 ..Default::default()
             }),
         );
+        let disabled = LoadedExtension {
+            directory: dir.path().to_string_lossy().into_owned(),
+            ..disabled
+        };
 
         let result = resolve_all_contributions(&[enabled, disabled]);
         assert_eq!(result.skills.len(), 1);
@@ -250,5 +266,53 @@ mod tests {
         let result = resolve_all_contributions(&[]);
         assert!(result.acp_adapters.is_empty());
         assert!(result.i18n.is_empty());
+    }
+
+    #[test]
+    fn test_resolve_all_sorts_settings_tabs_globally() {
+        let ext_a = make_extension(
+            "ext-a",
+            true,
+            Some(ExtContributes {
+                settings_tabs: vec![ExtSettingsTab {
+                    id: "zeta".into(),
+                    label: "Zeta".into(),
+                    icon: None,
+                    url: "settings/zeta.html".into(),
+                    position: None,
+                    order: 100,
+                }],
+                ..Default::default()
+            }),
+        );
+        let ext_b = make_extension(
+            "ext-b",
+            true,
+            Some(ExtContributes {
+                settings_tabs: vec![
+                    ExtSettingsTab {
+                        id: "alpha".into(),
+                        label: "Alpha".into(),
+                        icon: None,
+                        url: "settings/alpha.html".into(),
+                        position: None,
+                        order: 50,
+                    },
+                    ExtSettingsTab {
+                        id: "beta".into(),
+                        label: "Beta".into(),
+                        icon: None,
+                        url: "settings/beta.html".into(),
+                        position: None,
+                        order: 100,
+                    },
+                ],
+                ..Default::default()
+            }),
+        );
+
+        let result = resolve_all_contributions(&[ext_a, ext_b]);
+        let ids: Vec<&str> = result.settings_tabs.iter().map(|tab| tab.id.as_str()).collect();
+        assert_eq!(ids, vec!["ext-ext-b-alpha", "ext-ext-b-beta", "ext-ext-a-zeta"]);
     }
 }

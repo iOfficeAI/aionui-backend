@@ -193,7 +193,45 @@ impl AssistantService {
     pub async fn update(&self, id: &str, req: UpdateAssistantRequest) -> Result<AssistantResponse, AppError> {
         match self.classify_source(id).await {
             AssistantSource::Builtin => {
-                return Err(AppError::Forbidden("Cannot modify built-in assistant".into()));
+                // Built-in rows are sourced from the embedded bundle and can't
+                // be mutated. Users may still override `preset_agent_type` —
+                // that lives in the overrides table. Any other field on the
+                // request is rejected so callers don't silently lose data.
+                if req.name.is_some()
+                    || req.description.is_some()
+                    || req.avatar.is_some()
+                    || req.enabled_skills.is_some()
+                    || req.custom_skill_names.is_some()
+                    || req.disabled_builtin_skills.is_some()
+                    || req.prompts.is_some()
+                    || req.models.is_some()
+                    || req.name_i18n.is_some()
+                    || req.description_i18n.is_some()
+                    || req.prompts_i18n.is_some()
+                {
+                    return Err(AppError::Forbidden(
+                        "Only 'preset_agent_type' can be overridden on built-in assistants".into(),
+                    ));
+                }
+
+                let preset_agent_type = req.preset_agent_type.as_deref().ok_or_else(|| {
+                    AppError::BadRequest("'preset_agent_type' is required when updating a built-in assistant".into())
+                })?;
+
+                let existing = self.override_repo.get(id).await?;
+                let enabled = existing.as_ref().is_none_or(|o| o.enabled);
+                let sort_order = existing.as_ref().map(|o| o.sort_order).unwrap_or(0);
+                let last_used_at = existing.as_ref().and_then(|o| o.last_used_at);
+
+                let params = UpsertOverrideParams {
+                    assistant_id: id,
+                    enabled,
+                    sort_order,
+                    last_used_at,
+                    preset_agent_type: Some(Some(preset_agent_type)),
+                };
+                self.override_repo.upsert(&params).await?;
+                return self.get(id).await;
             }
             AssistantSource::Extension => {
                 return Err(AppError::Forbidden(
@@ -289,6 +327,7 @@ impl AssistantService {
             enabled,
             sort_order,
             last_used_at,
+            preset_agent_type: None,
         };
         self.override_repo.upsert(&params).await?;
 
@@ -625,7 +664,9 @@ fn builtin_to_response(b: &BuiltinAssistant, ov: Option<&AssistantOverrideRow>) 
         avatar: b.avatar.clone(),
         enabled: ov.map(|o| o.enabled).unwrap_or(true),
         sort_order: ov.map(|o| o.sort_order).unwrap_or(0),
-        preset_agent_type: b.preset_agent_type.clone(),
+        preset_agent_type: ov
+            .and_then(|o| o.preset_agent_type.clone())
+            .unwrap_or_else(|| b.preset_agent_type.clone()),
         enabled_skills: b.enabled_skills.clone(),
         custom_skill_names: b.custom_skill_names.clone(),
         disabled_builtin_skills: b.disabled_builtin_skills.clone(),
@@ -1030,7 +1071,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn update_rejects_builtin() {
+    async fn update_rejects_builtin_non_preset_fields() {
         let fx = fixture_with_builtins(vec![mk_builtin("builtin-office", "Office")]).await;
         let err = fx
             .service
@@ -1044,6 +1085,34 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, AppError::Forbidden(_)));
+    }
+
+    #[tokio::test]
+    async fn update_builtin_preset_agent_type_writes_override() {
+        let fx = fixture_with_builtins(vec![mk_builtin("builtin-office", "Office")]).await;
+        let updated = fx
+            .service
+            .update(
+                "builtin-office",
+                UpdateAssistantRequest {
+                    preset_agent_type: Some("claude".into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(updated.source, AssistantSource::Builtin);
+        assert_eq!(updated.preset_agent_type, "claude");
+        // List view must reflect the override too.
+        let listed = fx
+            .service
+            .list()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|a| a.id == "builtin-office")
+            .unwrap();
+        assert_eq!(listed.preset_agent_type, "claude");
     }
 
     #[tokio::test]

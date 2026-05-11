@@ -1,5 +1,9 @@
 use std::path::Path;
+use std::sync::Arc;
 
+use aionui_api_types::WebSocketMessage;
+use aionui_realtime::EventBroadcaster;
+use serde_json::json;
 use tracing::{debug, info, warn};
 
 use crate::constants::EXTENSION_MANIFEST_FILE;
@@ -59,13 +63,16 @@ pub struct HubUpdateInfo {
 pub struct HubInstaller {
     index_manager: HubIndexManager,
     registry: ExtensionRegistry,
+    broadcaster: Arc<dyn EventBroadcaster>,
 }
 
 impl HubInstaller {
     pub fn new(index_manager: HubIndexManager, registry: ExtensionRegistry) -> Self {
+        let broadcaster = registry.event_broadcaster();
         Self {
             index_manager,
             registry,
+            broadcaster,
         }
     }
 
@@ -75,10 +82,15 @@ impl HubInstaller {
     /// validate manifest → verify contributions → trigger hot reload.
     pub async fn install(&self, name: &str) -> HubResult {
         info!(name, "hub: installing extension");
+        self.broadcast_state_changed(name, "installing", None);
 
         let entry = match self.index_manager.get_extension(name) {
             Some(e) => e,
-            None => return HubResult::err(format!("Extension '{name}' not found in hub index")),
+            None => {
+                let error = format!("Extension '{name}' not found in hub index");
+                self.broadcast_state_changed(name, "failed", Some(error.clone()));
+                return HubResult::err(error);
+            }
         };
 
         let target_dir = self.index_manager.install_target_dir();
@@ -87,18 +99,23 @@ impl HubInstaller {
         // For now, the extension directory must already exist (no remote download).
         // Future: download from entry.download_url and extract.
         if !ext_dir.exists() {
-            return HubResult::err(format!(
+            let error = format!(
                 "Extension directory not found: {}. Remote download not yet implemented.",
                 ext_dir.display()
-            ));
+            );
+            self.broadcast_state_changed(name, "failed", Some(error.clone()));
+            return HubResult::err(error);
         }
 
         if let Err(e) = self.verify_installation(&ext_dir) {
-            return HubResult::err(format!("Installation verification failed: {e}"));
+            let error = format!("Installation verification failed: {e}");
+            self.broadcast_state_changed(name, "failed", Some(error.clone()));
+            return HubResult::err(error);
         }
 
         // Trigger hot reload to pick up the new extension.
         self.registry.hot_reload().await;
+        self.broadcast_state_changed(name, "installed", None);
 
         info!(name, "hub: extension installed successfully");
         HubResult::ok()
@@ -116,24 +133,34 @@ impl HubInstaller {
     /// directory (which may have been updated externally) and hot-reloading.
     pub async fn update(&self, name: &str) -> HubResult {
         info!(name, "hub: updating extension");
+        self.broadcast_state_changed(name, "updating", None);
 
         let entry = match self.index_manager.get_extension(name) {
             Some(e) => e,
-            None => return HubResult::err(format!("Extension '{name}' not found in hub index")),
+            None => {
+                let error = format!("Extension '{name}' not found in hub index");
+                self.broadcast_state_changed(name, "failed", Some(error.clone()));
+                return HubResult::err(error);
+            }
         };
 
         let target_dir = self.index_manager.install_target_dir();
         let ext_dir = target_dir.join(&entry.name);
 
         if !ext_dir.exists() {
-            return HubResult::err(format!("Extension not installed: {}", ext_dir.display()));
+            let error = format!("Extension not installed: {}", ext_dir.display());
+            self.broadcast_state_changed(name, "failed", Some(error.clone()));
+            return HubResult::err(error);
         }
 
         if let Err(e) = self.verify_installation(&ext_dir) {
-            return HubResult::err(format!("Update verification failed: {e}"));
+            let error = format!("Update verification failed: {e}");
+            self.broadcast_state_changed(name, "failed", Some(error.clone()));
+            return HubResult::err(error);
         }
 
         self.registry.hot_reload().await;
+        self.broadcast_state_changed(name, "installed", None);
 
         info!(name, "hub: extension updated successfully");
         HubResult::ok()
@@ -142,6 +169,7 @@ impl HubInstaller {
     /// Uninstall an extension by removing its directory and hot-reloading.
     pub async fn uninstall(&self, name: &str) -> HubResult {
         if let Err(msg) = validate_hub_name(name) {
+            self.broadcast_state_changed(name, "failed", Some(msg.clone()));
             return HubResult::err(msg);
         }
 
@@ -151,7 +179,9 @@ impl HubInstaller {
         let ext_dir = target_dir.join(name);
 
         if !ext_dir.exists() {
-            return HubResult::err(format!("Extension '{name}' is not installed"));
+            let error = format!("Extension '{name}' is not installed");
+            self.broadcast_state_changed(name, "failed", Some(error.clone()));
+            return HubResult::err(error);
         }
 
         if let Err(e) = std::fs::remove_dir_all(&ext_dir) {
@@ -160,10 +190,13 @@ impl HubInstaller {
                 error = %e,
                 "hub: failed to remove extension directory"
             );
-            return HubResult::err(format!("Failed to remove extension directory: {e}"));
+            let error = format!("Failed to remove extension directory: {e}");
+            self.broadcast_state_changed(name, "failed", Some(error.clone()));
+            return HubResult::err(error);
         }
 
         self.registry.hot_reload().await;
+        self.broadcast_state_changed(name, "uninstalled", None);
 
         info!(name, "hub: extension uninstalled successfully");
         HubResult::ok()
@@ -237,6 +270,17 @@ impl HubInstaller {
         );
         Ok(())
     }
+
+    fn broadcast_state_changed(&self, name: &str, status: &str, error: Option<String>) {
+        self.broadcaster.broadcast(WebSocketMessage::new(
+            "hub.state-changed",
+            json!({
+                "name": name,
+                "status": status,
+                "error": error,
+            }),
+        ));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -269,6 +313,7 @@ fn is_newer(index_version: &str, installed_version: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aionui_realtime::BroadcastEventBus;
 
     #[test]
     fn hub_result_ok() {
@@ -387,8 +432,6 @@ mod tests {
 
     fn make_test_registry() -> ExtensionRegistry {
         use crate::state::ExtensionStateStore;
-        use aionui_realtime::BroadcastEventBus;
-        use std::sync::Arc;
 
         let tmp = tempfile::TempDir::new().unwrap();
         let store = ExtensionStateStore::new(tmp.path().join("states.json"));
@@ -396,5 +439,28 @@ mod tests {
         // Leak the TempDir so it lives long enough for the test.
         std::mem::forget(tmp);
         ExtensionRegistry::new(store, bus, "1.0.0".into())
+    }
+
+    #[tokio::test]
+    async fn install_broadcasts_installing_then_failed_for_missing_index_entry() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let store = crate::state::ExtensionStateStore::new(tmp.path().join("states.json"));
+        let bus = Arc::new(BroadcastEventBus::new(64));
+        let registry = ExtensionRegistry::new(store, bus.clone(), "1.0.0".into());
+        let index_mgr = HubIndexManager::new(tmp.path().to_path_buf(), registry.clone());
+        let installer = HubInstaller::new(index_mgr, registry);
+        let mut rx = bus.subscribe();
+
+        let result = installer.install("missing-ext").await;
+
+        assert!(!result.success);
+        let first = rx.recv().await.unwrap();
+        assert_eq!(first.name, "hub.state-changed");
+        assert_eq!(first.data["name"], "missing-ext");
+        assert_eq!(first.data["status"], "installing");
+
+        let second = rx.recv().await.unwrap();
+        assert_eq!(second.name, "hub.state-changed");
+        assert_eq!(second.data["status"], "failed");
     }
 }

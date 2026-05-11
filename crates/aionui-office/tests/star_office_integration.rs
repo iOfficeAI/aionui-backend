@@ -75,7 +75,7 @@ async fn so1_no_service_returns_none() {
     let detector = StarOfficeDetector::new(reqwest::Client::new());
     let port = allocate_port();
     let url = format!("http://localhost:{port}");
-    let result = detector.detect(Some(&url), true, Some(50)).await;
+    let result = detector.detect_exact(Some(&url), true, Some(50)).await;
     assert!(result.is_none());
 }
 
@@ -86,7 +86,9 @@ async fn so1_no_service_returns_none() {
 #[tokio::test]
 async fn so2_preferred_url_no_service() {
     let detector = StarOfficeDetector::new(reqwest::Client::new());
-    let result = detector.detect(Some("http://localhost:59990"), true, Some(50)).await;
+    let result = detector
+        .detect_exact(Some("http://localhost:59990"), true, Some(50))
+        .await;
     assert!(result.is_none());
 }
 
@@ -100,10 +102,10 @@ async fn so3_cache_hit_returns_cached() {
     let url = format!("http://localhost:{port}");
     let detector = Arc::new(StarOfficeDetector::new(reqwest::Client::new()));
 
-    let _ = detector.detect(Some(&url), false, Some(50)).await;
+    let _ = detector.detect_exact(Some(&url), false, Some(50)).await;
 
     let t0 = tokio::time::Instant::now();
-    let result = detector.detect(Some(&url), false, Some(50)).await;
+    let result = detector.detect_exact(Some(&url), false, Some(50)).await;
     let elapsed = t0.elapsed();
 
     assert!(result.is_none());
@@ -123,8 +125,8 @@ async fn so4_force_bypasses_cache() {
     let url = format!("http://localhost:{port}");
     let detector = StarOfficeDetector::new(reqwest::Client::new());
 
-    let _ = detector.detect(Some(&url), false, Some(50)).await;
-    let result = detector.detect(Some(&url), true, Some(50)).await;
+    let _ = detector.detect_exact(Some(&url), false, Some(50)).await;
+    let result = detector.detect_exact(Some(&url), true, Some(50)).await;
 
     assert!(result.is_none());
 }
@@ -146,7 +148,7 @@ async fn so5_detect_available_service() {
 
     let detector = StarOfficeDetector::new(reqwest::Client::new());
     let url = format!("http://localhost:{port}");
-    let result = detector.detect(Some(&url), true, Some(2000)).await;
+    let result = detector.detect_exact(Some(&url), true, Some(2000)).await;
 
     assert_eq!(result, Some(format!("http://localhost:{port}")));
 
@@ -170,7 +172,7 @@ async fn so6_exclude_openclaw() {
 
     let detector = StarOfficeDetector::new(reqwest::Client::new());
     let url = format!("http://localhost:{port}");
-    let result = detector.detect(Some(&url), true, Some(2000)).await;
+    let result = detector.detect_exact(Some(&url), true, Some(2000)).await;
 
     assert!(result.is_none());
 
@@ -194,7 +196,7 @@ async fn health_step1_fail_returns_none() {
 
     let detector = StarOfficeDetector::new(reqwest::Client::new());
     let url = format!("http://localhost:{port}");
-    let result = detector.detect(Some(&url), true, Some(2000)).await;
+    let result = detector.detect_exact(Some(&url), true, Some(2000)).await;
 
     assert!(result.is_none());
 
@@ -218,7 +220,7 @@ async fn health_step2_no_status_markers() {
 
     let detector = StarOfficeDetector::new(reqwest::Client::new());
     let url = format!("http://localhost:{port}");
-    let result = detector.detect(Some(&url), true, Some(2000)).await;
+    let result = detector.detect_exact(Some(&url), true, Some(2000)).await;
 
     assert!(result.is_none());
 
@@ -242,7 +244,7 @@ async fn health_step3_no_feature_keywords() {
 
     let detector = StarOfficeDetector::new(reqwest::Client::new());
     let url = format!("http://localhost:{port}");
-    let result = detector.detect(Some(&url), true, Some(2000)).await;
+    let result = detector.detect_exact(Some(&url), true, Some(2000)).await;
 
     assert!(result.is_none());
 
@@ -266,7 +268,7 @@ async fn detect_with_writing_status() {
 
     let detector = StarOfficeDetector::new(reqwest::Client::new());
     let url = format!("http://localhost:{port}");
-    let result = detector.detect(Some(&url), true, Some(2000)).await;
+    let result = detector.detect_exact(Some(&url), true, Some(2000)).await;
 
     assert_eq!(result, Some(format!("http://localhost:{port}")));
 
@@ -285,12 +287,12 @@ async fn cache_stores_hit_after_success() {
 
     let detector = StarOfficeDetector::new(reqwest::Client::new());
     let url = format!("http://localhost:{port}");
-    let result = detector.detect(Some(&url), true, Some(2000)).await;
+    let result = detector.detect_exact(Some(&url), true, Some(2000)).await;
     assert!(result.is_some());
 
     handle.abort();
 
-    let cached = detector.detect(Some(&url), false, Some(50)).await;
+    let cached = detector.detect_exact(Some(&url), false, Some(50)).await;
     assert_eq!(cached, result);
 }
 
@@ -304,7 +306,7 @@ async fn cache_miss_ttl_expires() {
     let port = allocate_port();
     let url = format!("http://localhost:{port}");
 
-    let _ = detector.detect(Some(&url), false, Some(50)).await;
+    let _ = detector.detect_exact(Some(&url), false, Some(50)).await;
 
     tokio::time::sleep(std::time::Duration::from_millis(1600)).await;
 
@@ -312,7 +314,7 @@ async fn cache_miss_ttl_expires() {
     let handle = mock_star_office_server(port2, true, "idle", "<html><body>star office</body></html>").await;
 
     let url2 = format!("http://localhost:{port2}");
-    let result = detector.detect(Some(&url2), false, Some(2000)).await;
+    let result = detector.detect_exact(Some(&url2), false, Some(2000)).await;
     assert_eq!(result, Some(format!("http://localhost:{port2}")));
 
     handle.abort();

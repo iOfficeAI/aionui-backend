@@ -38,16 +38,23 @@ pub struct CloneConversationRequest {
 }
 
 /// Body for `POST /api/conversations/:id/messages`.
+///
+/// `msg_id` is server-generated — clients must not provide one.
 #[derive(Debug, Deserialize)]
 pub struct SendMessageRequest {
     pub content: String,
-    pub msg_id: String,
     #[serde(default)]
     pub files: Vec<String>,
     #[serde(default)]
     pub inject_skills: Vec<String>,
     #[serde(default)]
     pub hidden: bool,
+}
+
+/// Response for `POST /api/conversations/:id/messages`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SendMessageResponse {
+    pub msg_id: String,
 }
 
 // ── Query types ────────────────────────────────────────────────────
@@ -161,11 +168,10 @@ pub type ConversationArtifactListResponse = Vec<ConversationArtifactResponse>;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessageSearchItem {
     pub message_id: String,
-    pub conversation_id: String,
-    pub conversation_name: String,
-    pub r#type: String,
-    pub content: String,
-    pub created_at: TimestampMs,
+    pub message_type: String,
+    pub message_created_at: TimestampMs,
+    pub preview_text: String,
+    pub conversation: ConversationResponse,
 }
 
 /// Paginated search results for messages.
@@ -512,40 +518,65 @@ mod tests {
     fn serialize_search_item_snake_case() {
         let item = MessageSearchItem {
             message_id: "msg_1".into(),
-            conversation_id: "conv_1".into(),
-            conversation_name: "Code Review".into(),
-            r#type: "text".into(),
-            content: "matched snippet".into(),
-            created_at: 1712345678000,
+            message_type: "text".into(),
+            message_created_at: 1712345678000,
+            preview_text: "matched snippet".into(),
+            conversation: ConversationResponse {
+                id: "conv_1".into(),
+                name: "Code Review".into(),
+                r#type: AgentType::Acp,
+                model: None,
+                status: ConversationStatus::Finished,
+                source: None,
+                pinned: false,
+                pinned_at: None,
+                channel_chat_id: None,
+                created_at: 1712345678000,
+                modified_at: 1712345678000,
+                extra: json!({}),
+            },
         };
         let json = serde_json::to_value(&item).unwrap();
         assert_eq!(json["message_id"], "msg_1");
-        assert_eq!(json["conversation_id"], "conv_1");
-        assert_eq!(json["conversation_name"], "Code Review");
-        assert_eq!(json["type"], "text");
-        assert_eq!(json["content"], "matched snippet");
-        assert_eq!(json["created_at"], 1712345678000_i64);
+        assert_eq!(json["message_type"], "text");
+        assert_eq!(json["message_created_at"], 1712345678000_i64);
+        assert_eq!(json["preview_text"], "matched snippet");
+        assert_eq!(json["conversation"]["id"], "conv_1");
+        assert_eq!(json["conversation"]["name"], "Code Review");
         // Verify no camelCase leaks
         assert!(json.get("messageId").is_none());
-        assert!(json.get("conversationId").is_none());
-        assert!(json.get("conversationName").is_none());
-        assert!(json.get("createdAt").is_none());
+        assert!(json.get("messageType").is_none());
+        assert!(json.get("previewText").is_none());
     }
 
     #[test]
     fn search_item_roundtrip() {
         let item = MessageSearchItem {
             message_id: "msg_x".into(),
-            conversation_id: "conv_x".into(),
-            conversation_name: "Search Test".into(),
-            r#type: "tips".into(),
-            content: "some content".into(),
-            created_at: 9000,
+            message_type: "tips".into(),
+            message_created_at: 9000,
+            preview_text: "some content preview".into(),
+            conversation: ConversationResponse {
+                id: "conv_x".into(),
+                name: "Search Test".into(),
+                r#type: AgentType::Acp,
+                model: None,
+                status: ConversationStatus::Finished,
+                source: None,
+                pinned: false,
+                pinned_at: None,
+                channel_chat_id: None,
+                created_at: 9000,
+                modified_at: 9000,
+                extra: json!({}),
+            },
         };
         let serialized = serde_json::to_string(&item).unwrap();
         let deserialized: MessageSearchItem = serde_json::from_str(&serialized).unwrap();
         assert_eq!(deserialized.message_id, "msg_x");
-        assert_eq!(deserialized.conversation_name, "Search Test");
+        assert_eq!(deserialized.message_type, "tips");
+        assert_eq!(deserialized.preview_text, "some content preview");
+        assert_eq!(deserialized.conversation.name, "Search Test");
     }
 
     // ── SendMessageRequest ──────────────────────────────────────────
@@ -554,14 +585,12 @@ mod tests {
     fn deserialize_send_message_full() {
         let raw = json!({
             "content": "Review this code",
-            "msg_id": "msg-001",
             "files": ["/tmp/a.rs"],
             "inject_skills": ["security-review"],
             "hidden": true
         });
         let req: SendMessageRequest = serde_json::from_value(raw).unwrap();
         assert_eq!(req.content, "Review this code");
-        assert_eq!(req.msg_id, "msg-001");
         assert_eq!(req.files, vec!["/tmp/a.rs"]);
         assert_eq!(req.inject_skills, vec!["security-review"]);
         assert!(req.hidden);
@@ -569,10 +598,9 @@ mod tests {
 
     #[test]
     fn deserialize_send_message_minimal() {
-        let raw = json!({ "content": "Hi", "msg_id": "m1" });
+        let raw = json!({ "content": "Hi" });
         let req: SendMessageRequest = serde_json::from_value(raw).unwrap();
         assert_eq!(req.content, "Hi");
-        assert_eq!(req.msg_id, "m1");
         assert!(req.files.is_empty());
         assert!(req.inject_skills.is_empty());
         assert!(!req.hidden);
@@ -580,14 +608,16 @@ mod tests {
 
     #[test]
     fn deserialize_send_message_missing_content() {
-        let raw = json!({ "msg_id": "m1" });
+        let raw = json!({});
         assert!(serde_json::from_value::<SendMessageRequest>(raw).is_err());
     }
 
     #[test]
-    fn deserialize_send_message_missing_msg_id() {
-        let raw = json!({ "content": "Hello" });
-        assert!(serde_json::from_value::<SendMessageRequest>(raw).is_err());
+    fn deserialize_send_message_ignores_client_msg_id() {
+        // Clients may still send msg_id from stale builds — it must be ignored.
+        let raw = json!({ "content": "Hi", "msg_id": "client-supplied" });
+        let req: SendMessageRequest = serde_json::from_value(raw).unwrap();
+        assert_eq!(req.content, "Hi");
     }
 
     // ── Paginated type aliases ──────────────────────────────────────
@@ -635,17 +665,31 @@ mod tests {
         let resp: MessageSearchResponse = PaginatedResult {
             items: vec![MessageSearchItem {
                 message_id: "m1".into(),
-                conversation_id: "c1".into(),
-                conversation_name: "Conv".into(),
-                r#type: "text".into(),
-                content: "matched".into(),
-                created_at: 5000,
+                message_type: "text".into(),
+                message_created_at: 5000,
+                preview_text: "matched".into(),
+                conversation: ConversationResponse {
+                    id: "c1".into(),
+                    name: "Conv".into(),
+                    r#type: AgentType::Acp,
+                    model: None,
+                    status: ConversationStatus::Finished,
+                    source: None,
+                    pinned: false,
+                    pinned_at: None,
+                    channel_chat_id: None,
+                    created_at: 5000,
+                    modified_at: 5000,
+                    extra: json!({}),
+                },
             }],
             total: 1,
             has_more: false,
         };
         let json = serde_json::to_value(&resp).unwrap();
         assert_eq!(json["items"][0]["message_id"], "m1");
+        assert_eq!(json["items"][0]["conversation"]["id"], "c1");
+        assert_eq!(json["items"][0]["preview_text"], "matched");
         assert_eq!(json["total"], 1);
     }
 

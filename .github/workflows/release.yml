@@ -1,0 +1,188 @@
+name: Release
+
+on:
+  workflow_call:
+    inputs:
+      tag_name:
+        description: "Release tag to build and publish (e.g., v0.2.0)"
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release tag to build and publish (e.g., v0.2.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  BINARY_NAME: aionui-backend
+  CARGO_TERM_COLOR: always
+  CARGO_HTTP_TIMEOUT: "600"
+  CARGO_NET_RETRY: "10"
+  AIONUI_EMBED_BUN: "1"
+  BUN_VARIANT: default
+
+jobs:
+  prepare-release:
+    name: Prepare Release Metadata
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: refs/tags/${{ inputs.tag_name }}
+
+      - name: Extract version from tag
+        id: metadata
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.tag_name }}
+        run: |
+          version="${RELEASE_TAG#v}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    needs: prepare-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x86_64: build natively on ubuntu-22.04 (GLIBC 2.35) so the
+          # release binary runs on Debian 12 / Ubuntu 22.04+ / RHEL 9 /
+          # CentOS Stream 9. We cannot use `cross` here because the default
+          # cross docker image ships a gcc that aws-lc-sys's memcmp safety
+          # check rejects. Pinning the runner is simpler and covers the
+          # target audience — Debian 11 (GLIBC 2.31) is entering ELTS so we
+          # deliberately drop it.
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            binary_name: aionui-backend
+          # Linux aarch64: keep `cross` (its image happens to not trip the
+          # aws-lc-sys check and also yields an older GLIBC baseline).
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            binary_name: aionui-backend
+            use_cross: true
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            binary_name: aionui-backend
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            binary_name: aionui-backend
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary_name: aionui-backend.exe
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+            binary_name: aionui-backend.exe
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: refs/tags/${{ inputs.tag_name }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.95.0"
+          targets: ${{ matrix.target }}
+
+      - name: Fix MSVC linker (remove Git's link.exe)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Remove-Item 'C:\Program Files\Git\usr\bin\link.exe' -Force -ErrorAction SilentlyContinue
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          # Include runner OS image and use_cross flag in the cache key.
+          # Proc-macro .so files link against the host GLIBC, so switching
+          # the runner (ubuntu-24.04 ↔ 22.04) or flipping native ↔ cross
+          # must fall into a different cache bucket — otherwise the cached
+          # .so is loaded against an incompatible GLIBC and cargo panics
+          # with "can't find crate" / "GLIBC_* not found" errors.
+          shared-key: release-${{ matrix.target }}-${{ matrix.os }}${{ matrix.use_cross == true && '-cross' || '' }}
+
+      - name: Install cross (Linux targets)
+        if: matrix.use_cross == true
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build release binary
+        shell: bash
+        run: |
+          if [[ "${{ matrix.use_cross }}" == "true" ]]; then
+            cross build --release --target ${{ matrix.target }} -p aionui-app
+          else
+            cargo build --release --target ${{ matrix.target }} -p aionui-app
+          fi
+
+      - name: Package binary (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare-release.outputs.version }}
+        run: |
+          mkdir -p dist
+          ARCHIVE="aionui-backend-v${VERSION}-${{ matrix.target }}.tar.gz"
+          tar -C target/${{ matrix.target }}/release -czf "dist/${ARCHIVE}" ${{ matrix.binary_name }}
+          echo "ARCHIVE=${ARCHIVE}" >> "$GITHUB_ENV"
+
+      - name: Package binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.prepare-release.outputs.version }}
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $archive = "aionui-backend-v${env:VERSION}-${{ matrix.target }}.zip"
+          Compress-Archive -Path "target/${{ matrix.target }}/release/${{ matrix.binary_name }}" -DestinationPath "dist/${archive}" -Force
+          "ARCHIVE=${archive}" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.target }}
+          path: dist/${{ env.ARCHIVE }}
+          if-no-files-found: error
+
+  github-release:
+    name: Upload GitHub Release assets
+    runs-on: ubuntu-latest
+    needs:
+      - prepare-release
+      - build
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          cd artifacts
+          sha256sum aionui-backend-* > aionui-backend-checksums.txt
+
+      - name: Upload release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          release_url="https://github.com/${REPOSITORY}/releases/tag/${RELEASE_TAG}"
+          if gh release view "${RELEASE_TAG}" --repo "${REPOSITORY}" > /dev/null 2>&1; then
+            gh release upload "${RELEASE_TAG}" artifacts/* --repo "${REPOSITORY}" --clobber
+          else
+            gh release create "${RELEASE_TAG}" artifacts/* \
+              --repo "${REPOSITORY}" \
+              --title "${RELEASE_TAG}" \
+              --generate-notes
+          fi
+          echo "Uploaded assets to ${release_url}"

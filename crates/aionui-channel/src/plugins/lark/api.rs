@@ -9,10 +9,12 @@ use crate::error::ChannelError;
 
 use super::types::{
     BotInfoData, BotInfoResponse, GenericResponse, SendCardRequest, SendMessageData, SendMessageResponse,
-    TenantAccessTokenRequest, TenantAccessTokenResponse, UpdateCardRequest, WsEndpointData, WsEndpointResponse,
+    TenantAccessTokenRequest, TenantAccessTokenResponse, UpdateCardRequest, WsEndpointData, WsEndpointRequest,
+    WsEndpointResponse,
 };
 
 const LARK_OPEN_API_BASE: &str = "https://open.feishu.cn/open-apis";
+const LARK_BASE: &str = "https://open.feishu.cn";
 
 /// Token refresh margin — refresh 5 minutes before expiry.
 const TOKEN_REFRESH_MARGIN: Duration = Duration::from_secs(5 * 60);
@@ -140,19 +142,35 @@ impl LarkApi {
     }
 
     /// Get the WebSocket endpoint URL for long connection.
+    ///
+    /// Note: This endpoint uses AppID/AppSecret in the request body for auth,
+    /// NOT the Bearer token used by other Lark APIs.
     pub async fn get_ws_endpoint(&self) -> Result<WsEndpointData, ChannelError> {
-        let token = self.get_token().await?;
-        let url = format!("{LARK_OPEN_API_BASE}/callback/ws/endpoint");
+        let url = format!("{LARK_BASE}/callback/ws/endpoint");
 
-        let resp: WsEndpointResponse = self
+        let body = WsEndpointRequest {
+            app_id: self.app_id.clone(),
+            app_secret: self.app_secret.clone(),
+        };
+
+        let raw_resp = self
             .client
             .post(&url)
-            .header("Authorization", format!("Bearer {token}"))
+            .header("locale", "zh")
+            .json(&body)
             .send()
             .await
-            .map_err(|e| ChannelError::ConnectionFailed(format!("Lark WS endpoint request failed: {e}")))?
-            .json()
+            .map_err(|e| ChannelError::ConnectionFailed(format!("Lark WS endpoint request failed: {e}")))?;
+
+        let status = raw_resp.status();
+        let body_text = raw_resp
+            .text()
             .await
+            .map_err(|e| ChannelError::ConnectionFailed(format!("Lark WS endpoint read body failed: {e}")))?;
+
+        debug!(status = %status, body_len = body_text.len(), "Lark WS endpoint response received");
+
+        let resp: WsEndpointResponse = serde_json::from_str(&body_text)
             .map_err(|e| ChannelError::ConnectionFailed(format!("Lark WS endpoint parse failed: {e}")))?;
 
         if resp.code != 0 {

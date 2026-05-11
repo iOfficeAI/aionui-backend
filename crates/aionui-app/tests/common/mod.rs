@@ -7,6 +7,7 @@ use http_body_util::BodyExt;
 use tower::ServiceExt;
 use wiremock::MockServer;
 
+use aionui_ai_agent::{AgentInstance, IAgentTask, IMockAgent, WorkerTaskManagerImpl};
 use aionui_app::{AppServices, build_module_states, create_router, create_router_with_states};
 use aionui_extension::{ExternalPathsManager, SkillPaths, SkillRouterState};
 use aionui_file::FileService;
@@ -95,6 +96,77 @@ pub async fn build_app_with_mock_version(
     (router, services)
 }
 
+/// Build app with a mock worker task manager that returns noop agents.
+///
+/// Use for tests that exercise session/warmup paths (team ensure_session,
+/// send_message) where spawning a real CLI process is not feasible.
+pub async fn build_app_with_mock_agents() -> (axum::Router, AppServices) {
+    let db = aionui_db::init_database_memory().await.unwrap();
+    let factory: std::sync::Arc<
+        dyn Fn(
+                aionui_ai_agent::types::BuildTaskOptions,
+            ) -> futures_util::future::BoxFuture<'static, Result<AgentInstance, aionui_common::AppError>>
+            + Send
+            + Sync,
+    > = std::sync::Arc::new(|opts| {
+        Box::pin(async move {
+            Ok(AgentInstance::Mock(std::sync::Arc::new(NoopMockAgent {
+                conversation_id: opts.conversation_id,
+            })))
+        })
+    });
+    let wtm: std::sync::Arc<dyn aionui_ai_agent::IWorkerTaskManager> =
+        std::sync::Arc::new(WorkerTaskManagerImpl::new(factory));
+    let services = AppServices::from_database(db)
+        .await
+        .unwrap()
+        .with_worker_task_manager(wtm);
+    let router = create_router(&services).await;
+    (router, services)
+}
+
+struct NoopMockAgent {
+    conversation_id: String,
+}
+
+#[async_trait::async_trait]
+impl IAgentTask for NoopMockAgent {
+    fn agent_type(&self) -> aionui_common::AgentType {
+        aionui_common::AgentType::Acp
+    }
+    fn conversation_id(&self) -> &str {
+        &self.conversation_id
+    }
+    fn workspace(&self) -> &str {
+        "/tmp/test"
+    }
+    fn status(&self) -> Option<aionui_common::ConversationStatus> {
+        None
+    }
+    fn last_activity_at(&self) -> aionui_common::TimestampMs {
+        aionui_common::now_ms()
+    }
+    fn subscribe(&self) -> tokio::sync::broadcast::Receiver<aionui_ai_agent::AgentStreamEvent> {
+        let (tx, _) = tokio::sync::broadcast::channel(1);
+        tx.subscribe()
+    }
+    async fn send_message(
+        &self,
+        _data: aionui_ai_agent::types::SendMessageData,
+    ) -> Result<(), aionui_common::AppError> {
+        Ok(())
+    }
+    async fn cancel(&self) -> Result<(), aionui_common::AppError> {
+        Ok(())
+    }
+    fn kill(&self, _reason: Option<aionui_common::AgentKillReason>) -> Result<(), aionui_common::AppError> {
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl IMockAgent for NoopMockAgent {}
+
 pub async fn body_json(resp: axum::response::Response) -> serde_json::Value {
     let bytes = resp.into_body().collect().await.unwrap().to_bytes();
     serde_json::from_slice(&bytes).unwrap()
@@ -153,6 +225,10 @@ pub fn delete_with_token(uri: &str, token: &str, csrf: &str) -> Request<Body> {
 }
 
 /// Set up a user and login, returning (session_token, csrf_token).
+///
+/// The seeded `system_default_user` row already uses `username = "admin"`; if
+/// the test asks for that username, overwrite the seed row's empty credentials
+/// in place instead of trying to INSERT a duplicate.
 pub async fn setup_and_login(
     app: &mut axum::Router,
     services: &AppServices,
@@ -160,7 +236,15 @@ pub async fn setup_and_login(
     password: &str,
 ) -> (String, String) {
     let hash = aionui_auth::hash_password(password).unwrap();
-    services.user_repo.create_user(username, &hash).await.unwrap();
+    if username == "admin" {
+        services
+            .user_repo
+            .set_system_user_credentials(username, &hash)
+            .await
+            .unwrap();
+    } else {
+        services.user_repo.create_user(username, &hash).await.unwrap();
+    }
 
     let resp = app.clone().oneshot(get_request("/api/auth/status")).await.unwrap();
     let csrf = extract_csrf_token(&resp).expect("CSRF cookie should be set");

@@ -2,29 +2,31 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::rejection::JsonRejection;
-use axum::extract::{Json, State};
+use axum::extract::{Json, Path, State};
 use axum::http::{HeaderMap, header};
 use axum::middleware::from_fn_with_state;
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Extension, Router};
+use serde::Deserialize;
 
 use aionui_api_types::{
     ApiResponse, AuthStatusResponse, ChangePasswordRequest, LoginRequest, LoginResponse, PublicUser, QrLoginRequest,
-    RefreshResponse, RefreshTokenRequest, UserInfoResponse, WsTokenResponse,
+    RefreshResponse, RefreshTokenRequest, UserInfoResponse, WebuiChangePasswordRequest, WebuiChangeUsernameRequest,
+    WebuiChangeUsernameResponse, WebuiGenerateQrTokenResponse, WebuiResetPasswordResponse, WsTokenResponse,
 };
 use aionui_common::AppError;
 use aionui_common::constants::COOKIE_MAX_AGE_DAYS;
-use aionui_db::IUserRepository;
+use aionui_db::{IUserRepository, models::User};
 
 use crate::extract::extract_token_from_headers;
 use crate::middleware::{AuthState, CurrentUser, auth_middleware};
-use crate::password::{dummy_password_hash, hash_password, verify_password_timed};
+use crate::password::{dummy_password_hash, generate_password, hash_password, verify_password_timed};
 use crate::qr_token::QrTokenStore;
 use crate::rate_limit::{
     RateLimiter, api_rate_limit_middleware, auth_rate_limit_middleware, authenticated_action_rate_limit_middleware,
 };
-use crate::validation::validate_password;
+use crate::validation::{validate_password, validate_username};
 use crate::{CookieConfig, JwtService};
 
 /// Shared state for all auth route handlers.
@@ -34,6 +36,43 @@ pub struct AuthRouterState {
     pub user_repo: Arc<dyn IUserRepository>,
     pub cookie_config: Arc<CookieConfig>,
     pub qr_token_store: Arc<QrTokenStore>,
+    pub local: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateInternalUserRequest {
+    username: String,
+    password_hash: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct SetSystemUserCredentialsRequest {
+    username: String,
+    password_hash: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdatePasswordHashRequest {
+    password_hash: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateUsernameRequest {
+    username: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateJwtSecretRequest {
+    jwt_secret: String,
+}
+
+fn ensure_local_mode(local: bool) -> Result<(), AppError> {
+    if local {
+        return Ok(());
+    }
+    Err(AppError::Forbidden(
+        "This endpoint is only available in local mode".into(),
+    ))
 }
 
 /// Build the auth router with all endpoints and middleware layers.
@@ -48,6 +87,10 @@ pub struct AuthRouterState {
 /// - `GET /api/ws-token`
 /// - `POST /api/auth/qr-login`
 /// - `GET /qr-login`
+/// - `POST /api/webui/change-password` (local-only)
+/// - `POST /api/webui/change-username` (local-only)
+/// - `POST /api/webui/reset-password` (local-only)
+/// - `POST /api/webui/generate-qr-token` (local-only)
 pub fn auth_routes(state: AuthRouterState) -> Router {
     let auth_limiter = Arc::new(RateLimiter::auth());
     let api_limiter = Arc::new(RateLimiter::api());
@@ -75,6 +118,41 @@ pub fn auth_routes(state: AuthRouterState) -> Router {
     // API rate limited public routes (no auth required)
     let api_public = Router::new()
         .route("/api/auth/status", get(status_handler))
+        .route(
+            "/api/auth/internal/users",
+            get(list_internal_users_handler).post(create_internal_user_handler),
+        )
+        .route("/api/auth/internal/users/system", get(get_system_user_handler))
+        .route(
+            "/api/auth/internal/users/system/credentials",
+            post(set_system_user_credentials_handler),
+        )
+        .route(
+            "/api/auth/internal/users/by-username/{username}",
+            get(find_user_by_username_handler),
+        )
+        .route("/api/auth/internal/users/{id}", get(find_user_by_id_handler))
+        .route(
+            "/api/auth/internal/users/{id}/password",
+            post(update_user_password_hash_handler),
+        )
+        .route(
+            "/api/auth/internal/users/{id}/username",
+            post(update_user_username_handler),
+        )
+        .route(
+            "/api/auth/internal/users/{id}/jwt-secret",
+            post(update_user_jwt_secret_handler),
+        )
+        .route(
+            "/api/auth/internal/users/{id}/last-login",
+            post(update_user_last_login_handler),
+        )
+        // WebUI admin credential endpoints — local-only, enforced inside each handler.
+        .route("/api/webui/change-password", post(webui_change_password_handler))
+        .route("/api/webui/change-username", post(webui_change_username_handler))
+        .route("/api/webui/reset-password", post(webui_reset_password_handler))
+        .route("/api/webui/generate-qr-token", post(webui_generate_qr_token_handler))
         .route_layer(from_fn_with_state(api_limiter.clone(), api_rate_limit_middleware))
         .with_state(state.clone());
 
@@ -140,6 +218,13 @@ async fn login_handler(
         .map_err(|e| AppError::Internal(format!("Database error: {e}")))?;
 
     let (found_user, password_valid) = match user {
+        Some(u) if u.password_hash.trim().is_empty() => {
+            // Seeded user with no password yet (first-run local mode).
+            // Treat as invalid credentials; run dummy verify for timing symmetry
+            // and to avoid bcrypt error on empty hash leaking as a 500.
+            let _ = verify_password_timed(&req.password, dummy_password_hash()).await;
+            (None, false)
+        }
         Some(u) => {
             let valid = verify_password_timed(&req.password, &u.password_hash).await?;
             (Some(u), valid)
@@ -225,6 +310,109 @@ async fn status_handler(
         user_count: user_count as u64,
         is_authenticated,
     }))
+}
+
+// ---------------------------------------------------------------------------
+// Local-only internal user routes
+// ---------------------------------------------------------------------------
+
+async fn list_internal_users_handler(
+    State(state): State<AuthRouterState>,
+) -> Result<Json<ApiResponse<Vec<User>>>, AppError> {
+    ensure_local_mode(state.local)?;
+    let users = state.user_repo.list_users().await?;
+    Ok(Json(ApiResponse::ok(users)))
+}
+
+async fn get_system_user_handler(
+    State(state): State<AuthRouterState>,
+) -> Result<Json<ApiResponse<Option<User>>>, AppError> {
+    ensure_local_mode(state.local)?;
+    let user = state.user_repo.get_system_user().await?;
+    Ok(Json(ApiResponse::ok(user)))
+}
+
+async fn find_user_by_username_handler(
+    State(state): State<AuthRouterState>,
+    Path(username): Path<String>,
+) -> Result<Json<ApiResponse<Option<User>>>, AppError> {
+    ensure_local_mode(state.local)?;
+    let user = state.user_repo.find_by_username(&username).await?;
+    Ok(Json(ApiResponse::ok(user)))
+}
+
+async fn find_user_by_id_handler(
+    State(state): State<AuthRouterState>,
+    Path(id): Path<String>,
+) -> Result<Json<ApiResponse<Option<User>>>, AppError> {
+    ensure_local_mode(state.local)?;
+    let user = state.user_repo.find_by_id(&id).await?;
+    Ok(Json(ApiResponse::ok(user)))
+}
+
+async fn create_internal_user_handler(
+    State(state): State<AuthRouterState>,
+    body: Result<Json<CreateInternalUserRequest>, JsonRejection>,
+) -> Result<Json<ApiResponse<User>>, AppError> {
+    ensure_local_mode(state.local)?;
+    let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
+    let user = state.user_repo.create_user(&req.username, &req.password_hash).await?;
+    Ok(Json(ApiResponse::ok(user)))
+}
+
+async fn set_system_user_credentials_handler(
+    State(state): State<AuthRouterState>,
+    body: Result<Json<SetSystemUserCredentialsRequest>, JsonRejection>,
+) -> Result<Json<ApiResponse<()>>, AppError> {
+    ensure_local_mode(state.local)?;
+    let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
+    state
+        .user_repo
+        .set_system_user_credentials(&req.username, &req.password_hash)
+        .await?;
+    Ok(Json(ApiResponse::ok(())))
+}
+
+async fn update_user_password_hash_handler(
+    State(state): State<AuthRouterState>,
+    Path(id): Path<String>,
+    body: Result<Json<UpdatePasswordHashRequest>, JsonRejection>,
+) -> Result<Json<ApiResponse<()>>, AppError> {
+    ensure_local_mode(state.local)?;
+    let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
+    state.user_repo.update_password(&id, &req.password_hash).await?;
+    Ok(Json(ApiResponse::ok(())))
+}
+
+async fn update_user_username_handler(
+    State(state): State<AuthRouterState>,
+    Path(id): Path<String>,
+    body: Result<Json<UpdateUsernameRequest>, JsonRejection>,
+) -> Result<Json<ApiResponse<()>>, AppError> {
+    ensure_local_mode(state.local)?;
+    let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
+    state.user_repo.update_username(&id, &req.username).await?;
+    Ok(Json(ApiResponse::ok(())))
+}
+
+async fn update_user_jwt_secret_handler(
+    State(state): State<AuthRouterState>,
+    Path(id): Path<String>,
+    body: Result<Json<UpdateJwtSecretRequest>, JsonRejection>,
+) -> Result<Json<ApiResponse<()>>, AppError> {
+    ensure_local_mode(state.local)?;
+    let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
+    state.user_repo.update_jwt_secret(&id, &req.jwt_secret).await?;
+    Ok(Json(ApiResponse::ok(())))
+}
+
+async fn update_user_last_login_handler(
+    State(state): State<AuthRouterState>,
+    Path(id): Path<String>,
+) -> Result<Json<ApiResponse<()>>, AppError> {
+    ensure_local_mode(state.local)?;
+    state.user_repo.update_last_login(&id).await?;
+    Ok(Json(ApiResponse::ok(())))
 }
 
 // ---------------------------------------------------------------------------
@@ -460,3 +648,118 @@ const QR_LOGIN_HTML: &str = r#"<!DOCTYPE html>
 </script>
 </body>
 </html>"#;
+
+// ---------------------------------------------------------------------------
+// WebUI admin credential endpoints (local-only)
+// ---------------------------------------------------------------------------
+
+/// Random password length for `/api/webui/reset-password`.
+const RESET_PASSWORD_LEN: usize = 16;
+
+/// Resolve the WebUI admin user, falling back to NotFound when absent.
+async fn resolve_webui_admin(user_repo: &dyn IUserRepository) -> Result<User, AppError> {
+    user_repo
+        .get_primary_webui_user()
+        .await
+        .map_err(|e| AppError::Internal(format!("Database error: {e}")))?
+        .ok_or_else(|| AppError::NotFound("No WebUI admin user configured".into()))
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/webui/change-password
+// ---------------------------------------------------------------------------
+
+async fn webui_change_password_handler(
+    State(state): State<AuthRouterState>,
+    body: Result<Json<WebuiChangePasswordRequest>, JsonRejection>,
+) -> Result<Json<ApiResponse<()>>, AppError> {
+    ensure_local_mode(state.local)?;
+    let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
+
+    validate_password(&req.new_password)?;
+
+    let user = resolve_webui_admin(&*state.user_repo).await?;
+
+    let password = req.new_password;
+    let new_hash = tokio::task::spawn_blocking(move || hash_password(&password))
+        .await
+        .map_err(|e| AppError::Internal(format!("Task join error: {e}")))??;
+
+    state
+        .user_repo
+        .update_password(&user.id, &new_hash)
+        .await
+        .map_err(|e| AppError::Internal(format!("Database error: {e}")))?;
+
+    Ok(Json(ApiResponse::message("Password changed successfully")))
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/webui/change-username
+// ---------------------------------------------------------------------------
+
+async fn webui_change_username_handler(
+    State(state): State<AuthRouterState>,
+    body: Result<Json<WebuiChangeUsernameRequest>, JsonRejection>,
+) -> Result<Json<ApiResponse<WebuiChangeUsernameResponse>>, AppError> {
+    ensure_local_mode(state.local)?;
+    let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
+
+    let trimmed = req.new_username.trim().to_owned();
+    validate_username(&trimmed)?;
+
+    let user = resolve_webui_admin(&*state.user_repo).await?;
+
+    if user.username != trimmed {
+        state
+            .user_repo
+            .update_username(&user.id, &trimmed)
+            .await
+            .map_err(|e| AppError::Internal(format!("Database error: {e}")))?;
+    }
+
+    Ok(Json(ApiResponse::ok(WebuiChangeUsernameResponse { username: trimmed })))
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/webui/reset-password
+// ---------------------------------------------------------------------------
+
+async fn webui_reset_password_handler(
+    State(state): State<AuthRouterState>,
+) -> Result<Json<ApiResponse<WebuiResetPasswordResponse>>, AppError> {
+    ensure_local_mode(state.local)?;
+
+    let user = resolve_webui_admin(&*state.user_repo).await?;
+
+    let new_password = generate_password(RESET_PASSWORD_LEN);
+    let password_for_hash = new_password.clone();
+    let new_hash = tokio::task::spawn_blocking(move || hash_password(&password_for_hash))
+        .await
+        .map_err(|e| AppError::Internal(format!("Task join error: {e}")))??;
+
+    state
+        .user_repo
+        .update_password(&user.id, &new_hash)
+        .await
+        .map_err(|e| AppError::Internal(format!("Database error: {e}")))?;
+
+    Ok(Json(ApiResponse::ok(WebuiResetPasswordResponse { new_password })))
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/webui/generate-qr-token
+// ---------------------------------------------------------------------------
+
+async fn webui_generate_qr_token_handler(
+    State(state): State<AuthRouterState>,
+) -> Result<Json<ApiResponse<WebuiGenerateQrTokenResponse>>, AppError> {
+    ensure_local_mode(state.local)?;
+
+    let (token, expires_at_ms) = state.qr_token_store.generate_with_expiry();
+
+    Ok(Json(ApiResponse::ok(WebuiGenerateQrTokenResponse {
+        token,
+        expires_at_ms,
+    })))
+}

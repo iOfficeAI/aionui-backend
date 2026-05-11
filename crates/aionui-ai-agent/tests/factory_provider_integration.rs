@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use aionui_ai_agent::acp_agent_service::AcpAgentService;
-use aionui_ai_agent::agent_registry::AgentRegistry;
+use aionui_ai_agent::AcpSessionSyncService;
+use aionui_ai_agent::AcpSkillManager;
 use aionui_ai_agent::factory::{AgentFactoryDeps, build_agent_factory};
-use aionui_ai_agent::skill_manager::AcpSkillManager;
+use aionui_ai_agent::registry::AgentRegistry;
 use aionui_ai_agent::types::BuildTaskOptions;
 use aionui_common::{AgentType, ProviderWithModel, encrypt_string};
 use aionui_db::{
@@ -20,7 +20,7 @@ async fn setup() -> (
     Arc<dyn IProviderRepository>,
     Arc<SqliteRemoteAgentRepository>,
     Arc<AgentRegistry>,
-    Arc<AcpAgentService>,
+    Arc<AcpSessionSyncService>,
 ) {
     let db = init_database_memory().await.unwrap();
     let pool = db.pool().clone();
@@ -30,7 +30,7 @@ async fn setup() -> (
     let registry = AgentRegistry::new(metadata_repo);
     registry.hydrate().await.unwrap();
     let session_repo: Arc<dyn IAcpSessionRepository> = Arc::new(SqliteAcpSessionRepository::new(pool));
-    let acp_agent_service = AcpAgentService::new(session_repo);
+    let acp_agent_service = AcpSessionSyncService::new(session_repo);
     (provider_repo, remote_agent_repo, registry, acp_agent_service)
 }
 
@@ -60,8 +60,8 @@ fn make_factory(
     provider_repo: Arc<dyn IProviderRepository>,
     remote_agent_repo: Arc<SqliteRemoteAgentRepository>,
     agent_registry: Arc<AgentRegistry>,
-    acp_agent_service: Arc<AcpAgentService>,
-) -> aionui_ai_agent::AgentFactory {
+    acp_agent_service: Arc<AcpSessionSyncService>,
+) -> aionui_ai_agent::task_manager::AgentFactory {
     let tmp = tempfile::TempDir::new().unwrap();
     let skill_paths = Arc::new(aionui_extension::resolve_skill_paths(tmp.path(), tmp.path()));
     build_agent_factory(AgentFactoryDeps {
@@ -94,7 +94,7 @@ async fn aionrs_factory_returns_error_for_missing_provider() {
         extra: serde_json::json!({}),
     };
 
-    let result = factory(options);
+    let result = factory(options).await;
     match result {
         Ok(_) => panic!("Expected error for missing provider, got Ok"),
         Err(e) => {
@@ -125,7 +125,7 @@ async fn aionrs_factory_resolves_provider_from_db() {
         extra: serde_json::json!({ "max_tokens": 2048 }),
     };
 
-    let result = factory(options);
+    let result = factory(options).await;
     assert!(result.is_ok(), "Expected Ok, got: {:?}", result.err());
 }
 
@@ -147,6 +147,6 @@ async fn aionrs_factory_respects_use_model_override() {
         extra: serde_json::json!({}),
     };
 
-    let result = factory(options);
+    let result = factory(options).await;
     assert!(result.is_ok(), "Expected Ok, got: {:?}", result.err());
 }

@@ -239,29 +239,29 @@ mod tests {
 
     #[test]
     fn expired_window_resets_count() {
-        let limiter = RateLimiter::new(1, Duration::from_millis(1));
+        let limiter = RateLimiter::new(1, Duration::from_millis(50));
         assert!(limiter.check_and_increment("key").is_ok());
-        std::thread::sleep(Duration::from_millis(5));
+        std::thread::sleep(Duration::from_millis(100));
         // Window expired → counter reset
         assert!(limiter.check_and_increment("key").is_ok());
     }
 
     #[test]
     fn expired_window_allows_check() {
-        let limiter = RateLimiter::new(1, Duration::from_millis(1));
+        let limiter = RateLimiter::new(1, Duration::from_millis(50));
         limiter.record_attempt("key");
         assert!(limiter.check("key").is_err());
-        std::thread::sleep(Duration::from_millis(5));
+        std::thread::sleep(Duration::from_millis(100));
         // Window expired → check passes
         assert!(limiter.check("key").is_ok());
     }
 
     #[test]
     fn cleanup_removes_expired_entries() {
-        let limiter = RateLimiter::new(10, Duration::from_millis(1));
+        let limiter = RateLimiter::new(10, Duration::from_millis(50));
         limiter.check_and_increment("key").unwrap();
         assert_eq!(limiter.entry_count(), 1);
-        std::thread::sleep(Duration::from_millis(5));
+        std::thread::sleep(Duration::from_millis(100));
         limiter.cleanup();
         assert_eq!(limiter.entry_count(), 0);
     }

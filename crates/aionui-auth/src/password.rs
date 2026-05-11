@@ -88,6 +88,15 @@ pub fn generate_user_credentials() -> (String, String) {
     (username, password)
 }
 
+/// Generate a strong random password suitable for WebUI admin reset.
+///
+/// Guarantees ≥1 character from each category (upper, lower, digit, special)
+/// and fills remaining slots from a mixed charset.
+pub fn generate_password(len: usize) -> String {
+    // Enforce minimum length of 4 to satisfy the four-category guarantee.
+    generate_strong_password(len.max(4))
+}
+
 // --- Internal helpers ---
 
 /// Fill a buffer with cryptographically random bytes.

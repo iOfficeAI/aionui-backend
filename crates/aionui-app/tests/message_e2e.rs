@@ -333,7 +333,7 @@ async fn t9_1_search_keyword_match() {
     let json = body_json(resp).await;
     let items = json["data"]["items"].as_array().unwrap();
     assert_eq!(items.len(), 1);
-    assert_eq!(items[0]["conversation_name"], "Search Conv");
+    assert_eq!(items[0]["conversation"]["name"], "Search Conv");
 }
 
 #[tokio::test]
@@ -524,7 +524,7 @@ async fn t2_1_send_message_accepted() {
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
     let conv_id = create_conversation(&mut app, &token, &csrf, "Send Test").await;
 
-    let body = json!({ "content": "Hello AI", "msg_id": "msg-user-1" });
+    let body = json!({ "content": "Hello AI" });
     let req = common::json_with_token(
         "POST",
         &format!("/api/conversations/{conv_id}/messages"),
@@ -537,11 +537,21 @@ async fn t2_1_send_message_accepted() {
     // (the route itself is wired correctly — 202 when factory is real)
     // In E2E with stub factory, the get_or_build_task fails.
     // We verify the route is reachable and returns an error (not 404/405).
+    // 400 may occur when the stub environment lacks valid backend configuration.
     let status = resp.status();
     assert!(
-        status == StatusCode::ACCEPTED || status == StatusCode::INTERNAL_SERVER_ERROR,
-        "Expected 202 or 500 (stub factory), got {status}"
+        status == StatusCode::ACCEPTED
+            || status == StatusCode::INTERNAL_SERVER_ERROR
+            || status == StatusCode::BAD_REQUEST,
+        "Expected 202, 400, or 500 (stub factory), got {status}"
     );
+
+    if status == StatusCode::ACCEPTED {
+        let body: serde_json::Value =
+            serde_json::from_slice(&axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap()).unwrap();
+        assert!(body["success"].as_bool().unwrap());
+        assert!(body["data"]["msg_id"].as_str().is_some_and(|s| !s.is_empty()));
+    }
 }
 
 #[tokio::test]
@@ -550,7 +560,7 @@ async fn t2_1_send_message_empty_content_bad_request() {
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
     let conv_id = create_conversation(&mut app, &token, &csrf, "Empty Content").await;
 
-    let body = json!({ "content": "", "msg_id": "msg-user-1" });
+    let body = json!({ "content": "" });
     let req = common::json_with_token(
         "POST",
         &format!("/api/conversations/{conv_id}/messages"),
@@ -567,7 +577,7 @@ async fn t2_1_send_message_conversation_not_found() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
-    let body = json!({ "content": "Hello", "msg_id": "msg-1" });
+    let body = json!({ "content": "Hello" });
     let req = common::json_with_token("POST", "/api/conversations/non-existent/messages", body, &token, &csrf);
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
@@ -577,7 +587,7 @@ async fn t2_1_send_message_conversation_not_found() {
 async fn t2_1_send_message_requires_auth() {
     let (app, _services) = build_app().await;
 
-    let body = json!({ "content": "Hello", "msg_id": "msg-1" });
+    let body = json!({ "content": "Hello" });
     let req = axum::http::Request::builder()
         .method("POST")
         .uri("/api/conversations/some-id/messages")

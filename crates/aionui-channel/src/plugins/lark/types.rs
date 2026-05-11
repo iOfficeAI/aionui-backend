@@ -1,4 +1,12 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+
+/// Deserialize a string that may be null into an empty string.
+fn deserialize_nullable_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer).map(|opt| opt.unwrap_or_default())
+}
 
 // ---------------------------------------------------------------------------
 // Tenant access token
@@ -44,6 +52,16 @@ pub(crate) struct BotInfoData {
 // WebSocket endpoint
 // ---------------------------------------------------------------------------
 
+/// Request body for the WebSocket endpoint URL request.
+/// Note: This endpoint uses AppID/AppSecret directly, NOT Bearer token auth.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct WsEndpointRequest {
+    #[serde(rename = "AppID")]
+    pub app_id: String,
+    #[serde(rename = "AppSecret")]
+    pub app_secret: String,
+}
+
 /// Response from the WebSocket endpoint URL request.
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct WsEndpointResponse {
@@ -52,40 +70,27 @@ pub(crate) struct WsEndpointResponse {
     pub data: Option<WsEndpointData>,
 }
 
-/// Data containing the WebSocket URL.
+/// Data containing the WebSocket URL and client configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct WsEndpointData {
     #[serde(rename = "URL")]
     pub url: String,
+    #[serde(rename = "ClientConfig")]
+    pub client_config: Option<WsClientConfig>,
 }
 
-// ---------------------------------------------------------------------------
-// WebSocket frame
-// ---------------------------------------------------------------------------
-
-/// A frame received over the Lark WebSocket connection.
-///
-/// Lark sends JSON frames with a `type` field indicating the frame kind.
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct WsFrame {
-    /// Frame type: "event", "card", "pong", etc.
-    #[serde(rename = "type")]
-    pub frame_type: String,
-    /// Header containing metadata (event type, event ID, token).
-    pub header: Option<WsFrameHeader>,
-    /// Event-specific payload.
-    pub event: Option<serde_json::Value>,
-    /// Card action payload.
-    pub data: Option<serde_json::Value>,
-}
-
-/// Header metadata in a WebSocket frame.
+/// Client configuration returned by the WS endpoint API.
 #[derive(Debug, Clone, Deserialize)]
 #[allow(dead_code)]
-pub(crate) struct WsFrameHeader {
-    pub event_id: Option<String>,
-    pub event_type: Option<String>,
-    pub token: Option<String>,
+pub(crate) struct WsClientConfig {
+    #[serde(rename = "ReconnectCount")]
+    pub reconnect_count: Option<i32>,
+    #[serde(rename = "ReconnectInterval")]
+    pub reconnect_interval: Option<u64>,
+    #[serde(rename = "ReconnectNonce")]
+    pub reconnect_nonce: Option<u64>,
+    #[serde(rename = "PingInterval")]
+    pub ping_interval: Option<u64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -114,11 +119,11 @@ pub(crate) struct MessageSender {
 #[derive(Debug, Clone, Deserialize)]
 #[allow(dead_code)]
 pub(crate) struct SenderIdContainer {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_nullable_string")]
     pub open_id: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_nullable_string")]
     pub user_id: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_nullable_string")]
     pub union_id: String,
 }
 
@@ -126,10 +131,15 @@ pub(crate) struct SenderIdContainer {
 #[derive(Debug, Clone, Deserialize)]
 #[allow(dead_code)]
 pub(crate) struct MessageBody {
+    #[serde(default, deserialize_with = "deserialize_nullable_string")]
     pub message_id: String,
+    #[serde(default, deserialize_with = "deserialize_nullable_string")]
     pub chat_id: String,
+    #[serde(default, deserialize_with = "deserialize_nullable_string")]
     pub chat_type: String,
+    #[serde(default, deserialize_with = "deserialize_nullable_string")]
     pub message_type: String,
+    #[serde(default, deserialize_with = "deserialize_nullable_string")]
     pub content: String,
     #[serde(default)]
     pub parent_id: Option<String>,
@@ -463,35 +473,33 @@ mod tests {
         });
         let resp: WsEndpointResponse = serde_json::from_value(raw).unwrap();
         assert_eq!(resp.code, 0);
-        assert_eq!(resp.data.unwrap().url, "wss://open.feishu.cn/ws/xxx");
+        let data = resp.data.unwrap();
+        assert_eq!(data.url, "wss://open.feishu.cn/ws/xxx");
+        assert!(data.client_config.is_none());
     }
 
-    // -- WsFrame ------------------------------------------------------------
-
     #[test]
-    fn ws_frame_event_parses() {
+    fn ws_endpoint_response_with_client_config() {
         let raw = json!({
-            "type": "event",
-            "header": {
-                "event_id": "ev_123",
-                "event_type": "im.message.receive_v1",
-                "token": "tok_abc"
-            },
-            "event": { "sender": {}, "message": {} }
+            "code": 0,
+            "msg": "success",
+            "data": {
+                "URL": "wss://open.feishu.cn/ws/abc?device_id=d1&service_id=7",
+                "ClientConfig": {
+                    "ReconnectCount": -1,
+                    "ReconnectInterval": 120,
+                    "ReconnectNonce": 30,
+                    "PingInterval": 120
+                }
+            }
         });
-        let frame: WsFrame = serde_json::from_value(raw).unwrap();
-        assert_eq!(frame.frame_type, "event");
-        let header = frame.header.unwrap();
-        assert_eq!(header.event_id.as_deref(), Some("ev_123"));
-        assert_eq!(header.event_type.as_deref(), Some("im.message.receive_v1"));
-    }
-
-    #[test]
-    fn ws_frame_pong_parses() {
-        let raw = json!({ "type": "pong" });
-        let frame: WsFrame = serde_json::from_value(raw).unwrap();
-        assert_eq!(frame.frame_type, "pong");
-        assert!(frame.header.is_none());
+        let resp: WsEndpointResponse = serde_json::from_value(raw).unwrap();
+        assert_eq!(resp.code, 0);
+        let data = resp.data.unwrap();
+        assert_eq!(data.url, "wss://open.feishu.cn/ws/abc?device_id=d1&service_id=7");
+        let config = data.client_config.unwrap();
+        assert_eq!(config.reconnect_count, Some(-1));
+        assert_eq!(config.ping_interval, Some(120));
     }
 
     // -- MessageEvent -------------------------------------------------------

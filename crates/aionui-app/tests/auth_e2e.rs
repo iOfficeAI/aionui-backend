@@ -101,6 +101,10 @@ fn post_json_with_csrf(uri: &str, body: &str, token: &str, csrf: &str) -> Reques
 }
 
 /// Set up a user and login, returning (session_token, csrf_token).
+///
+/// Seeded `system_default_user` already owns `username = "admin"` with an empty
+/// hash; if the test uses that name, overwrite the seed row in place. Other
+/// usernames use the normal create_user path.
 async fn setup_and_login(
     app: &mut axum::Router,
     services: &AppServices,
@@ -109,7 +113,15 @@ async fn setup_and_login(
 ) -> (String, String) {
     // Create user
     let hash = aionui_auth::hash_password(password).unwrap();
-    services.user_repo.create_user(username, &hash).await.unwrap();
+    if username == "admin" {
+        services
+            .user_repo
+            .set_system_user_credentials(username, &hash)
+            .await
+            .unwrap();
+    } else {
+        services.user_repo.create_user(username, &hash).await.unwrap();
+    }
 
     // Get CSRF token from a GET request first
     let resp = app.clone().oneshot(get_request("/api/auth/status")).await.unwrap();
@@ -209,7 +221,13 @@ async fn t12_2_csrf_exempt_paths() {
 async fn t12_3_session_cookie_attributes() {
     let (app, services) = build_app().await;
     let hash = aionui_auth::hash_password("StrongP@ss1").unwrap();
-    services.user_repo.create_user("admin", &hash).await.unwrap();
+    // system_default_user is seeded with username='admin'; overwrite its empty
+    // password in place instead of creating a duplicate.
+    services
+        .user_repo
+        .set_system_user_credentials("admin", &hash)
+        .await
+        .unwrap();
 
     let req = post_json_login("/login", r#"{"username":"admin","password":"StrongP@ss1"}"#);
     let resp = app.oneshot(req).await.unwrap();
