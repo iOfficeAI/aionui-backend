@@ -108,13 +108,29 @@ pub(super) async fn build(
                 );
                 Some(session)
             }
-            Err(e) => {
-                debug!(
-                    conversation_id = %ctx.conversation_id,
-                    error = %e,
-                    "No existing aionrs session found, starting fresh"
-                );
-                None
+            Err(_) => {
+                // Fallback: old architecture stored sessions inside the workspace
+                let legacy_dir = std::path::Path::new(&ctx.workspace).join(".aionrs/sessions");
+                let legacy_mgr = SessionManager::new(legacy_dir.clone(), 100);
+                match legacy_mgr.load(&ctx.conversation_id) {
+                    Ok(session) => {
+                        info!(
+                            conversation_id = %ctx.conversation_id,
+                            session_id = %session.id,
+                            message_count = session.messages.len(),
+                            "Loaded legacy aionrs session from workspace"
+                        );
+                        Some(session)
+                    }
+                    Err(e) => {
+                        debug!(
+                            conversation_id = %ctx.conversation_id,
+                            error = %e,
+                            "No existing aionrs session found, starting fresh"
+                        );
+                        None
+                    }
+                }
             }
         }
     };

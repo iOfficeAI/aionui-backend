@@ -257,24 +257,24 @@ mod tests {
         let rows = repo.list_all().await.unwrap();
         // 17 ACP vendors + 2 non-ACP builtins + 1 internal = 20.
         assert_eq!(rows.len(), 20);
-        assert!(rows.iter().any(|r| r.name == "Claude" && r.agent_source == "builtin"));
+        assert!(
+            rows.iter()
+                .any(|r| r.name == "Claude Code" && r.agent_source == "builtin")
+        );
         assert!(
             rows.iter()
                 .any(|r| r.name == "Aion CLI" && r.agent_source == "internal")
         );
         // Nanobot and OpenClaw are builtin (not internal).
         assert!(rows.iter().any(|r| r.name == "Nanobot" && r.agent_source == "builtin"));
-        assert!(
-            rows.iter()
-                .any(|r| r.name == "OpenClaw Gateway" && r.agent_source == "builtin")
-        );
+        assert!(rows.iter().any(|r| r.name == "OpenClaw" && r.agent_source == "builtin"));
     }
 
     #[tokio::test]
     async fn find_by_source_and_name_hits_seed_row() {
         let (repo, _db) = setup().await;
         let row = repo
-            .find_by_source_and_name("builtin", "Claude")
+            .find_by_source_and_name("builtin", "Claude Code")
             .await
             .unwrap()
             .expect("seeded claude row");
