@@ -14,8 +14,8 @@ use aionui_db::models::{
 };
 use aionui_db::{
     ConversationFilters, ConversationRowUpdate, CreateAcpSessionParams, DbError, IAcpSessionRepository,
-    IAgentMetadataRepository, IConversationRepository, ITeamRepository, MessageRowUpdate, MessageSearchRow,
-    PersistedSessionState, SaveRuntimeStateParams, SortOrder,
+    IAgentMetadataRepository, IConversationRepository, IProviderRepository, ITeamRepository, MessageRowUpdate,
+    MessageSearchRow, PersistedSessionState, SaveRuntimeStateParams, SortOrder,
 };
 use aionui_realtime::EventBroadcaster;
 
@@ -560,6 +560,34 @@ fn success_factory() -> AgentFactory {
     })
 }
 
+struct EmptyProviderRepo;
+
+#[async_trait::async_trait]
+impl IProviderRepository for EmptyProviderRepo {
+    async fn list(&self) -> Result<Vec<aionui_db::models::Provider>, DbError> {
+        Ok(vec![])
+    }
+    async fn find_by_id(&self, _id: &str) -> Result<Option<aionui_db::models::Provider>, DbError> {
+        Ok(None)
+    }
+    async fn create(
+        &self,
+        _params: aionui_db::CreateProviderParams<'_>,
+    ) -> Result<aionui_db::models::Provider, DbError> {
+        Err(DbError::NotFound("not implemented".into()))
+    }
+    async fn update(
+        &self,
+        _id: &str,
+        _params: aionui_db::UpdateProviderParams<'_>,
+    ) -> Result<aionui_db::models::Provider, DbError> {
+        Err(DbError::NotFound("not implemented".into()))
+    }
+    async fn delete(&self, _id: &str) -> Result<(), DbError> {
+        Err(DbError::NotFound("not implemented".into()))
+    }
+}
+
 fn setup_with_factory(factory: AgentFactory) -> (Arc<TeamSessionService>, Arc<CountingTaskManager>) {
     setup_with_factory_and_metadata(factory, Arc::new(StubAgentMetadataRepo::empty()))
 }
@@ -583,9 +611,11 @@ fn setup_with_factory_and_metadata(
     let backend_binary_path = Arc::new(std::path::PathBuf::from("/tmp/aionui-backend-test"));
     let task_manager = Arc::new(CountingTaskManager::new(factory));
     let task_manager_dyn: Arc<dyn IWorkerTaskManager> = task_manager.clone();
+    let provider_repo: Arc<dyn IProviderRepository> = Arc::new(EmptyProviderRepo);
     let svc = TeamSessionService::new(
         team_repo,
         agent_metadata_repo,
+        provider_repo,
         conv_service,
         broadcaster,
         task_manager_dyn,
@@ -616,9 +646,11 @@ fn setup_with_recording_broadcaster() -> (Arc<TeamSessionService>, Arc<Recording
     );
     let backend_binary_path = Arc::new(std::path::PathBuf::from("/tmp/aionui-backend-test"));
     let task_manager: Arc<dyn IWorkerTaskManager> = Arc::new(CountingTaskManager::new(success_factory()));
+    let provider_repo: Arc<dyn IProviderRepository> = Arc::new(EmptyProviderRepo);
     let svc = TeamSessionService::new(
         team_repo,
         agent_metadata_repo,
+        provider_repo,
         conv_service,
         broadcaster,
         task_manager,

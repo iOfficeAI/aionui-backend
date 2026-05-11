@@ -354,8 +354,14 @@ pub fn handle_team_list_models(_args: &Value) -> Value {
 
 /// Build `team_list_models` response from DB rows. Reads each enabled,
 /// team-capable backend's `available_models` column. Filters by
-/// `agent_type` if provided.
-pub fn build_list_models_from_rows(rows: &[AgentMetadataRow], agent_type_filter: Option<&str>) -> Value {
+/// `agent_type` if provided. For internal agents (backend=NULL),
+/// `provider_models` supplies the aggregated models from the providers table.
+pub fn build_list_models_from_rows(
+    rows: &[AgentMetadataRow],
+    agent_type_filter: Option<&str>,
+    provider_models: &[String],
+) -> Value {
+    use aionui_api_types::BehaviorPolicy;
     use aionui_common::constants::is_team_capable;
 
     let mut agent_types: Vec<Value> = Vec::new();
@@ -364,47 +370,88 @@ pub fn build_list_models_from_rows(rows: &[AgentMetadataRow], agent_type_filter:
         if !row.enabled {
             continue;
         }
-        let Some(backend) = row.backend.as_deref() else {
-            continue;
+        // Use backend if present, otherwise agent_type as identifier (handles aionrs with backend=NULL)
+        let key = match row.backend.as_deref() {
+            Some(b) => b.to_owned(),
+            None => row.agent_type.clone(),
         };
+        let is_internal = row.backend.is_none();
 
-        // Check team capability
-        let caps = row
-            .agent_capabilities
+        // Check team capability: behavior_policy.supports_team OR legacy whitelist+MCP detection
+        let bp_supports = row
+            .behavior_policy
             .as_deref()
-            .and_then(|s| serde_json::from_str::<Value>(s).ok());
-        if !is_team_capable(backend, caps.as_ref()) {
-            continue;
+            .and_then(|s| serde_json::from_str::<BehaviorPolicy>(s).ok())
+            .is_some_and(|bp| bp.supports_team);
+        if !bp_supports {
+            let caps = row
+                .agent_capabilities
+                .as_deref()
+                .and_then(|s| serde_json::from_str::<Value>(s).ok());
+            if !is_team_capable(&key, caps.as_ref()) {
+                continue;
+            }
         }
 
         // Apply agent_type filter
         if let Some(filter) = agent_type_filter
-            && backend != filter
+            && key != filter
         {
             continue;
         }
 
-        // Parse available_models from DB
+        // For internal agents (aionrs), use provider models
+        if is_internal && !provider_models.is_empty() {
+            agent_types.push(json!({
+                "type": key,
+                "models": provider_models,
+            }));
+            continue;
+        }
+
+        // Parse available_models from DB.
+        // Format is either:
+        //   {"current_model_id":"...", "available_models": [{"id":"...", "label":"..."}]}
+        // or legacy array:
+        //   [{"id":"...", "name":"..."}]
         let models: Vec<String> = row
             .available_models
             .as_deref()
-            .and_then(|s| serde_json::from_str::<Vec<Value>>(s).ok())
-            .map(|entries| {
-                entries
-                    .iter()
-                    .filter_map(|e| e.get("id").and_then(Value::as_str).map(String::from))
-                    .collect()
+            .and_then(|s| serde_json::from_str::<Value>(s).ok())
+            .and_then(|v| {
+                // Try object with "available_models" key first (ModelInfoPayload format)
+                if let Some(arr) = v.get("available_models").and_then(Value::as_array) {
+                    let ids: Vec<String> = arr
+                        .iter()
+                        .filter_map(|e| e.get("id").and_then(Value::as_str).map(String::from))
+                        .collect();
+                    if !ids.is_empty() {
+                        return Some(ids);
+                    }
+                }
+                // Fallback: try parsing as direct array
+                if let Some(arr) = v.as_array() {
+                    let ids: Vec<String> = arr
+                        .iter()
+                        .filter_map(|e| e.get("id").and_then(Value::as_str).map(String::from))
+                        .collect();
+                    if !ids.is_empty() {
+                        return Some(ids);
+                    }
+                }
+                None
             })
             .unwrap_or_default();
 
         agent_types.push(json!({
-            "type": backend,
+            "type": key,
             "models": models,
         }));
     }
 
     json!({ "agent_types": agent_types })
 }
+
 
 /// Phase-1 minimal `team_describe_assistant` handler. Backend has no preset
 /// assistants wired yet, so every call returns the not-found text.
@@ -688,7 +735,7 @@ mod tests {
             make_agent_row("codebuddy", true, r#"[{"id":"codebuddy-pro","name":"CodeBuddy Pro"}]"#),
             make_agent_row("disabled-one", false, r#"[{"id":"m1","name":"M1"}]"#),
         ];
-        let value = build_list_models_from_rows(&rows, None);
+        let value = build_list_models_from_rows(&rows, None, &[]);
         let types: Vec<&str> = value["agent_types"]
             .as_array()
             .unwrap()
@@ -707,7 +754,7 @@ mod tests {
             true,
             r#"[{"id":"claude-opus-4","name":"Opus 4"},{"id":"claude-sonnet-4","name":"Sonnet 4"}]"#,
         )];
-        let value = build_list_models_from_rows(&rows, None);
+        let value = build_list_models_from_rows(&rows, None, &[]);
         let claude_entry = value["agent_types"]
             .as_array()
             .unwrap()
@@ -729,7 +776,7 @@ mod tests {
             make_agent_row("claude", true, r#"[{"id":"claude-sonnet-4","name":"Sonnet 4"}]"#),
             make_agent_row("codebuddy", true, r#"[{"id":"cb-pro","name":"Pro"}]"#),
         ];
-        let value = build_list_models_from_rows(&rows, Some("codebuddy"));
+        let value = build_list_models_from_rows(&rows, Some("codebuddy"), &[]);
         let types: Vec<&str> = value["agent_types"]
             .as_array()
             .unwrap()
@@ -745,7 +792,7 @@ mod tests {
             make_agent_row("claude", true, r#"[{"id":"claude-sonnet-4","name":"Sonnet 4"}]"#),
             make_agent_row_no_models("gemini", true),
         ];
-        let value = build_list_models_from_rows(&rows, None);
+        let value = build_list_models_from_rows(&rows, None, &[]);
         let types: Vec<&str> = value["agent_types"]
             .as_array()
             .unwrap()
@@ -799,6 +846,108 @@ mod tests {
             None => String::new(),
             Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
         }
+    }
+
+    #[test]
+    fn build_list_models_from_rows_includes_null_backend_with_supports_team() {
+        let mut aionrs_row = make_agent_row("aionrs", true, r#"[{"id":"aionrs-default","name":"AionRS"}]"#);
+        aionrs_row.backend = None;
+        aionrs_row.agent_type = "aionrs".to_owned();
+        aionrs_row.agent_source = "internal".to_owned();
+        aionrs_row.agent_capabilities = None;
+        aionrs_row.behavior_policy = Some(r#"{"supports_team":true}"#.to_owned());
+
+        let rows = vec![
+            make_agent_row("claude", true, r#"[{"id":"claude-sonnet-4","name":"Sonnet 4"}]"#),
+            aionrs_row,
+        ];
+        let value = build_list_models_from_rows(&rows, None, &[]);
+        let types: Vec<&str> = value["agent_types"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|e| e["type"].as_str())
+            .collect();
+        assert!(types.contains(&"claude"));
+        assert!(types.contains(&"aionrs"), "aionrs with backend=NULL but supports_team=true must be included");
+    }
+
+    #[test]
+    fn build_list_models_from_rows_filters_null_backend_by_agent_type() {
+        let mut aionrs_row = make_agent_row("aionrs", true, r#"[{"id":"aionrs-default","name":"AionRS"}]"#);
+        aionrs_row.backend = None;
+        aionrs_row.agent_type = "aionrs".to_owned();
+        aionrs_row.agent_capabilities = None;
+        aionrs_row.behavior_policy = Some(r#"{"supports_team":true}"#.to_owned());
+
+        let rows = vec![
+            make_agent_row("claude", true, r#"[{"id":"claude-sonnet-4","name":"Sonnet 4"}]"#),
+            aionrs_row,
+        ];
+        // Filter by "aionrs" should only return aionrs
+        let value = build_list_models_from_rows(&rows, Some("aionrs"), &[]);
+        let types: Vec<&str> = value["agent_types"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|e| e["type"].as_str())
+            .collect();
+        assert_eq!(types, vec!["aionrs"]);
+    }
+
+    #[test]
+    fn build_list_models_from_rows_parses_model_info_payload_format() {
+        let model_info_json = r#"{"current_model_id":"DeepSeek-V3.2","current_model_label":"DeepSeek-V3.2","available_models":[{"id":"GLM-5.0","label":"GLM-5.0"},{"id":"GLM-5.0-Turbo","label":"GLM-5.0-Turbo"},{"id":"DeepSeek-V3.2","label":"DeepSeek-V3.2"}]}"#;
+        let rows = vec![make_agent_row("codebuddy", true, model_info_json)];
+        let value = build_list_models_from_rows(&rows, None, &[]);
+        let cb_entry = value["agent_types"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["type"].as_str() == Some("codebuddy"))
+            .expect("codebuddy entry");
+        let models: Vec<&str> = cb_entry["models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        assert_eq!(models, vec!["GLM-5.0", "GLM-5.0-Turbo", "DeepSeek-V3.2"]);
+    }
+
+    #[test]
+    fn build_list_models_from_rows_uses_provider_models_for_internal_agents() {
+        let mut aionrs_row = make_agent_row("aionrs", true, "[]");
+        aionrs_row.backend = None;
+        aionrs_row.agent_type = "aionrs".to_owned();
+        aionrs_row.agent_source = "internal".to_owned();
+        aionrs_row.agent_capabilities = None;
+        aionrs_row.available_models = None;
+        aionrs_row.behavior_policy = Some(r#"{"supports_team":true}"#.to_owned());
+
+        let provider_models = vec![
+            "gemini-3.1-pro-preview".to_owned(),
+            "gpt-5.4".to_owned(),
+            "gpt-5.2".to_owned(),
+        ];
+        let rows = vec![
+            make_agent_row("claude", true, r#"{"available_models":[{"id":"claude-sonnet-4","label":"Sonnet 4"}]}"#),
+            aionrs_row,
+        ];
+        let value = build_list_models_from_rows(&rows, None, &provider_models);
+        let aionrs_entry = value["agent_types"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|e| e["type"].as_str() == Some("aionrs"))
+            .expect("aionrs entry");
+        let models: Vec<&str> = aionrs_entry["models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        assert_eq!(models, vec!["gemini-3.1-pro-preview", "gpt-5.4", "gpt-5.2"]);
     }
 
     #[test]

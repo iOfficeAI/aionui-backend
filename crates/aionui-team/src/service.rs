@@ -12,7 +12,7 @@ use aionui_api_types::{
 use aionui_common::{AgentKillReason, ProviderWithModel, generate_id, now_ms};
 use aionui_conversation::ConversationService;
 use aionui_db::models::TeamRow;
-use aionui_db::{IAgentMetadataRepository, ITeamRepository, UpdateTeamParams};
+use aionui_db::{IAgentMetadataRepository, IProviderRepository, ITeamRepository, UpdateTeamParams};
 use aionui_realtime::EventBroadcaster;
 use dashmap::DashMap;
 use tokio::task::JoinHandle;
@@ -33,6 +33,7 @@ struct SessionEntry {
 pub struct TeamSessionService {
     repo: Arc<dyn ITeamRepository>,
     agent_metadata_repo: Arc<dyn IAgentMetadataRepository>,
+    provider_repo: Arc<dyn IProviderRepository>,
     conversation_service: ConversationService,
     broadcaster: Arc<dyn EventBroadcaster>,
     task_manager: Arc<dyn IWorkerTaskManager>,
@@ -59,9 +60,11 @@ pub struct TeamSessionService {
 }
 
 impl TeamSessionService {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         repo: Arc<dyn ITeamRepository>,
         agent_metadata_repo: Arc<dyn IAgentMetadataRepository>,
+        provider_repo: Arc<dyn IProviderRepository>,
         conversation_service: ConversationService,
         broadcaster: Arc<dyn EventBroadcaster>,
         task_manager: Arc<dyn IWorkerTaskManager>,
@@ -71,6 +74,7 @@ impl TeamSessionService {
         Arc::new_cyclic(|weak| Self {
             repo,
             agent_metadata_repo,
+            provider_repo,
             conversation_service,
             broadcaster,
             task_manager,

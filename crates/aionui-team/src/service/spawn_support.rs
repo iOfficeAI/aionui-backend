@@ -138,11 +138,29 @@ impl TeamSessionService {
 
     /// Return the `team_list_models` response built from DB rows.
     /// Falls back to the hardcoded response if the DB query fails.
+    /// For internal agents (like aionrs with backend=NULL), enriches
+    /// with models from the providers table.
     pub(crate) async fn list_models_from_db(&self, agent_type_filter: Option<&str>) -> serde_json::Value {
         let Ok(rows) = self.agent_metadata_repo.list_all().await else {
             return crate::mcp::tools::handle_team_list_models(&serde_json::Value::Null);
         };
-        crate::mcp::tools::build_list_models_from_rows(&rows, agent_type_filter)
+        let provider_models = self.collect_provider_models().await;
+        crate::mcp::tools::build_list_models_from_rows(&rows, agent_type_filter, &provider_models)
+    }
+
+    /// Collect all enabled provider model IDs grouped by provider name.
+    /// Returns a flat list of model IDs for use by internal agents (aionrs).
+    async fn collect_provider_models(&self) -> Vec<String> {
+        let Ok(providers) = self.provider_repo.list().await else {
+            return vec![];
+        };
+        providers
+            .into_iter()
+            .filter(|p| p.enabled)
+            .flat_map(|p| {
+                serde_json::from_str::<Vec<String>>(&p.models).unwrap_or_default()
+            })
+            .collect()
     }
 
     pub async fn spawn_agent_in_session(
