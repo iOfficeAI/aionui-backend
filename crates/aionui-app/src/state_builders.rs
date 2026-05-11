@@ -223,6 +223,7 @@ pub fn build_session_state(services: &AppServices, agent_service: Arc<AgentServi
 pub fn build_file_state(services: &AppServices) -> FileRouterState {
     let broadcaster = services.event_bus.clone();
     let allowed_roots = default_allowed_roots();
+    let browse_roots = aionui_file::browse::default_browse_roots();
     let file_service = Arc::new(FileService::new(broadcaster.clone(), allowed_roots.clone()));
     let watch_service = Arc::new(FileWatchService::new(broadcaster).expect("file watch service initialization"));
     let snapshot_service = Arc::new(SnapshotService::new());
@@ -231,6 +232,7 @@ pub fn build_file_state(services: &AppServices) -> FileRouterState {
         watch_service,
         snapshot_service,
         allowed_roots,
+        browse_roots,
     }
 }
 

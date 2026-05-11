@@ -126,6 +126,64 @@ pub struct CancelZipRequest {
     pub request_id: String,
 }
 
+/// Query parameters for `GET /api/fs/browse` — shallow directory browser.
+///
+/// Unlike `/api/fs/dir` (which returns a recursive tree scoped to a workspace
+/// root), `browse` is a WebUI-only host-file picker: it lists a single
+/// directory level, surfaces navigation hints (`can_go_up`, `parent_path`),
+/// and on Windows supports a `__ROOT__` sentinel for the drive-list screen.
+#[derive(Debug, Deserialize)]
+pub struct BrowseDirectoryQuery {
+    /// Directory to list. Empty string means "use default" (Windows: drive
+    /// list; Unix: current working directory). `"__ROOT__"` on Windows is
+    /// treated the same as an empty path.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// When true, include regular files in the response. Defaults to false
+    /// (directories only).
+    #[serde(default)]
+    pub show_files: Option<String>,
+}
+
+/// A single entry in a `/api/fs/browse` response.
+///
+/// Uses camelCase on the wire to match the original Express contract the
+/// frontend `DirectorySelectionModal` still consumes.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowseEntry {
+    pub name: String,
+    pub path: String,
+    pub is_directory: bool,
+    pub is_file: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<u64>,
+    /// Last-modified time as milliseconds since the unix epoch. Absent when
+    /// the entry has no readable metadata (e.g. a Windows drive stub).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modified: Option<i64>,
+}
+
+/// Response body for `GET /api/fs/browse`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowseDirectoryResponse {
+    /// The resolved directory currently being listed. Empty string when the
+    /// response is a Windows drive-list screen.
+    pub current_path: String,
+    /// Path to navigate to when the user clicks "up". `None` when already at
+    /// the root. Value `"__ROOT__"` is a sentinel used on Windows to mean
+    /// "return to the drive-list screen".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_path: Option<String>,
+    pub items: Vec<BrowseEntry>,
+    pub can_go_up: bool,
+    pub truncated: bool,
+    /// True when the response represents the Windows drive-list screen.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_root: Option<bool>,
+}
+
 // ---------------------------------------------------------------------------
 // A. Core file operations — Response DTOs
 // ---------------------------------------------------------------------------

@@ -1,21 +1,22 @@
 use axum::Router;
 use axum::extract::rejection::JsonRejection;
-use axum::extract::{DefaultBodyLimit, Json, Multipart, State};
-use axum::routing::post;
+use axum::extract::{DefaultBodyLimit, Json, Multipart, Query, State};
+use axum::routing::{get, post};
 use std::path::Path;
 use tower_http::limit::RequestBodyLimitLayer;
 
 use aionui_api_types::{
-    ApiResponse, CancelZipRequest, CopyFilesRequest, CopyFilesResponse, CreateTempFileRequest, DirOrFileResponse,
-    FetchRemoteImageRequest, FileChangeInfoResponse, FileMetadataResponse, FileWatchRequest, GetFileMetadataRequest,
-    GetFilesByDirRequest, GetImageBase64Request, ListWorkspaceFilesRequest, ReadFileBufferRequest, ReadFileRequest,
-    RemoveEntryRequest, RenameRequest, RenameResponse, SnapshotBaselineRequest, SnapshotCompareResponse,
-    SnapshotDiscardRequest, SnapshotInfoResponse, SnapshotStageRequest, SnapshotWorkspaceRequest,
-    WorkspaceFlatFileResponse, WorkspaceOfficeWatchRequest, WriteFileRequest, ZipRequest,
+    ApiResponse, BrowseDirectoryQuery, BrowseDirectoryResponse, CancelZipRequest, CopyFilesRequest, CopyFilesResponse,
+    CreateTempFileRequest, DirOrFileResponse, FetchRemoteImageRequest, FileChangeInfoResponse, FileMetadataResponse,
+    FileWatchRequest, GetFileMetadataRequest, GetFilesByDirRequest, GetImageBase64Request, ListWorkspaceFilesRequest,
+    ReadFileBufferRequest, ReadFileRequest, RemoveEntryRequest, RenameRequest, RenameResponse, SnapshotBaselineRequest,
+    SnapshotCompareResponse, SnapshotDiscardRequest, SnapshotInfoResponse, SnapshotStageRequest,
+    SnapshotWorkspaceRequest, WorkspaceFlatFileResponse, WorkspaceOfficeWatchRequest, WriteFileRequest, ZipRequest,
 };
 use aionui_common::AppError;
 use aionui_common::constants::UPLOAD_MAX_SIZE;
 
+use crate::browse;
 use crate::traits::{FileServiceRef, FileWatchServiceRef, SnapshotServiceRef};
 use crate::types::{
     CompareResult, CopyResult, DirOrFile, FileChangeInfo, FileMetadata, SnapshotInfo, SnapshotMode, WorkspaceFlatFile,
@@ -33,6 +34,11 @@ pub struct FileRouterState {
     pub watch_service: FileWatchServiceRef,
     pub snapshot_service: SnapshotServiceRef,
     pub allowed_roots: Vec<std::path::PathBuf>,
+    /// Roots permitted by the shallow `/api/fs/browse` endpoint. This is
+    /// typically wider than `allowed_roots` (it includes `cwd`, Windows
+    /// drive letters, and `/` on Unix) because the WebUI host-file picker
+    /// legitimately needs to reach outside any single workspace.
+    pub browse_roots: Vec<std::path::PathBuf>,
 }
 
 // ---------------------------------------------------------------------------
@@ -56,6 +62,7 @@ pub fn file_routes(state: FileRouterState) -> Router {
 
     Router::new()
         // A. Core file operations
+        .route("/api/fs/browse", get(browse_directory))
         .route("/api/fs/dir", post(get_files_by_dir))
         .route("/api/fs/list", post(list_workspace_files))
         .route("/api/fs/metadata", post(get_file_metadata))
@@ -96,6 +103,26 @@ pub fn file_routes(state: FileRouterState) -> Router {
 // ---------------------------------------------------------------------------
 // A. Core file operations — handlers
 // ---------------------------------------------------------------------------
+
+/// `GET /api/fs/browse` — shallow directory listing for the WebUI host-file
+/// picker. Runs on the Tokio blocking pool because it does synchronous
+/// filesystem I/O.
+async fn browse_directory(
+    State(state): State<FileRouterState>,
+    Query(query): Query<BrowseDirectoryQuery>,
+) -> Result<Json<ApiResponse<BrowseDirectoryResponse>>, AppError> {
+    let show_files = matches!(query.show_files.as_deref(), Some("true") | Some("1"));
+    let raw_path = query.path.clone();
+    let roots = state.browse_roots.clone();
+
+    let response = tokio::task::spawn_blocking(move || {
+        browse::browse(raw_path.as_deref(), show_files, &roots)
+    })
+    .await
+    .map_err(|e| AppError::Internal(format!("browse task failed: {}", e)))??;
+
+    Ok(Json(ApiResponse::ok(response)))
+}
 
 async fn get_files_by_dir(
     State(state): State<FileRouterState>,
