@@ -80,6 +80,9 @@ pub struct BehaviorPolicy {
     /// `_meta.<vendor>.options.resume` field.
     #[serde(default)]
     pub session_load_via_meta_field: bool,
+
+    #[serde(default)]
+    pub supports_team: bool,
 }
 
 /// Handshake-derived fields captured from the ACP init/session-response.
@@ -277,5 +280,19 @@ mod behavior_policy_tests {
         assert!(!policy.supports_side_question);
         assert!(!policy.self_identity_sticky);
         assert!(!policy.session_load_via_meta_field);
+        assert!(!policy.supports_team);
+    }
+
+    #[test]
+    fn supports_team_defaults_false_and_roundtrips() {
+        let empty: BehaviorPolicy = serde_json::from_str("{}").unwrap();
+        assert!(!empty.supports_team);
+
+        let with_team: BehaviorPolicy =
+            serde_json::from_str(r#"{"supports_team":true}"#).unwrap();
+        assert!(with_team.supports_team);
+
+        let serialized = serde_json::to_string(&with_team).unwrap();
+        assert!(serialized.contains("\"supports_team\":true"));
     }
 }

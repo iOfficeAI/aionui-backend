@@ -272,7 +272,8 @@ fn decode_row(row: AgentMetadataRow) -> Option<AgentMetadata> {
     };
 
     let backend_str = row.backend.as_deref().unwrap_or("");
-    let team_capable = aionui_common::constants::is_team_capable(backend_str, handshake.agent_capabilities.as_ref());
+    let team_capable = behavior_policy.supports_team
+        || aionui_common::constants::is_team_capable(backend_str, handshake.agent_capabilities.as_ref());
 
     let mut meta = AgentMetadata {
         id: row.id,
