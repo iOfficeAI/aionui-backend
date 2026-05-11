@@ -257,7 +257,10 @@ mod tests {
         let rows = repo.list_all().await.unwrap();
         // 17 ACP vendors + 2 non-ACP builtins + 1 internal = 20.
         assert_eq!(rows.len(), 20);
-        assert!(rows.iter().any(|r| r.name == "Claude Code" && r.agent_source == "builtin"));
+        assert!(
+            rows.iter()
+                .any(|r| r.name == "Claude Code" && r.agent_source == "builtin")
+        );
         assert!(
             rows.iter()
                 .any(|r| r.name == "Aion CLI" && r.agent_source == "internal")
