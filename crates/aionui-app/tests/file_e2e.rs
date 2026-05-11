@@ -25,6 +25,7 @@ async fn fs_endpoints_require_auth() {
         "/api/fs/remove",
         "/api/fs/rename",
         "/api/fs/temp",
+        "/api/fs/upload",
         "/api/fs/image-base64",
         "/api/fs/fetch-remote-image",
         "/api/fs/zip",
@@ -774,4 +775,179 @@ async fn path_traversal_rejected() {
     let resp = app.oneshot(req).await.unwrap();
     // Should be rejected (400 bad request)
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+// ===========================================================================
+// /api/fs/upload — multipart upload
+// ===========================================================================
+
+struct UploadMultipart {
+    boundary: String,
+    parts: Vec<u8>,
+}
+
+impl UploadMultipart {
+    fn new() -> Self {
+        Self {
+            boundary: "----TestBoundaryFsUpload9XyZ".to_owned(),
+            parts: Vec::new(),
+        }
+    }
+
+    fn add_text(mut self, name: &str, value: &str) -> Self {
+        self.parts
+            .extend_from_slice(format!("--{}\r\n", self.boundary).as_bytes());
+        self.parts
+            .extend_from_slice(format!("Content-Disposition: form-data; name=\"{name}\"\r\n\r\n").as_bytes());
+        self.parts.extend_from_slice(value.as_bytes());
+        self.parts.extend_from_slice(b"\r\n");
+        self
+    }
+
+    fn add_file(mut self, name: &str, filename: &str, mime: &str, data: &[u8]) -> Self {
+        self.parts
+            .extend_from_slice(format!("--{}\r\n", self.boundary).as_bytes());
+        self.parts.extend_from_slice(
+            format!("Content-Disposition: form-data; name=\"{name}\"; filename=\"{filename}\"\r\n").as_bytes(),
+        );
+        self.parts
+            .extend_from_slice(format!("Content-Type: {mime}\r\n\r\n").as_bytes());
+        self.parts.extend_from_slice(data);
+        self.parts.extend_from_slice(b"\r\n");
+        self
+    }
+
+    fn build(mut self) -> (String, Vec<u8>) {
+        self.parts
+            .extend_from_slice(format!("--{}--\r\n", self.boundary).as_bytes());
+        let content_type = format!("multipart/form-data; boundary={}", self.boundary);
+        (content_type, self.parts)
+    }
+}
+
+fn upload_request(content_type: &str, body: Vec<u8>, token: &str, csrf: &str) -> axum::http::Request<axum::body::Body> {
+    let content_length = body.len();
+    axum::http::Request::builder()
+        .method("POST")
+        .uri("/api/fs/upload")
+        .header("content-type", content_type)
+        .header("content-length", content_length)
+        .header("authorization", format!("Bearer {token}"))
+        .header("x-csrf-token", csrf)
+        .header("cookie", format!("aionui-csrf-token={csrf}"))
+        .body(axum::body::Body::from(body))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn upload_accepts_small_png_and_returns_readable_path() {
+    let (mut app, services) = build_app().await;
+    let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
+
+    // Minimal valid 1x1 PNG (67 bytes).
+    let png_bytes: Vec<u8> = vec![
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00,
+        0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53, 0xDE, 0x00, 0x00, 0x00,
+        0x0C, 0x49, 0x44, 0x41, 0x54, 0x08, 0xD7, 0x63, 0xF8, 0xCF, 0xC0, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01, 0xE2,
+        0x21, 0xBC, 0x33, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+    ];
+
+    let conv_id = format!("conv-upload-{}", std::process::id());
+    let (content_type, body) = UploadMultipart::new()
+        .add_file("file", "paste.png", "image/png", &png_bytes)
+        .add_text("conversation_id", &conv_id)
+        .build();
+
+    let req = upload_request(&content_type, body, &token, &csrf);
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let json = body_json(resp).await;
+    assert_eq!(json["success"], true);
+    let path = json["data"].as_str().expect("data should be a string path");
+    let p = std::path::Path::new(path);
+    assert!(p.is_absolute(), "returned path must be absolute: {path}");
+    assert_eq!(p.file_name().unwrap().to_string_lossy(), "paste.png");
+    // conversation_id routing produced a sub-directory of that name.
+    assert_eq!(p.parent().unwrap().file_name().unwrap().to_string_lossy(), conv_id);
+    // File contents must match what we uploaded.
+    let on_disk = std::fs::read(p).expect("uploaded file should be readable");
+    assert_eq!(on_disk, png_bytes);
+
+    // Cleanup.
+    let _ = std::fs::remove_file(p);
+    let _ = std::fs::remove_dir(p.parent().unwrap());
+}
+
+#[tokio::test]
+async fn upload_uses_content_disposition_filename_when_file_name_missing() {
+    let (mut app, services) = build_app().await;
+    let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
+
+    let bytes = b"hello upload".to_vec();
+    let unique = format!("dispo-{}.bin", std::process::id());
+    let (content_type, body) = UploadMultipart::new()
+        .add_file("file", &unique, "application/octet-stream", &bytes)
+        .build();
+
+    let req = upload_request(&content_type, body, &token, &csrf);
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let json = body_json(resp).await;
+    let path = json["data"].as_str().unwrap();
+    assert!(path.ends_with(&unique));
+    let _ = std::fs::remove_file(path);
+}
+
+#[tokio::test]
+async fn upload_prefers_explicit_file_name_field_over_dispo() {
+    let (mut app, services) = build_app().await;
+    let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
+
+    let bytes = b"pref".to_vec();
+    let explicit = format!("explicit-{}.bin", std::process::id());
+    let (content_type, body) = UploadMultipart::new()
+        .add_file("file", "dispo.bin", "application/octet-stream", &bytes)
+        .add_text("file_name", &explicit)
+        .build();
+
+    let req = upload_request(&content_type, body, &token, &csrf);
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let json = body_json(resp).await;
+    let path = json["data"].as_str().unwrap();
+    assert!(path.ends_with(&explicit), "expected filename {explicit}, got {path}");
+    let _ = std::fs::remove_file(path);
+}
+
+#[tokio::test]
+async fn upload_missing_file_field_returns_400() {
+    let (mut app, services) = build_app().await;
+    let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
+
+    let (content_type, body) = UploadMultipart::new().add_text("file_name", "ignored.png").build();
+
+    let req = upload_request(&content_type, body, &token, &csrf);
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    let json = body_json(resp).await;
+    assert_eq!(json["success"], false);
+}
+
+#[tokio::test]
+async fn upload_body_exceeding_30mb_returns_413() {
+    let (mut app, services) = build_app().await;
+    let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
+
+    // 31 MB payload comfortably exceeds UPLOAD_MAX_SIZE (30 MB).
+    let big = vec![0u8; 31 * 1024 * 1024];
+    let (content_type, body) = UploadMultipart::new()
+        .add_file("file", "big.bin", "application/octet-stream", &big)
+        .build();
+
+    let req = upload_request(&content_type, body, &token, &csrf);
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
 }

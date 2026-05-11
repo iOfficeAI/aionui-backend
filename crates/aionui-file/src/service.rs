@@ -333,6 +333,25 @@ fn write_file_sync(path: &Path, data: &[u8]) -> Result<bool, AppError> {
     Ok(true)
 }
 
+/// Split a file name into `(base, ext)` where `ext` includes the leading dot.
+///
+/// Uses the **last** `.` as the extension boundary (matching macOS Finder and
+/// Chrome download naming). If the file has no extension, or the only dot is at
+/// the very start (hidden files like `.env`), the entire name is treated as the
+/// base and `ext` is empty.
+///
+/// Examples:
+/// - `"image.png"` -> `("image", ".png")`
+/// - `"foo.tar.gz"` -> `("foo.tar", ".gz")`
+/// - `"README"` -> `("README", "")`
+/// - `".env"` -> `(".env", "")`
+fn split_base_ext(name: &str) -> (&str, &str) {
+    match name.rfind('.') {
+        Some(idx) if idx > 0 => name.split_at(idx),
+        _ => (name, ""),
+    }
+}
+
 /// Get file metadata synchronously.
 fn get_file_metadata_sync(path: &Path) -> Result<FileMetadata, AppError> {
     let metadata = std::fs::metadata(path)
@@ -865,6 +884,94 @@ impl crate::traits::IFileService for FileService {
         })
         .await
         .map_err(|e| AppError::Internal(format!("create temp file task failed: {e}")))?
+    }
+
+    async fn create_upload_file(
+        &self,
+        file_name: &str,
+        data: &[u8],
+        conversation_id: Option<&str>,
+    ) -> Result<String, AppError> {
+        if file_name.is_empty() {
+            return Err(AppError::BadRequest("file name must not be empty".to_owned()));
+        }
+        if has_traversal(file_name) {
+            return Err(AppError::BadRequest(format!(
+                "file name '{}' contains invalid traversal patterns",
+                file_name
+            )));
+        }
+        if file_name.contains('/') || file_name.contains('\\') {
+            return Err(AppError::BadRequest(format!(
+                "file name '{}' must not contain path separators",
+                file_name
+            )));
+        }
+
+        // Validate optional conversation_id: no separators / traversal.
+        let conv_id = match conversation_id {
+            Some(id) if !id.is_empty() => {
+                if has_traversal(id) || id.contains('/') || id.contains('\\') {
+                    return Err(AppError::BadRequest(format!(
+                        "conversation id '{}' contains invalid characters",
+                        id
+                    )));
+                }
+                Some(id.to_owned())
+            }
+            _ => None,
+        };
+
+        let name = file_name.to_owned();
+        let bytes = data.to_vec();
+
+        tokio::task::spawn_blocking(move || {
+            let mut dir = std::env::temp_dir().join("aionui");
+            if let Some(conv_id) = conv_id.as_deref() {
+                dir = dir.join(conv_id);
+            } else {
+                dir = dir.join("general");
+            }
+            std::fs::create_dir_all(&dir)
+                .map_err(|e| AppError::Internal(format!("cannot create upload directory: {e}")))?;
+
+            let (base, ext) = split_base_ext(&name);
+            let mut candidate = name.clone();
+            let mut counter: u32 = 2;
+            loop {
+                let file_path = dir.join(&candidate);
+                match std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&file_path)
+                {
+                    Ok(mut f) => {
+                        f.write_all(&bytes).map_err(|e| {
+                            AppError::Internal(format!("cannot write upload file '{}': {e}", file_path.display()))
+                        })?;
+                        return Ok(file_path.to_string_lossy().into_owned());
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                        if counter > 1000 {
+                            return Err(AppError::Internal(format!(
+                                "too many name collisions for upload file '{}'",
+                                name
+                            )));
+                        }
+                        candidate = format!("{base}({counter}){ext}");
+                        counter += 1;
+                    }
+                    Err(e) => {
+                        return Err(AppError::Internal(format!(
+                            "cannot write upload file '{}': {e}",
+                            file_path.display()
+                        )));
+                    }
+                }
+            }
+        })
+        .await
+        .map_err(|e| AppError::Internal(format!("create upload file task failed: {e}")))?
     }
 
     async fn get_image_base64(&self, path: &str, extra_root: Option<&Path>) -> Result<String, AppError> {
@@ -1737,5 +1844,251 @@ mod tests {
 
         assert!(create_zip_sync(&zip_path, &entries, &cancelled).unwrap());
         assert!(zip_path.exists());
+    }
+
+    // ---- create_upload_file -------------------------------------------------
+
+    struct NullBroadcaster;
+    impl aionui_realtime::EventBroadcaster for NullBroadcaster {
+        fn broadcast(&self, _msg: aionui_api_types::WebSocketMessage<serde_json::Value>) {}
+    }
+
+    fn make_service() -> crate::service::FileService {
+        crate::service::FileService::new(Arc::new(NullBroadcaster), vec![])
+    }
+
+    #[tokio::test]
+    async fn create_upload_file_writes_bytes_and_returns_path() {
+        use crate::traits::IFileService;
+        let svc = make_service();
+        let unique = format!(
+            "upload_test_{}.bin",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let path_str = svc.create_upload_file(&unique, b"hello bytes", None).await.unwrap();
+        let path = std::path::Path::new(&path_str);
+        assert!(path.is_absolute());
+        assert_eq!(path.file_name().unwrap().to_string_lossy(), unique);
+        let contents = std::fs::read(path).unwrap();
+        assert_eq!(contents, b"hello bytes");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn create_upload_file_routes_to_conversation_subdir() {
+        use crate::traits::IFileService;
+        let svc = make_service();
+        let conv = format!(
+            "conv-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let unique = format!(
+            "img-{}.png",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let path_str = svc
+            .create_upload_file(&unique, b"\x89PNG\r\n", Some(&conv))
+            .await
+            .unwrap();
+        let path = std::path::Path::new(&path_str);
+        let parent = path.parent().unwrap();
+        assert_eq!(parent.file_name().unwrap().to_string_lossy(), conv);
+        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_dir(parent);
+    }
+
+    #[tokio::test]
+    async fn create_upload_file_rejects_path_separators() {
+        use crate::traits::IFileService;
+        let svc = make_service();
+        let result = svc.create_upload_file("nested/file.png", b"x", None).await;
+        assert!(matches!(result, Err(AppError::BadRequest(_))));
+        let result = svc.create_upload_file("nested\\file.png", b"x", None).await;
+        assert!(matches!(result, Err(AppError::BadRequest(_))));
+    }
+
+    #[tokio::test]
+    async fn create_upload_file_rejects_traversal() {
+        use crate::traits::IFileService;
+        let svc = make_service();
+        let result = svc.create_upload_file("..", b"x", None).await;
+        assert!(matches!(result, Err(AppError::BadRequest(_))));
+    }
+
+    #[tokio::test]
+    async fn create_upload_file_rejects_empty_name() {
+        use crate::traits::IFileService;
+        let svc = make_service();
+        let result = svc.create_upload_file("", b"x", None).await;
+        assert!(matches!(result, Err(AppError::BadRequest(_))));
+    }
+
+    #[tokio::test]
+    async fn create_upload_file_rejects_invalid_conversation_id() {
+        use crate::traits::IFileService;
+        let svc = make_service();
+        let result = svc.create_upload_file("good.png", b"x", Some("../escape")).await;
+        assert!(matches!(result, Err(AppError::BadRequest(_))));
+        let result = svc.create_upload_file("good.png", b"x", Some("nested/id")).await;
+        assert!(matches!(result, Err(AppError::BadRequest(_))));
+    }
+
+    // ---- name collision behaviour -----------------------------------------
+
+    /// Generate a unique conversation id so each test gets a fresh directory.
+    fn unique_conv_id(tag: &str) -> String {
+        format!(
+            "conv-collide-{tag}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        )
+    }
+
+    #[test]
+    fn split_base_ext_matches_finder_conventions() {
+        assert_eq!(split_base_ext("image.png"), ("image", ".png"));
+        assert_eq!(split_base_ext("foo.tar.gz"), ("foo.tar", ".gz"));
+        assert_eq!(split_base_ext("README"), ("README", ""));
+        assert_eq!(split_base_ext(".env"), (".env", ""));
+        assert_eq!(split_base_ext("a.b"), ("a", ".b"));
+    }
+
+    #[tokio::test]
+    async fn create_upload_file_first_upload_uses_original_name() {
+        use crate::traits::IFileService;
+        let svc = make_service();
+        let conv = unique_conv_id("first");
+        let path_str = svc
+            .create_upload_file("image.png", b"first", Some(&conv))
+            .await
+            .unwrap();
+        let path = std::path::Path::new(&path_str);
+        assert_eq!(path.file_name().unwrap().to_string_lossy(), "image.png");
+        assert_eq!(std::fs::read(path).unwrap(), b"first");
+
+        let parent = path.parent().unwrap().to_path_buf();
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    #[tokio::test]
+    async fn create_upload_file_appends_numeric_suffix_on_conflict() {
+        use crate::traits::IFileService;
+        let svc = make_service();
+        let conv = unique_conv_id("suffix");
+
+        let first = svc.create_upload_file("image.png", b"one", Some(&conv)).await.unwrap();
+        let second = svc.create_upload_file("image.png", b"two", Some(&conv)).await.unwrap();
+        let third = svc
+            .create_upload_file("image.png", b"three", Some(&conv))
+            .await
+            .unwrap();
+
+        let first_path = std::path::Path::new(&first);
+        let second_path = std::path::Path::new(&second);
+        let third_path = std::path::Path::new(&third);
+
+        assert_eq!(first_path.file_name().unwrap().to_string_lossy(), "image.png");
+        assert_eq!(second_path.file_name().unwrap().to_string_lossy(), "image(2).png");
+        assert_eq!(third_path.file_name().unwrap().to_string_lossy(), "image(3).png");
+
+        // Originals stay intact — verifies no overwrite happened.
+        assert_eq!(std::fs::read(first_path).unwrap(), b"one");
+        assert_eq!(std::fs::read(second_path).unwrap(), b"two");
+        assert_eq!(std::fs::read(third_path).unwrap(), b"three");
+
+        let parent = first_path.parent().unwrap().to_path_buf();
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    #[tokio::test]
+    async fn create_upload_file_handles_extensionless_collision() {
+        use crate::traits::IFileService;
+        let svc = make_service();
+        let conv = unique_conv_id("noext");
+
+        let first = svc.create_upload_file("README", b"a", Some(&conv)).await.unwrap();
+        let second = svc.create_upload_file("README", b"b", Some(&conv)).await.unwrap();
+
+        let first_path = std::path::Path::new(&first);
+        let second_path = std::path::Path::new(&second);
+
+        assert_eq!(first_path.file_name().unwrap().to_string_lossy(), "README");
+        assert_eq!(second_path.file_name().unwrap().to_string_lossy(), "README(2)");
+
+        let parent = first_path.parent().unwrap().to_path_buf();
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    #[tokio::test]
+    async fn create_upload_file_handles_multi_dot_extension_collision() {
+        use crate::traits::IFileService;
+        let svc = make_service();
+        let conv = unique_conv_id("multidot");
+
+        let first = svc.create_upload_file("foo.tar.gz", b"a", Some(&conv)).await.unwrap();
+        let second = svc.create_upload_file("foo.tar.gz", b"b", Some(&conv)).await.unwrap();
+
+        let first_path = std::path::Path::new(&first);
+        let second_path = std::path::Path::new(&second);
+
+        assert_eq!(first_path.file_name().unwrap().to_string_lossy(), "foo.tar.gz");
+        assert_eq!(second_path.file_name().unwrap().to_string_lossy(), "foo.tar(2).gz");
+
+        let parent = first_path.parent().unwrap().to_path_buf();
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    #[tokio::test]
+    async fn create_upload_file_handles_hidden_file_collision() {
+        use crate::traits::IFileService;
+        let svc = make_service();
+        let conv = unique_conv_id("hidden");
+
+        let first = svc.create_upload_file(".env", b"a", Some(&conv)).await.unwrap();
+        let second = svc.create_upload_file(".env", b"b", Some(&conv)).await.unwrap();
+
+        let first_path = std::path::Path::new(&first);
+        let second_path = std::path::Path::new(&second);
+
+        assert_eq!(first_path.file_name().unwrap().to_string_lossy(), ".env");
+        assert_eq!(second_path.file_name().unwrap().to_string_lossy(), ".env(2)");
+
+        let parent = first_path.parent().unwrap().to_path_buf();
+        let _ = std::fs::remove_dir_all(&parent);
+    }
+
+    #[tokio::test]
+    async fn create_upload_file_preserves_all_bytes_across_collisions() {
+        use crate::traits::IFileService;
+        let svc = make_service();
+        let conv = unique_conv_id("bytes");
+
+        let a = svc.create_upload_file("image.png", b"AAA", Some(&conv)).await.unwrap();
+        let b = svc.create_upload_file("image.png", b"BBB", Some(&conv)).await.unwrap();
+        let c = svc.create_upload_file("image.png", b"CCC", Some(&conv)).await.unwrap();
+
+        // All three files exist with distinct content — no overwrite.
+        assert_eq!(std::fs::read(&a).unwrap(), b"AAA");
+        assert_eq!(std::fs::read(&b).unwrap(), b"BBB");
+        assert_eq!(std::fs::read(&c).unwrap(), b"CCC");
+
+        // Sanity: three distinct paths.
+        assert_ne!(a, b);
+        assert_ne!(b, c);
+        assert_ne!(a, c);
+
+        let parent = std::path::Path::new(&a).parent().unwrap().to_path_buf();
+        let _ = std::fs::remove_dir_all(&parent);
     }
 }

@@ -61,7 +61,7 @@ aion-mcp = { git = "https://github.com/iOfficeAI/aionrs.git", tag = "v0.1.21" }
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.8", features = ["multipart", "ws"] }
 tower = { version = "0.5" }
-tower-http = { version = "0.6", features = ["cors", "trace"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "limit"] }
 http = "1"
 
 # Serialization

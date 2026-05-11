@@ -1,8 +1,9 @@
 use axum::Router;
 use axum::extract::rejection::JsonRejection;
-use axum::extract::{Json, State};
+use axum::extract::{DefaultBodyLimit, Json, Multipart, State};
 use axum::routing::post;
 use std::path::Path;
+use tower_http::limit::RequestBodyLimitLayer;
 
 use aionui_api_types::{
     ApiResponse, CancelZipRequest, CopyFilesRequest, CopyFilesResponse, CreateTempFileRequest, DirOrFileResponse,
@@ -13,6 +14,7 @@ use aionui_api_types::{
     WorkspaceFlatFileResponse, WorkspaceOfficeWatchRequest, WriteFileRequest, ZipRequest,
 };
 use aionui_common::AppError;
+use aionui_common::constants::UPLOAD_MAX_SIZE;
 
 use crate::traits::{FileServiceRef, FileWatchServiceRef, SnapshotServiceRef};
 use crate::types::{
@@ -41,6 +43,17 @@ pub struct FileRouterState {
 ///
 /// All routes require authentication (applied by the caller).
 pub fn file_routes(state: FileRouterState) -> Router {
+    // Upload route carries its own body-size limit (UPLOAD_MAX_SIZE, 30 MB).
+    // We first disable the global `DefaultBodyLimit` that `aionui-app`
+    // installs (otherwise the `Multipart` extractor would cap the body at
+    // `BODY_LIMIT`), then apply `RequestBodyLimitLayer` as the sole hard
+    // cap. The layers are added in outer->inner order via `.layer()`.
+    let upload_router = Router::new()
+        .route("/api/fs/upload", post(upload_file))
+        .layer(DefaultBodyLimit::disable())
+        .layer(RequestBodyLimitLayer::new(UPLOAD_MAX_SIZE))
+        .with_state(state.clone());
+
     Router::new()
         // A. Core file operations
         .route("/api/fs/dir", post(get_files_by_dir))
@@ -77,6 +90,7 @@ pub fn file_routes(state: FileRouterState) -> Router {
         .route("/api/fs/snapshot/branches", post(snapshot_branches))
         .route("/api/fs/snapshot/dispose", post(snapshot_dispose))
         .with_state(state)
+        .merge(upload_router)
 }
 
 // ---------------------------------------------------------------------------
@@ -204,6 +218,103 @@ async fn create_temp_file(
 ) -> Result<Json<ApiResponse<String>>, AppError> {
     let Json(req) = body.map_err(|e| AppError::BadRequest(e.to_string()))?;
     let path = state.file_service.create_temp_file(&req.file_name).await?;
+    Ok(Json(ApiResponse::ok(path)))
+}
+
+/// Fields extracted from a `/api/fs/upload` multipart request.
+struct UploadMultipartFields {
+    file_data: Vec<u8>,
+    file_name: Option<String>,
+    dispo_file_name: Option<String>,
+    conversation_id: Option<String>,
+}
+
+/// Strip any directory component from a file name and reject empty results.
+/// The returned name is guaranteed not to contain path separators; deeper
+/// traversal validation happens in [`IFileService::create_upload_file`].
+fn sanitize_upload_filename(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let last = trimmed.rsplit(['/', '\\']).next().unwrap_or("");
+    let last = last.trim();
+    if last.is_empty() { None } else { Some(last.to_owned()) }
+}
+
+async fn extract_upload_multipart(mut multipart: Multipart) -> Result<UploadMultipartFields, AppError> {
+    let mut file_data: Option<Vec<u8>> = None;
+    let mut file_name: Option<String> = None;
+    let mut dispo_file_name: Option<String> = None;
+    let mut conversation_id: Option<String> = None;
+
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| AppError::BadRequest(format!("multipart error: {e}")))?
+    {
+        let name = field.name().unwrap_or("").to_owned();
+        match name.as_str() {
+            "file" => {
+                // Capture the Content-Disposition filename (if any) before
+                // consuming the field body — `field.file_name()` is only
+                // available on the field metadata, not on the Bytes below.
+                dispo_file_name = field.file_name().and_then(sanitize_upload_filename);
+                file_data = Some(
+                    field
+                        .bytes()
+                        .await
+                        .map_err(|e| AppError::BadRequest(format!("failed to read file: {e}")))?
+                        .to_vec(),
+                );
+            }
+            "file_name" => {
+                let text = field
+                    .text()
+                    .await
+                    .map_err(|e| AppError::BadRequest(format!("failed to read file_name: {e}")))?;
+                if let Some(name) = sanitize_upload_filename(&text) {
+                    file_name = Some(name);
+                }
+            }
+            "conversation_id" => {
+                let text = field
+                    .text()
+                    .await
+                    .map_err(|e| AppError::BadRequest(format!("failed to read conversation_id: {e}")))?;
+                let trimmed = text.trim();
+                if !trimmed.is_empty() {
+                    conversation_id = Some(trimmed.to_owned());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let file_data = file_data.ok_or_else(|| AppError::BadRequest("missing 'file' field".to_owned()))?;
+
+    Ok(UploadMultipartFields {
+        file_data,
+        file_name,
+        dispo_file_name,
+        conversation_id,
+    })
+}
+
+async fn upload_file(
+    State(state): State<FileRouterState>,
+    multipart: Multipart,
+) -> Result<Json<ApiResponse<String>>, AppError> {
+    let fields = extract_upload_multipart(multipart).await?;
+
+    let file_name = fields.file_name.or(fields.dispo_file_name).ok_or_else(|| {
+        AppError::BadRequest("missing file name: provide 'file_name' or a multipart filename".to_owned())
+    })?;
+
+    let path = state
+        .file_service
+        .create_upload_file(&file_name, &fields.file_data, fields.conversation_id.as_deref())
+        .await?;
     Ok(Json(ApiResponse::ok(path)))
 }
 
@@ -693,5 +804,30 @@ mod tests {
         assert_eq!(r.staged[0].operation, FileChangeOperation::Create);
         assert_eq!(r.unstaged.len(), 1);
         assert_eq!(r.unstaged[0].operation, FileChangeOperation::Modify);
+    }
+
+    // ---- sanitize_upload_filename -----------------------------------------
+
+    #[test]
+    fn sanitize_upload_filename_strips_directory_components() {
+        assert_eq!(sanitize_upload_filename("a/b/c.png").as_deref(), Some("c.png"));
+        assert_eq!(sanitize_upload_filename("C:\\tmp\\d.jpg").as_deref(), Some("d.jpg"));
+        assert_eq!(
+            sanitize_upload_filename("  spaced.txt  ").as_deref(),
+            Some("spaced.txt")
+        );
+    }
+
+    #[test]
+    fn sanitize_upload_filename_rejects_empty() {
+        assert_eq!(sanitize_upload_filename(""), None);
+        assert_eq!(sanitize_upload_filename("   "), None);
+        assert_eq!(sanitize_upload_filename("/"), None);
+        assert_eq!(sanitize_upload_filename("a/b/"), None);
+    }
+
+    #[test]
+    fn sanitize_upload_filename_plain_passthrough() {
+        assert_eq!(sanitize_upload_filename("image.png").as_deref(), Some("image.png"));
     }
 }

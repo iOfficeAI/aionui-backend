@@ -6,6 +6,7 @@ pub mod team_stdio;
 
 use std::sync::Arc;
 
+use axum::extract::DefaultBodyLimit;
 use axum::http::Method;
 use axum::middleware::from_fn_with_state;
 use axum::routing::get;
@@ -606,6 +607,11 @@ pub fn create_router_with_all_state(services: &AppServices, states: ModuleStates
     .merge(office_proxy)
     .merge(public_assets)
     .layer(middleware::from_fn(security_headers_middleware));
+
+    // Raise the default request body limit from axum's 2MB default to
+    // `BODY_LIMIT` (10MB). Routes that need a larger cap (e.g. `/api/fs/upload`)
+    // disable this default and install their own `RequestBodyLimitLayer`.
+    let router = router.layer(DefaultBodyLimit::max(aionui_common::constants::BODY_LIMIT));
 
     let router = with_access_log(router);
 
