@@ -706,3 +706,56 @@ async fn create_aionrs_strips_extra_model_field() {
     // Top-level model is still present and wins.
     assert_eq!(resp.model.unwrap().model, "gpt-4o");
 }
+
+#[tokio::test]
+async fn update_rejects_top_level_model_for_acp() {
+    let (svc, _, task_mgr) = setup().await;
+    let conv = svc.create(USER_ID, make_create_req()).await.unwrap();
+
+    let req: UpdateConversationRequest = serde_json::from_value(json!({
+        "model": { "provider_id": "p1", "model": "claude-sonnet-4-20250514" }
+    }))
+    .unwrap();
+
+    let err = svc.update(USER_ID, &conv.id, req, &task_mgr).await.unwrap_err();
+    assert!(matches!(err, AppError::BadRequest(_)), "expected BadRequest, got {err:?}");
+}
+
+#[tokio::test]
+async fn update_accepts_top_level_model_for_aionrs() {
+    let (svc, _, task_mgr) = setup().await;
+
+    let create_req: CreateConversationRequest = serde_json::from_value(json!({
+        "type": "aionrs",
+        "model": { "provider_id": "p1", "model": "gpt-4o" },
+        "extra": {}
+    }))
+    .unwrap();
+    let conv = svc.create(USER_ID, create_req).await.unwrap();
+
+    let req: UpdateConversationRequest = serde_json::from_value(json!({
+        "model": { "provider_id": "p1", "model": "gpt-4o-mini" }
+    }))
+    .unwrap();
+    let updated = svc.update(USER_ID, &conv.id, req, &task_mgr).await.unwrap();
+    assert_eq!(updated.model.unwrap().model, "gpt-4o-mini");
+}
+
+#[tokio::test]
+async fn update_non_aionrs_extra_model_does_not_kill_task() {
+    // Verifies the explicit rule that `extra.model` changes for non-aionrs
+    // do NOT trigger task_manager.kill. Since our `NoopTaskManager::kill` is
+    // a no-op we can't assert the negative directly; we assert the update
+    // succeeds and the merged extra carries the new field, and that top-level
+    // model remains None.
+    let (svc, _, task_mgr) = setup().await;
+    let conv = svc.create(USER_ID, make_create_req()).await.unwrap();
+
+    let req: UpdateConversationRequest = serde_json::from_value(json!({
+        "extra": { "current_model_id": "claude-opus-4" }
+    }))
+    .unwrap();
+    let updated = svc.update(USER_ID, &conv.id, req, &task_mgr).await.unwrap();
+    assert_eq!(updated.extra["current_model_id"], "claude-opus-4");
+    assert!(updated.model.is_none());
+}
