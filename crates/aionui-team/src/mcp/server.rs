@@ -437,7 +437,7 @@ pub(crate) async fn dispatch_tool(
         "team_task_update" => exec_task_update(arguments, scheduler).await,
         "team_task_list" => exec_task_list(scheduler).await,
         "team_members" => exec_members(scheduler).await,
-        "team_rename_agent" => exec_rename_agent(arguments, scheduler).await,
+        "team_rename_agent" => exec_rename_agent(arguments, scheduler, service, team_id).await,
         "team_shutdown_agent" => {
             exec_shutdown_agent(arguments, scheduler, service, team_id, caller_slot_id, caller_role).await
         }
@@ -688,14 +688,26 @@ async fn exec_members(scheduler: &TeammateManager) -> Result<String, String> {
     serde_json::to_string_pretty(&output).map_err(|e| format!("Serialization error: {e}"))
 }
 
-async fn exec_rename_agent(args: &Value, scheduler: &TeammateManager) -> Result<String, String> {
+async fn exec_rename_agent(
+    args: &Value,
+    scheduler: &TeammateManager,
+    service: &Weak<TeamSessionService>,
+    team_id: &str,
+) -> Result<String, String> {
     let input: RenameAgentInput = serde_json::from_value(args.clone()).map_err(|e| format!("Invalid params: {e}"))?;
 
     let resolved_slot = resolve_agent_target(scheduler, &input.slot_id).await?;
-    scheduler
-        .rename_agent(&resolved_slot, &input.new_name)
-        .await
-        .map_err(|e| e.to_string())?;
+
+    if let Some(svc) = service.upgrade() {
+        svc.rename_agent(team_id, &resolved_slot, &input.new_name)
+            .await
+            .map_err(|e| e.to_string())?;
+    } else {
+        scheduler
+            .rename_agent(&resolved_slot, &input.new_name)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
 
     Ok(format!("Agent '{}' renamed to '{}'", input.slot_id, input.new_name))
 }
