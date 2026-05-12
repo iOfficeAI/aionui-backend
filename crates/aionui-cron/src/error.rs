@@ -26,6 +26,9 @@ pub enum CronError {
     #[error("Invalid skill content: {0}")]
     InvalidSkillContent(String),
 
+    #[error("Invalid agent config: {0}")]
+    InvalidAgentConfig(String),
+
     #[error("Scheduler error: {0}")]
     Scheduler(String),
 
@@ -47,6 +50,7 @@ impl From<CronError> for AppError {
             CronError::InvalidJobStatus(msg) => AppError::BadRequest(msg),
             CronError::InvalidTimezone(msg) => AppError::BadRequest(msg),
             CronError::InvalidSkillContent(msg) => AppError::BadRequest(msg),
+            CronError::InvalidAgentConfig(msg) => AppError::BadRequest(msg),
             CronError::Scheduler(msg) => AppError::Internal(msg),
             CronError::Database(db_err) => AppError::from(db_err),
             CronError::Json(e) => AppError::Internal(format!("JSON error: {e}")),
@@ -103,6 +107,12 @@ mod tests {
     #[test]
     fn invalid_skill_content_maps_to_bad_request() {
         let err: AppError = CronError::InvalidSkillContent("empty".into()).into();
+        assert!(matches!(err, AppError::BadRequest(_)));
+    }
+
+    #[test]
+    fn invalid_agent_config_maps_to_bad_request() {
+        let err: AppError = CronError::InvalidAgentConfig("missing backend".into()).into();
         assert!(matches!(err, AppError::BadRequest(_)));
     }
 

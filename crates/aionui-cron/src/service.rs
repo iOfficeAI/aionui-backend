@@ -67,6 +67,7 @@ impl CronService {
     pub async fn add_job(&self, req: CreateCronJobRequest) -> Result<CronJob, CronError> {
         let schedule = schedule_from_dto(&req.schedule);
         validate_schedule(&schedule)?;
+        validate_aionrs_agent_config(&req.agent_type, req.agent_config.as_ref())?;
 
         let execution_mode = parse_execution_mode(req.execution_mode.as_deref())?;
         let created_by = CreatedBy::from_str(&req.created_by)?;
@@ -152,6 +153,7 @@ impl CronService {
             job.execution_mode = parse_execution_mode(Some(mode_str))?;
         }
         if let Some(config_dto) = &req.agent_config {
+            validate_aionrs_agent_config(&job.agent_type, Some(config_dto))?;
             job.agent_config = Some(CronAgentConfig {
                 backend: config_dto.backend.clone(),
                 name: config_dto.name.clone(),
@@ -1083,6 +1085,25 @@ fn parse_provider_with_model_loose(model_json: Option<&str>) -> Option<ProviderW
 // Free functions
 // ---------------------------------------------------------------------------
 
+/// Aionrs cron jobs require `agent_config.backend` (provider_id) to be set —
+/// the executor uses it to look up the provider row and build the agent.
+/// Reject add/update requests that would produce an invalid aionrs job.
+fn validate_aionrs_agent_config(
+    agent_type: &str,
+    agent_config: Option<&aionui_api_types::CronAgentConfigDto>,
+) -> Result<(), CronError> {
+    if agent_type != "aionrs" {
+        return Ok(());
+    }
+    let backend_ok = agent_config.is_some_and(|c| !c.backend.trim().is_empty());
+    if !backend_ok {
+        return Err(CronError::InvalidAgentConfig(
+            "aionrs cron jobs require agent_config.backend (provider_id)".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn parse_execution_mode(mode: Option<&str>) -> Result<ExecutionMode, CronError> {
     match mode {
         None | Some("existing") => Ok(ExecutionMode::Existing),
@@ -1252,6 +1273,57 @@ mod tests {
     #[test]
     fn validate_skill_valid_short() {
         assert!(validate_skill_body_content("Run daily report").is_ok());
+    }
+
+    // -- validate_aionrs_agent_config ----------------------------------------
+
+    fn agent_cfg_dto(backend: &str) -> aionui_api_types::CronAgentConfigDto {
+        aionui_api_types::CronAgentConfigDto {
+            backend: backend.to_owned(),
+            name: "provider".into(),
+            cli_path: None,
+            is_preset: None,
+            custom_agent_id: None,
+            preset_agent_type: None,
+            mode: None,
+            model_id: Some("gpt-4o".into()),
+            config_options: None,
+            workspace: None,
+        }
+    }
+
+    #[test]
+    fn validate_aionrs_accepts_valid_config() {
+        let cfg = agent_cfg_dto("4056cdea");
+        assert!(validate_aionrs_agent_config("aionrs", Some(&cfg)).is_ok());
+    }
+
+    #[test]
+    fn validate_aionrs_rejects_missing_config() {
+        let err = validate_aionrs_agent_config("aionrs", None).unwrap_err();
+        assert!(matches!(err, CronError::InvalidAgentConfig(_)));
+    }
+
+    #[test]
+    fn validate_aionrs_rejects_empty_backend() {
+        let cfg = agent_cfg_dto("");
+        let err = validate_aionrs_agent_config("aionrs", Some(&cfg)).unwrap_err();
+        assert!(matches!(err, CronError::InvalidAgentConfig(_)));
+    }
+
+    #[test]
+    fn validate_aionrs_rejects_whitespace_backend() {
+        let cfg = agent_cfg_dto("   ");
+        let err = validate_aionrs_agent_config("aionrs", Some(&cfg)).unwrap_err();
+        assert!(matches!(err, CronError::InvalidAgentConfig(_)));
+    }
+
+    #[test]
+    fn validate_aionrs_ignores_non_aionrs_type() {
+        // ACP / other types may legitimately omit agent_config or leave backend empty.
+        assert!(validate_aionrs_agent_config("acp", None).is_ok());
+        let cfg = agent_cfg_dto("");
+        assert!(validate_aionrs_agent_config("claude", Some(&cfg)).is_ok());
     }
 
     // -- parse_execution_mode -------------------------------------------------

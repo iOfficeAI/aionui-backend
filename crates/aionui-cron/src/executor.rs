@@ -399,7 +399,7 @@ impl JobExecutor {
         let req = CreateConversationRequest {
             r#type: agent_type,
             name: Some(job.name.clone()),
-            model: Some(model),
+            model,
             source: None,
             channel_chat_id: None,
             extra,
@@ -457,7 +457,15 @@ impl JobExecutor {
         saved_skill: Option<&SavedSkillContext>,
     ) -> ExecutionResult {
         let agent_type = parse_agent_type(&self.agent_registry, &job.agent_type).await;
-        let model = resolve_model(job);
+        // `BuildTaskOptions.model` is non-optional; non-aionrs agent types
+        // ignore it in their factory branches, so a blank placeholder is the
+        // canonical empty value (mirrors `ConversationService::build_task_options`
+        // for rows with NULL `model`).
+        let model = resolve_model(job).unwrap_or_else(|| ProviderWithModel {
+            provider_id: String::new(),
+            model: String::new(),
+            use_model: None,
+        });
         let workspace = match self.resolve_execution_workspace(job, conversation_id).await {
             Ok(workspace) => workspace,
             Err(e) => {
@@ -876,20 +884,29 @@ async fn parse_agent_type(registry: &AgentRegistry, agent_type_str: &str) -> Age
     serde_json::from_value::<AgentType>(serde_json::Value::String(agent_type_str.to_owned())).unwrap_or(AgentType::Acp)
 }
 
-fn resolve_model(job: &CronJob) -> ProviderWithModel {
-    if let Some(config) = &job.agent_config {
-        ProviderWithModel {
-            provider_id: config.backend.clone(),
-            model: config.model_id.clone().unwrap_or_else(|| "default".to_owned()),
-            use_model: None,
-        }
-    } else {
-        ProviderWithModel {
-            provider_id: job.agent_type.clone(),
-            model: "default".to_owned(),
-            use_model: None,
-        }
+/// Only aionrs conversations carry meaningful model info in `conversations.model`;
+/// ACP and other agent types ignore this field and resolve the model via their own
+/// mechanisms (catalog defaults, CLI flags, etc.). Returning `None` lets the
+/// `CreateConversationRequest.model` stay `None` for those types, which is the
+/// correct semantic.
+///
+/// For aionrs, `agent_config.backend` holds the provider_id (a DB hash, not a
+/// vendor label). `CronService::add_job`/`update_job` already rejects aionrs
+/// jobs lacking this field, so the `None` return here is defensive for any
+/// legacy in-memory row that somehow slipped through.
+fn resolve_model(job: &CronJob) -> Option<ProviderWithModel> {
+    if job.agent_type != "aionrs" {
+        return None;
     }
+    let config = job.agent_config.as_ref()?;
+    if config.backend.trim().is_empty() {
+        return None;
+    }
+    Some(ProviderWithModel {
+        provider_id: config.backend.clone(),
+        model: config.model_id.clone().unwrap_or_else(|| "default".to_owned()),
+        use_model: None,
+    })
 }
 
 /// Fill `extra` with the agent identity the factory should use.
@@ -1346,30 +1363,60 @@ mod tests {
     // -- resolve_model tests -------------------------------------------------
 
     #[test]
-    fn resolve_model_with_config() {
+    fn resolve_model_returns_none_for_acp() {
+        // Model info only applies to aionrs; ACP ignores it.
         let job = sample_job();
-        let model = resolve_model(&job);
-        assert_eq!(model.provider_id, "acp");
-        assert_eq!(model.model, "claude-sonnet-4");
+        assert!(resolve_model(&job).is_none());
     }
 
     #[test]
-    fn resolve_model_without_config() {
+    fn resolve_model_returns_none_for_acp_without_config() {
         let job = CronJob {
             agent_config: None,
             ..sample_job()
         };
-        let model = resolve_model(&job);
-        assert_eq!(model.provider_id, "acp");
-        assert_eq!(model.model, "default");
+        assert!(resolve_model(&job).is_none());
     }
 
     #[test]
-    fn resolve_model_config_no_model_id() {
+    fn resolve_model_returns_none_for_non_aionrs_type() {
         let job = CronJob {
+            agent_type: "claude".into(),
+            ..sample_job()
+        };
+        assert!(resolve_model(&job).is_none());
+    }
+
+    #[test]
+    fn resolve_model_aionrs_with_full_config() {
+        let job = CronJob {
+            agent_type: "aionrs".into(),
             agent_config: Some(CronAgentConfig {
-                backend: "gemini".into(),
-                name: "Gemini".into(),
+                backend: "4056cdea".into(),
+                name: "OpenAI".into(),
+                cli_path: None,
+                is_preset: None,
+                custom_agent_id: None,
+                preset_agent_type: None,
+                mode: None,
+                model_id: Some("gpt-5".into()),
+                config_options: None,
+                workspace: None,
+            }),
+            ..sample_job()
+        };
+        let model = resolve_model(&job).expect("aionrs + full config returns Some");
+        assert_eq!(model.provider_id, "4056cdea");
+        assert_eq!(model.model, "gpt-5");
+    }
+
+    #[test]
+    fn resolve_model_aionrs_without_model_id_defaults_to_default() {
+        let job = CronJob {
+            agent_type: "aionrs".into(),
+            agent_config: Some(CronAgentConfig {
+                backend: "4056cdea".into(),
+                name: "OpenAI".into(),
                 cli_path: None,
                 is_preset: None,
                 custom_agent_id: None,
@@ -1381,9 +1428,42 @@ mod tests {
             }),
             ..sample_job()
         };
-        let model = resolve_model(&job);
-        assert_eq!(model.provider_id, "gemini");
+        let model = resolve_model(&job).expect("aionrs without model_id still returns Some");
+        assert_eq!(model.provider_id, "4056cdea");
         assert_eq!(model.model, "default");
+    }
+
+    #[test]
+    fn resolve_model_aionrs_without_config_returns_none() {
+        // Defensive: `add_job` rejects this shape, but resolve_model must not
+        // fabricate a provider_id from the agent_type like the old code did.
+        let job = CronJob {
+            agent_type: "aionrs".into(),
+            agent_config: None,
+            ..sample_job()
+        };
+        assert!(resolve_model(&job).is_none());
+    }
+
+    #[test]
+    fn resolve_model_aionrs_with_empty_backend_returns_none() {
+        let job = CronJob {
+            agent_type: "aionrs".into(),
+            agent_config: Some(CronAgentConfig {
+                backend: "   ".into(),
+                name: "Bogus".into(),
+                cli_path: None,
+                is_preset: None,
+                custom_agent_id: None,
+                preset_agent_type: None,
+                mode: None,
+                model_id: Some("gpt-5".into()),
+                config_options: None,
+                workspace: None,
+            }),
+            ..sample_job()
+        };
+        assert!(resolve_model(&job).is_none());
     }
 
     // -- build_task_extra tests -----------------------------------------------
