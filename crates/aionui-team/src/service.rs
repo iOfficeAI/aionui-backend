@@ -950,7 +950,7 @@ impl TeamSessionService {
         let slot_id_owned = slot_id.to_owned();
         let sessions = self.sessions.clone();
         let team_id_owned = team_id.to_owned();
-        let repo = Arc::clone(self.conversation_service.repo());
+        let repo = Arc::clone(self.conversation_service.conversation_repo());
         let broadcaster = self.broadcaster.clone();
         let user_id_owned = user_id;
         tokio::spawn(async move {

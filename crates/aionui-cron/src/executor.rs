@@ -2013,11 +2013,11 @@ mod tests {
         let stub_repo: Arc<dyn IConversationRepository> = Arc::new(StubConvRepo);
         let agent_metadata_repo: Arc<dyn aionui_db::IAgentMetadataRepository> = Arc::new(StubAgentMetadataRepo);
         let acp_session_repo: Arc<dyn aionui_db::IAcpSessionRepository> = Arc::new(StubAcpSessionRepo);
-        let conv_service = Arc::new(ConversationService::new_with_workspace_root(
-            Arc::clone(&stub_repo),
-            stub_broadcaster,
+        let conv_service = Arc::new(ConversationService::new(
             std::env::temp_dir(),
+            stub_broadcaster,
             Arc::new(StubSkillResolver),
+            Arc::clone(&stub_repo),
             Arc::clone(&agent_metadata_repo),
             acp_session_repo,
         ));
@@ -2616,11 +2616,11 @@ mod tests {
 
         let agent_metadata_repo: Arc<dyn aionui_db::IAgentMetadataRepository> = Arc::new(StubAgentMetadataRepo);
         let acp_session_repo: Arc<dyn aionui_db::IAcpSessionRepository> = Arc::new(StubAcpSessionRepo);
-        let conversation_service = Arc::new(ConversationService::new_with_workspace_root(
-            Arc::clone(&repo),
-            Arc::clone(&broadcaster),
+        let conversation_service = Arc::new(ConversationService::new(
             std::env::temp_dir(),
+            Arc::clone(&broadcaster),
             Arc::new(StubSkillResolver),
+            Arc::clone(&repo),
             Arc::clone(&agent_metadata_repo),
             acp_session_repo,
         ));

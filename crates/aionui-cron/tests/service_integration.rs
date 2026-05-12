@@ -548,11 +548,11 @@ async fn setup_with_conv_repo() -> (
 
     let stub_conv_repo = Arc::new(StubConvRepo::new());
     let stub_conv_repo_trait: Arc<dyn IConversationRepository> = stub_conv_repo.clone();
-    let conv_service = Arc::new(ConversationService::new_with_workspace_root(
-        Arc::clone(&stub_conv_repo_trait),
-        bc.clone() as Arc<dyn EventBroadcaster>,
+    let conv_service = Arc::new(ConversationService::new(
         std::env::temp_dir(),
+        bc.clone() as Arc<dyn EventBroadcaster>,
         Arc::new(StubSkillResolver),
+        Arc::clone(&stub_conv_repo_trait),
         Arc::clone(&agent_metadata_repo),
         acp_session_repo,
     ));

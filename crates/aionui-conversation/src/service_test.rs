@@ -474,11 +474,11 @@ fn make_service_with_resolver(
     let broadcaster = Arc::new(MockBroadcaster::new());
     let agent_metadata_repo: Arc<dyn IAgentMetadataRepository> = Arc::new(StubAgentMetadataRepo);
     let acp_session_repo: Arc<dyn IAcpSessionRepository> = Arc::new(StubAcpSessionRepo);
-    let svc = ConversationService::new_with_workspace_root(
-        repo.clone(),
-        broadcaster.clone(),
+    let svc = ConversationService::new(
         std::path::PathBuf::from(std::env::temp_dir()),
+        broadcaster.clone(),
         skill_resolver,
+        repo.clone(),
         agent_metadata_repo,
         acp_session_repo,
     );
@@ -1729,7 +1729,7 @@ async fn send_message_continues_cron_system_responses() {
         ],
     ));
     task_mgr.insert_agent(&conv.id, AgentInstance::Mock(scripted_agent.clone()));
-    svc.set_cron_service(Some(Arc::new(MockCronContinuationService)));
+    svc.with_cron_service(Some(Arc::new(MockCronContinuationService)));
 
     let task_mgr_dyn: Arc<dyn IWorkerTaskManager> = task_mgr.clone();
     let req: SendMessageRequest = serde_json::from_value(json!({

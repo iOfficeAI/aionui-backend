@@ -164,16 +164,16 @@ pub fn build_conversation_state(
     let skill_resolver = Arc::new(aionui_conversation::skill_resolver::ExtensionSkillResolver::new(
         services.skill_paths.clone(),
     ));
-    let conversation_service = ConversationService::new_with_workspace_root(
-        repo,
-        services.event_bus.clone(),
+    let conversation_service = ConversationService::new(
         std::path::PathBuf::from(&services.data_dir),
+        services.event_bus.clone(),
         skill_resolver,
+        repo,
         agent_metadata_repo,
         acp_session_repo,
     );
     if let Some(cron_service) = cron_service {
-        conversation_service.set_cron_service(Some(cron_service));
+        conversation_service.with_cron_service(Some(cron_service));
     }
     ConversationRouterState {
         conversation_service,
@@ -321,11 +321,11 @@ pub async fn build_channel_state(
     let acp_session_repo: Arc<dyn aionui_db::IAcpSessionRepository> = Arc::new(
         aionui_db::SqliteAcpSessionRepository::new(services.database.pool().clone()),
     );
-    let conversation_svc = Arc::new(ConversationService::new_with_workspace_root(
-        conv_repo,
-        services.event_bus.clone(),
+    let conversation_svc = Arc::new(ConversationService::new(
         std::path::PathBuf::from(&services.data_dir),
+        services.event_bus.clone(),
         skill_resolver,
+        conv_repo,
         agent_metadata_repo,
         acp_session_repo,
     ));
@@ -395,16 +395,16 @@ pub fn build_team_state(
     let skill_resolver = Arc::new(aionui_conversation::skill_resolver::ExtensionSkillResolver::new(
         services.skill_paths.clone(),
     ));
-    let conv_service = ConversationService::new_with_workspace_root(
-        conv_repo,
-        services.event_bus.clone(),
+    let conv_service = ConversationService::new(
         std::path::PathBuf::from(&services.data_dir),
+        services.event_bus.clone(),
         skill_resolver,
+        conv_repo,
         agent_metadata_repo,
         acp_session_repo,
     );
     if let Some(cron_service) = cron_service {
-        conv_service.set_cron_service(Some(cron_service));
+        conv_service.with_cron_service(Some(cron_service));
     }
     let service = TeamSessionService::new(
         team_repo,
@@ -432,11 +432,11 @@ pub fn build_cron_state(services: &AppServices) -> CronRouterState {
     let skill_resolver = Arc::new(aionui_conversation::skill_resolver::ExtensionSkillResolver::new(
         services.skill_paths.clone(),
     ));
-    let conv_service = ConversationService::new_with_workspace_root(
-        conv_repo.clone(),
-        services.event_bus.clone(),
+    let conv_service = ConversationService::new(
         std::path::PathBuf::from(&services.data_dir),
+        services.event_bus.clone(),
         skill_resolver,
+        conv_repo.clone(),
         agent_metadata_repo,
         acp_session_repo,
     );

@@ -550,7 +550,7 @@ impl TeamSession {
                 input.conversation_id.clone(),
                 msg_id,
                 self.user_id.clone(),
-                Arc::clone(svc.conversation_service_ref().repo()),
+                Arc::clone(svc.conversation_service_ref().conversation_repo()),
                 self.broadcaster.clone(),
                 None,
             );

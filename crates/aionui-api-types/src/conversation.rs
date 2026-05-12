@@ -451,7 +451,10 @@ mod tests {
         assert!(json.get("pinnedAt").is_none());
         // Null-valued Option fields must be omitted from JSON.
         assert!(json.get("pinned_at").is_none(), "pinned_at None should be omitted");
-        assert!(json.get("channel_chat_id").is_none(), "channel_chat_id None should be omitted");
+        assert!(
+            json.get("channel_chat_id").is_none(),
+            "channel_chat_id None should be omitted"
+        );
     }
 
     #[test]
@@ -474,7 +477,10 @@ mod tests {
         assert!(json.get("model").is_none(), "model None should be omitted");
         assert!(json.get("source").is_none(), "source None should be omitted");
         assert!(json.get("pinned_at").is_none(), "pinned_at None should be omitted");
-        assert!(json.get("channel_chat_id").is_none(), "channel_chat_id None should be omitted");
+        assert!(
+            json.get("channel_chat_id").is_none(),
+            "channel_chat_id None should be omitted"
+        );
         // Non-optional fields still present.
         assert_eq!(json["id"], "conv_none");
         assert_eq!(json["type"], "acp");

@@ -66,11 +66,11 @@ async fn setup() -> (
         Arc::new(aionui_db::SqliteAgentMetadataRepository::new(db.pool().clone()));
     let acp_session_repo: Arc<dyn aionui_db::IAcpSessionRepository> =
         Arc::new(aionui_db::SqliteAcpSessionRepository::new(db.pool().clone()));
-    let svc = ConversationService::new_with_workspace_root(
-        repo.clone(),
-        broadcaster.clone(),
+    let svc = ConversationService::new(
         std::env::temp_dir(),
+        broadcaster.clone(),
         Arc::new(EmptySkillResolver),
+        repo.clone(),
         agent_metadata_repo,
         acp_session_repo,
     );

@@ -326,7 +326,7 @@ async fn exec_team_tool(
 /// no active team is found for this conversation.
 async fn resolve_team_context(service: &TeamSessionService, conversation_id: &str) -> Result<(String, String), String> {
     // Extract teamId from conversation.extra via the conversation service repo.
-    let repo = service.conversation_service_ref().repo().clone();
+    let repo = service.conversation_service_ref().conversation_repo().clone();
     let row = repo
         .get(conversation_id)
         .await

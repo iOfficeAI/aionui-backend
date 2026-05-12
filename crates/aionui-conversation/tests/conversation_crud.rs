@@ -99,11 +99,11 @@ async fn setup() -> (ConversationService, Arc<TestBroadcaster>, Arc<dyn IWorkerT
         Arc::new(aionui_db::SqliteAgentMetadataRepository::new(db.pool().clone()));
     let acp_session_repo: Arc<dyn aionui_db::IAcpSessionRepository> =
         Arc::new(aionui_db::SqliteAcpSessionRepository::new(db.pool().clone()));
-    let svc = ConversationService::new_with_workspace_root(
-        repo,
-        broadcaster.clone(),
+    let svc = ConversationService::new(
         std::env::temp_dir(),
+        broadcaster.clone(),
         Arc::new(EmptySkillResolver),
+        repo,
         agent_metadata_repo,
         acp_session_repo,
     );
@@ -805,11 +805,11 @@ async fn create_acp_seeds_acp_session_runtime_from_extra() {
         Arc::new(aionui_db::SqliteAgentMetadataRepository::new(db.pool().clone()));
     let acp_session_repo: Arc<dyn aionui_db::IAcpSessionRepository> =
         Arc::new(SqliteAcpSessionRepository::new(db.pool().clone()));
-    let svc = aionui_conversation::ConversationService::new_with_workspace_root(
-        repo,
-        broadcaster.clone(),
+    let svc = aionui_conversation::ConversationService::new(
         std::env::temp_dir(),
+        broadcaster.clone(),
         Arc::new(EmptySkillResolver),
+        repo,
         agent_metadata_repo,
         acp_session_repo.clone(),
     );
@@ -853,11 +853,11 @@ async fn create_acp_skips_seed_when_extra_has_empty_runtime_fields() {
         Arc::new(aionui_db::SqliteAgentMetadataRepository::new(db.pool().clone()));
     let acp_session_repo: Arc<dyn aionui_db::IAcpSessionRepository> =
         Arc::new(SqliteAcpSessionRepository::new(db.pool().clone()));
-    let svc = aionui_conversation::ConversationService::new_with_workspace_root(
-        repo,
-        broadcaster.clone(),
+    let svc = aionui_conversation::ConversationService::new(
         std::env::temp_dir(),
+        broadcaster.clone(),
         Arc::new(EmptySkillResolver),
+        repo,
         agent_metadata_repo,
         acp_session_repo.clone(),
     );
@@ -873,7 +873,9 @@ async fn create_acp_skips_seed_when_extra_has_empty_runtime_fields() {
     let runtime = acp_session_repo.load_runtime_state(&conv.id).await.unwrap();
     // Either `None` (no runtime key yet) or Some(default) — both mean "nothing seeded".
     assert!(
-        runtime.as_ref().map_or(true, |r| r.current_mode_id.is_none() && r.current_model_id.is_none()),
+        runtime
+            .as_ref()
+            .map_or(true, |r| r.current_mode_id.is_none() && r.current_model_id.is_none()),
         "empty runtime fields should not produce a seed: got {runtime:?}"
     );
 }
