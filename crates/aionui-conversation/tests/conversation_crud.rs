@@ -116,7 +116,6 @@ const USER_ID: &str = "system_default_user";
 fn make_create_req() -> CreateConversationRequest {
     serde_json::from_value(json!({
         "type": "acp",
-        "model": { "provider_id": "p1", "model": "claude-sonnet-4-20250514" },
         "extra": { "workspace": "/home/user/project" }
     }))
     .unwrap()
@@ -140,10 +139,8 @@ async fn t1_1_create_with_defaults() {
     assert!(resp.created_at > 0);
     assert_eq!(resp.created_at, resp.modified_at);
 
-    // Model preserved
-    let model = resp.model.unwrap();
-    assert_eq!(model.provider_id, "p1");
-    assert_eq!(model.model, "claude-sonnet-4-20250514");
+    // Non-aionrs: top-level model is None.
+    assert!(resp.model.is_none(), "ACP response should not carry top-level model");
 
     // WebSocket event
     let events = broadcaster.take_events();
@@ -167,14 +164,26 @@ async fn t1_2_create_each_agent_type() {
     ];
 
     for (type_str, expected_type) in types {
-        let req: CreateConversationRequest = serde_json::from_value(json!({
-            "type": type_str,
-            "model": { "provider_id": "p1", "model": "m1" },
-            "extra": {}
-        }))
-        .unwrap();
+        let body = if type_str == "aionrs" {
+            json!({
+                "type": type_str,
+                "model": { "provider_id": "p1", "model": "m1" },
+                "extra": {}
+            })
+        } else {
+            json!({
+                "type": type_str,
+                "extra": {}
+            })
+        };
+        let req: CreateConversationRequest = serde_json::from_value(body).unwrap();
         let resp = svc.create(USER_ID, req).await.unwrap();
         assert_eq!(resp.r#type, expected_type, "Type mismatch for {type_str}");
+        if type_str == "aionrs" {
+            assert!(resp.model.is_some(), "aionrs should keep top-level model");
+        } else {
+            assert!(resp.model.is_none(), "{type_str} should have no top-level model");
+        }
     }
 }
 
@@ -185,7 +194,6 @@ async fn t1_3_create_with_optional_fields() {
     let req: CreateConversationRequest = serde_json::from_value(json!({
         "type": "acp",
         "name": "Custom Name",
-        "model": { "provider_id": "p1", "model": "m1" },
         "source": "telegram",
         "channel_chat_id": "user:123",
         "extra": { "workspace": "/path" }
@@ -282,7 +290,6 @@ async fn t2_4_source_filter() {
 
     let telegram_req: CreateConversationRequest = serde_json::from_value(json!({
         "type": "acp",
-        "model": { "provider_id": "p1", "model": "m1" },
         "source": "telegram",
         "extra": {}
     }))
@@ -393,7 +400,6 @@ async fn t4_4_extra_merge_preserves_existing_keys() {
 
     let req: CreateConversationRequest = serde_json::from_value(json!({
         "type": "acp",
-        "model": { "provider_id": "p1", "model": "m1" },
         "extra": { "workspace": "/old", "contextFileName": "ctx.md" }
     }))
     .unwrap();
@@ -411,7 +417,16 @@ async fn t4_4_extra_merge_preserves_existing_keys() {
 #[tokio::test]
 async fn t4_5_update_model() {
     let (svc, _, task_mgr) = setup().await;
-    let conv = svc.create(USER_ID, make_create_req()).await.unwrap();
+
+    // Top-level model updates are only valid on aionrs conversations
+    // (Task 8 enforces the aionrs-only rule in update).
+    let create_req: CreateConversationRequest = serde_json::from_value(json!({
+        "type": "aionrs",
+        "model": { "provider_id": "p1", "model": "m1" },
+        "extra": {}
+    }))
+    .unwrap();
+    let conv = svc.create(USER_ID, create_req).await.unwrap();
 
     let req: UpdateConversationRequest = serde_json::from_value(json!({
         "model": { "provider_id": "p2", "model": "new-model" }
@@ -519,7 +534,6 @@ async fn t12_1_long_name() {
     let req: CreateConversationRequest = serde_json::from_value(json!({
         "type": "acp",
         "name": long_name,
-        "model": { "provider_id": "p1", "model": "m1" },
         "extra": {}
     }))
     .unwrap();
@@ -544,7 +558,6 @@ async fn t12_2_large_extra_json() {
 
     let req: CreateConversationRequest = serde_json::from_value(json!({
         "type": "acp",
-        "model": { "provider_id": "p1", "model": "m1" },
         "extra": large_extra
     }))
     .unwrap();

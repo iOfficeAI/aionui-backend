@@ -82,7 +82,6 @@ const USER_ID: &str = "system_default_user";
 fn make_create_req() -> CreateConversationRequest {
     serde_json::from_value(json!({
         "type": "acp",
-        "model": { "provider_id": "p1", "model": "claude-sonnet-4-20250514" },
         "extra": { "workspace": "/home/user/project" }
     }))
     .unwrap()
@@ -112,7 +111,6 @@ async fn t6_1_clone_from_source() {
     let source_req: CreateConversationRequest = serde_json::from_value(json!({
         "type": "acp",
         "name": "Source",
-        "model": { "provider_id": "p1", "model": "m1" },
         "extra": { "workspace": "/src", "contextFileName": "ctx.md" }
     }))
     .unwrap();
@@ -124,7 +122,6 @@ async fn t6_1_clone_from_source() {
         "conversation": {
             "type": "acp",
             "name": "Cloned",
-            "model": { "provider_id": "p1", "model": "m1" },
             "extra": { "workspace": "/cloned" }
         }
     }))
@@ -147,7 +144,6 @@ async fn t6_2_clone_without_source() {
         "conversation": {
             "type": "acp",
             "name": "Direct",
-            "model": { "provider_id": "p1", "model": "m1" },
             "extra": {}
         }
     }))
@@ -164,7 +160,6 @@ async fn t6_3_clone_source_not_found() {
         "source_conversation_id": "nonexistent",
         "conversation": {
             "type": "acp",
-            "model": { "provider_id": "p1", "model": "m1" },
             "extra": {}
         }
     }))
@@ -187,7 +182,6 @@ async fn t6_4_clone_messages_not_copied() {
         "source_conversation_id": source.id,
         "conversation": {
             "type": "acp",
-            "model": { "provider_id": "p1", "model": "m1" },
             "extra": {}
         }
     }))
@@ -446,7 +440,16 @@ async fn t9_5_preview_text_extracts_from_json_content() {
 #[tokio::test]
 async fn t9_6_search_result_includes_conversation_model() {
     let (svc, repo, _b) = setup().await;
-    let conv = svc.create(USER_ID, make_create_req()).await.unwrap();
+
+    // Search surfaces conversation.model only for aionrs (the only type that
+    // carries a top-level model under the aionrs-only rule).
+    let aionrs_req: CreateConversationRequest = serde_json::from_value(json!({
+        "type": "aionrs",
+        "model": { "provider_id": "p1", "model": "claude-sonnet-4-20250514" },
+        "extra": { "workspace": "/home/user/project" }
+    }))
+    .unwrap();
+    let conv = svc.create(USER_ID, aionrs_req).await.unwrap();
 
     repo.insert_message(&make_message(&conv.id, "model test keyword", 0))
         .await
@@ -494,7 +497,6 @@ async fn t10_1_same_workspace() {
     let req1: CreateConversationRequest = serde_json::from_value(json!({
         "type": "acp",
         "name": "Conv A",
-        "model": { "provider_id": "p1", "model": "m1" },
         "extra": { "workspace": "/shared/path" }
     }))
     .unwrap();
@@ -503,7 +505,6 @@ async fn t10_1_same_workspace() {
     let req2: CreateConversationRequest = serde_json::from_value(json!({
         "type": "acp",
         "name": "Conv B",
-        "model": { "provider_id": "p1", "model": "m1" },
         "extra": { "workspace": "/shared/path" }
     }))
     .unwrap();
@@ -513,7 +514,6 @@ async fn t10_1_same_workspace() {
     let req3: CreateConversationRequest = serde_json::from_value(json!({
         "type": "acp",
         "name": "Conv C",
-        "model": { "provider_id": "p1", "model": "m1" },
         "extra": { "workspace": "/other/path" }
     }))
     .unwrap();
@@ -530,7 +530,6 @@ async fn t10_2_no_associated() {
 
     let req: CreateConversationRequest = serde_json::from_value(json!({
         "type": "acp",
-        "model": { "provider_id": "p1", "model": "m1" },
         "extra": { "workspace": "/unique/path" }
     }))
     .unwrap();

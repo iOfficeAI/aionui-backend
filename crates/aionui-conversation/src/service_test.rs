@@ -489,7 +489,6 @@ fn make_service_with_resolver(
 fn make_create_req() -> CreateConversationRequest {
     serde_json::from_value(json!({
         "type": "acp",
-        "model": { "provider_id": "p1", "model": "m1" },
         "extra": { "workspace": "/project" }
     }))
     .unwrap()
@@ -529,7 +528,6 @@ async fn create_with_custom_name_and_source() {
     let req: CreateConversationRequest = serde_json::from_value(json!({
         "type": "acp",
         "name": "Custom Name",
-        "model": { "provider_id": "p1", "model": "m1" },
         "source": "telegram",
         "channel_chat_id": "chat:123",
         "extra": {}
@@ -548,7 +546,14 @@ async fn create_with_custom_name_and_source() {
 async fn create_stores_model_as_json() {
     let (svc, _broadcaster, _repo, _task_mgr) = make_service();
 
-    let resp = svc.create("user_1", make_create_req()).await.unwrap();
+    // Top-level model is only valid for aionrs conversations.
+    let req: CreateConversationRequest = serde_json::from_value(json!({
+        "type": "aionrs",
+        "model": { "provider_id": "p1", "model": "m1" },
+        "extra": { "workspace": "/project" }
+    }))
+    .unwrap();
+    let resp = svc.create("user_1", req).await.unwrap();
 
     let model = resp.model.unwrap();
     assert_eq!(model.provider_id, "p1");
@@ -613,7 +618,6 @@ async fn list_with_source_filter() {
 
     let telegram_req: CreateConversationRequest = serde_json::from_value(json!({
         "type": "acp",
-        "model": { "provider_id": "p1", "model": "m1" },
         "source": "telegram",
         "extra": {}
     }))
@@ -703,7 +707,6 @@ async fn update_extra_merge() {
 
     let req: CreateConversationRequest = serde_json::from_value(json!({
         "type": "acp",
-        "model": { "provider_id": "p1", "model": "m1" },
         "extra": { "workspace": "/old", "contextFileName": "ctx.md" }
     }))
     .unwrap();
@@ -721,7 +724,16 @@ async fn update_extra_merge() {
 #[tokio::test]
 async fn update_model() {
     let (svc, _broadcaster, _repo, task_mgr) = make_service();
-    let conv = svc.create("user_1", make_create_req()).await.unwrap();
+
+    // Top-level model updates are only valid on aionrs conversations
+    // (Task 8 enforces the aionrs-only rule in update).
+    let create_req: CreateConversationRequest = serde_json::from_value(json!({
+        "type": "aionrs",
+        "model": { "provider_id": "p1", "model": "m1" },
+        "extra": { "workspace": "/project" }
+    }))
+    .unwrap();
+    let conv = svc.create("user_1", create_req).await.unwrap();
 
     let req: UpdateConversationRequest = serde_json::from_value(json!({
         "model": { "provider_id": "p2", "model": "new-model" }
@@ -778,7 +790,6 @@ async fn broadcast_includes_source_on_delete() {
 
     let req: CreateConversationRequest = serde_json::from_value(json!({
         "type": "acp",
-        "model": { "provider_id": "p1", "model": "m1" },
         "source": "telegram",
         "extra": {}
     }))
@@ -860,7 +871,6 @@ async fn clone_without_source_creates_new() {
         "conversation": {
             "type": "acp",
             "name": "Cloned",
-            "model": { "provider_id": "p1", "model": "m1" },
             "extra": { "workspace": "/new" }
         }
     }))
@@ -883,7 +893,6 @@ async fn clone_from_source_inherits_config() {
     let source_req: CreateConversationRequest = serde_json::from_value(json!({
         "type": "acp",
         "name": "Source Conv",
-        "model": { "provider_id": "p1", "model": "m1" },
         "extra": { "workspace": "/source", "contextFileName": "ctx.md" }
     }))
     .unwrap();
@@ -894,7 +903,6 @@ async fn clone_from_source_inherits_config() {
         "source_conversation_id": source.id,
         "conversation": {
             "type": "acp",
-            "model": { "provider_id": "p1", "model": "m1" },
             "extra": { "workspace": "/cloned" }
         }
     }))
@@ -918,7 +926,6 @@ async fn clone_source_not_found() {
         "source_conversation_id": "no-such-id",
         "conversation": {
             "type": "acp",
-            "model": { "provider_id": "p1", "model": "m1" },
             "extra": {}
         }
     }))
@@ -938,7 +945,6 @@ async fn clone_source_wrong_user() {
         "source_conversation_id": source.id,
         "conversation": {
             "type": "acp",
-            "model": { "provider_id": "p1", "model": "m1" },
             "extra": {}
         }
     }))
@@ -954,7 +960,6 @@ async fn clone_strips_cron_job_id_by_default() {
 
     let source_req: CreateConversationRequest = serde_json::from_value(json!({
         "type": "acp",
-        "model": { "provider_id": "p1", "model": "m1" },
         "extra": { "workspace": "/p", "cronJobId": "cron_1" }
     }))
     .unwrap();
@@ -964,7 +969,6 @@ async fn clone_strips_cron_job_id_by_default() {
         "source_conversation_id": source.id,
         "conversation": {
             "type": "acp",
-            "model": { "provider_id": "p1", "model": "m1" },
             "extra": {}
         }
     }))
@@ -982,7 +986,6 @@ async fn clone_with_migrate_cron_preserves_cron_job_id() {
 
     let source_req: CreateConversationRequest = serde_json::from_value(json!({
         "type": "acp",
-        "model": { "provider_id": "p1", "model": "m1" },
         "extra": { "workspace": "/p", "cronJobId": "cron_1" }
     }))
     .unwrap();
@@ -992,7 +995,6 @@ async fn clone_with_migrate_cron_preserves_cron_job_id() {
         "source_conversation_id": source.id,
         "conversation": {
             "type": "acp",
-            "model": { "provider_id": "p1", "model": "m1" },
             "extra": {}
         },
         "migrate_cron": true
@@ -1010,7 +1012,6 @@ async fn clone_with_migrate_cron_preserves_snake_case_cron_job_id() {
 
     let source_req: CreateConversationRequest = serde_json::from_value(json!({
         "type": "acp",
-        "model": { "provider_id": "p1", "model": "m1" },
         "extra": { "workspace": "/p", "cron_job_id": "cron_2" }
     }))
     .unwrap();
@@ -1020,7 +1021,6 @@ async fn clone_with_migrate_cron_preserves_snake_case_cron_job_id() {
         "source_conversation_id": source.id,
         "conversation": {
             "type": "acp",
-            "model": { "provider_id": "p1", "model": "m1" },
             "extra": {}
         },
         "migrate_cron": true
@@ -1678,7 +1678,6 @@ async fn send_message_persists_factory_resolved_workspace() {
     // Create a conversation with an empty workspace to simulate legacy case.
     let req: CreateConversationRequest = serde_json::from_value(json!({
         "type": "acp",
-        "model": { "provider_id": "p1", "model": "m1" },
         "extra": {}
     }))
     .unwrap();
