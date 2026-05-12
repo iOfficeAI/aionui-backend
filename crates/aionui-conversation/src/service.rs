@@ -153,6 +153,17 @@ impl ConversationService {
         let now = now_ms();
         let source = req.source.unwrap_or(ConversationSource::Aionui);
 
+        // Type-aware rule: top-level `model` is aionrs-only. Other agent types
+        // carry model/mode via `extra` (see spec 2026-05-12). Reject early so
+        // clients that still ship the legacy shape get a loud 400 instead of
+        // a silent write to a column nobody reads.
+        if req.r#type != AgentType::Aionrs && req.model.is_some() {
+            return Err(AppError::BadRequest(format!(
+                "top-level `model` is only accepted for aionrs conversations; pass model via `extra` for {}",
+                req.r#type.serde_name()
+            )));
+        }
+
         let mut extra = req.extra;
 
         // Determine whether the user chose this workspace ("custom") or we
