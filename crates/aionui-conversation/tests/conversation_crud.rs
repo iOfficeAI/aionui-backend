@@ -718,7 +718,10 @@ async fn update_rejects_top_level_model_for_acp() {
     .unwrap();
 
     let err = svc.update(USER_ID, &conv.id, req, &task_mgr).await.unwrap_err();
-    assert!(matches!(err, AppError::BadRequest(_)), "expected BadRequest, got {err:?}");
+    assert!(
+        matches!(err, AppError::BadRequest(_)),
+        "expected BadRequest, got {err:?}"
+    );
 }
 
 #[tokio::test]
@@ -789,4 +792,88 @@ async fn update_aionrs_strips_extra_model_from_patch() {
     assert_eq!(updated.extra["last_token_usage"]["total_tokens"], 42);
     // Top-level model unchanged by the extra-only patch.
     assert_eq!(updated.model.unwrap().model, "gpt-4o");
+}
+
+#[tokio::test]
+async fn create_acp_seeds_acp_session_runtime_from_extra() {
+    use aionui_db::{SqliteAcpSessionRepository, init_database_memory};
+
+    let db = init_database_memory().await.unwrap();
+    let repo = Arc::new(aionui_db::SqliteConversationRepository::new(db.pool().clone()));
+    let broadcaster = Arc::new(TestBroadcaster::new());
+    let agent_metadata_repo: Arc<dyn aionui_db::IAgentMetadataRepository> =
+        Arc::new(aionui_db::SqliteAgentMetadataRepository::new(db.pool().clone()));
+    let acp_session_repo: Arc<dyn aionui_db::IAcpSessionRepository> =
+        Arc::new(SqliteAcpSessionRepository::new(db.pool().clone()));
+    let svc = aionui_conversation::ConversationService::new_with_workspace_root(
+        repo,
+        broadcaster.clone(),
+        std::env::temp_dir(),
+        Arc::new(EmptySkillResolver),
+        agent_metadata_repo,
+        acp_session_repo.clone(),
+    );
+
+    let req: CreateConversationRequest = serde_json::from_value(json!({
+        "type": "acp",
+        "extra": {
+            "backend": "claude",
+            "current_mode_id": "bypassPermissions",
+            "current_model_id": "claude-opus-4"
+        }
+    }))
+    .unwrap();
+    let conv = svc.create(USER_ID, req).await.unwrap();
+
+    let runtime = acp_session_repo
+        .load_runtime_state(&conv.id)
+        .await
+        .unwrap()
+        .expect("acp_session runtime state should exist after create");
+    assert_eq!(
+        runtime.current_mode_id.as_deref(),
+        Some("bypassPermissions"),
+        "extra.current_mode_id must be seeded into acp_session on create"
+    );
+    assert_eq!(
+        runtime.current_model_id.as_deref(),
+        Some("claude-opus-4"),
+        "extra.current_model_id must be seeded into acp_session on create"
+    );
+}
+
+#[tokio::test]
+async fn create_acp_skips_seed_when_extra_has_empty_runtime_fields() {
+    use aionui_db::{SqliteAcpSessionRepository, init_database_memory};
+
+    let db = init_database_memory().await.unwrap();
+    let repo = Arc::new(aionui_db::SqliteConversationRepository::new(db.pool().clone()));
+    let broadcaster = Arc::new(TestBroadcaster::new());
+    let agent_metadata_repo: Arc<dyn aionui_db::IAgentMetadataRepository> =
+        Arc::new(aionui_db::SqliteAgentMetadataRepository::new(db.pool().clone()));
+    let acp_session_repo: Arc<dyn aionui_db::IAcpSessionRepository> =
+        Arc::new(SqliteAcpSessionRepository::new(db.pool().clone()));
+    let svc = aionui_conversation::ConversationService::new_with_workspace_root(
+        repo,
+        broadcaster.clone(),
+        std::env::temp_dir(),
+        Arc::new(EmptySkillResolver),
+        agent_metadata_repo,
+        acp_session_repo.clone(),
+    );
+
+    // Both fields present but empty — treated as absent, no save_runtime_state call.
+    let req: CreateConversationRequest = serde_json::from_value(json!({
+        "type": "acp",
+        "extra": { "backend": "claude", "current_mode_id": "", "current_model_id": "" }
+    }))
+    .unwrap();
+    let conv = svc.create(USER_ID, req).await.unwrap();
+
+    let runtime = acp_session_repo.load_runtime_state(&conv.id).await.unwrap();
+    // Either `None` (no runtime key yet) or Some(default) — both mean "nothing seeded".
+    assert!(
+        runtime.as_ref().map_or(true, |r| r.current_mode_id.is_none() && r.current_model_id.is_none()),
+        "empty runtime fields should not produce a seed: got {runtime:?}"
+    );
 }

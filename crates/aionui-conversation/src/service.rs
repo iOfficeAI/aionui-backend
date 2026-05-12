@@ -18,7 +18,7 @@ use aionui_common::{
 use aionui_db::models::MessageRow;
 use aionui_db::{
     ConversationFilters, ConversationRowUpdate, CreateAcpSessionParams, IAcpSessionRepository,
-    IAgentMetadataRepository, IConversationRepository, SortOrder,
+    IAgentMetadataRepository, IConversationRepository, SaveRuntimeStateParams, SortOrder,
 };
 use aionui_realtime::EventBroadcaster;
 use tracing::{debug, info, warn};
@@ -356,6 +356,31 @@ impl ConversationService {
             .create(&params)
             .await
             .map_err(|e| AppError::Internal(format!("Failed to create acp_session row: {e}")))?;
+
+        // Seed optional runtime state from create payload. Empty strings are
+        // treated as absent, matching the "send key only when value present"
+        // contract on the wire. Mode/model take effect on the first
+        // reconcile right after session/new.
+        let mode = extra
+            .get("current_mode_id")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+        let model = extra
+            .get("current_model_id")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
+        if mode.is_some() || model.is_some() {
+            let params = SaveRuntimeStateParams {
+                current_mode_id: mode.map(Some),
+                current_model_id: model.map(Some),
+                config_selections_json: None,
+                context_usage_json: None,
+            };
+            self.acp_session_repo
+                .save_runtime_state(conversation_id, &params)
+                .await
+                .map_err(|e| AppError::Internal(format!("Failed to seed acp_session runtime state: {e}")))?;
+        }
         Ok(())
     }
 
