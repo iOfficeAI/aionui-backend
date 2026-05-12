@@ -166,6 +166,19 @@ impl ConversationService {
 
         let mut extra = req.extra;
 
+        // aionrs source-of-truth rule: top-level `model` wins. If an older client
+        // still packs `extra.model`, strip it before persist so the stored row
+        // has a single canonical model representation.
+        if req.r#type == AgentType::Aionrs
+            && let Some(obj) = extra.as_object_mut()
+            && obj.remove("model").is_some()
+        {
+            warn!(
+                user_id = %user_id,
+                "aionrs create: stripped legacy `extra.model`; top-level `model` is canonical"
+            );
+        }
+
         // Determine whether the user chose this workspace ("custom") or we
         // auto-provision one under `{data_dir}/conversations/{label}-temp-{id}/`.
         // `is_custom_workspace` is the authoritative signal consumed later to
