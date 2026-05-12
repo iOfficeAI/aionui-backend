@@ -27,13 +27,10 @@ pub fn conversation_routes(state: ConversationRouterState) -> Router {
         .route("/api/conversations/{id}", get(get_one).patch(update).delete(delete_one))
         .route("/api/conversations/{id}/reset", post(reset))
         .route("/api/conversations/{id}/associated", get(associated))
-        .route(
-            "/api/conversations/{id}/messages",
-            get(list_messages).post(send_message),
-        )
+        .route("/api/conversations/{id}/messages", get(list_msg).post(send_msg))
         .route("/api/conversations/{id}/artifacts", get(list_artifacts))
         .route("/api/conversations/{id}/artifacts/{artifactId}", patch(update_artifact))
-        .route("/api/conversations/{id}/stop", post(stop_stream))
+        .route("/api/conversations/{id}/stop", post(cancel))
         .route("/api/conversations/{id}/warmup", post(warmup))
         // Confirmation system
         .route("/api/conversations/{id}/confirmations", get(list_confirmations))
@@ -124,7 +121,7 @@ async fn associated(
     Ok(Json(ApiResponse::ok(items)))
 }
 
-async fn list_messages(
+async fn list_msg(
     State(state): State<ConversationRouterState>,
     Extension(user): Extension<CurrentUser>,
     Path(id): Path<String>,
@@ -134,7 +131,7 @@ async fn list_messages(
     Ok(Json(ApiResponse::ok(result)))
 }
 
-async fn send_message(
+async fn send_msg(
     State(state): State<ConversationRouterState>,
     Extension(user): Extension<CurrentUser>,
     Path(id): Path<String>,
@@ -181,14 +178,14 @@ async fn update_artifact(
     Ok(Json(ApiResponse::ok(artifact)))
 }
 
-async fn stop_stream(
+async fn cancel(
     State(state): State<ConversationRouterState>,
     Extension(user): Extension<CurrentUser>,
     Path(id): Path<String>,
 ) -> Result<Json<ApiResponse<()>>, AppError> {
     state
         .conversation_service
-        .stop_stream(&user.id, &id, &state.worker_task_manager)
+        .cancel(&user.id, &id, &state.worker_task_manager)
         .await?;
     Ok(Json(ApiResponse::success()))
 }

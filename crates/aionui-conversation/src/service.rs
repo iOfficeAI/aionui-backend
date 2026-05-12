@@ -1116,7 +1116,7 @@ impl ConversationService {
     }
 
     /// Stop the current streaming response for a conversation.
-    pub async fn stop_stream(
+    pub async fn cancel(
         &self,
         user_id: &str,
         conversation_id: &str,

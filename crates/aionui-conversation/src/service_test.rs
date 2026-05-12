@@ -1786,7 +1786,7 @@ async fn stop_stream_with_active_agent() {
 
     // Stop should succeed since agent exists
     let result = svc
-        .stop_stream("user_1", &conv.id, &(task_mgr as Arc<dyn IWorkerTaskManager>))
+        .cancel("user_1", &conv.id, &(task_mgr as Arc<dyn IWorkerTaskManager>))
         .await;
     assert!(result.is_ok());
 }
@@ -1796,7 +1796,7 @@ async fn stop_stream_conversation_not_found() {
     let (svc, _broadcaster, _repo, _task_mgr) = make_service();
     let task_mgr: Arc<dyn IWorkerTaskManager> = Arc::new(MockTaskManager::new());
 
-    let err = svc.stop_stream("user_1", "no-such-id", &task_mgr).await.unwrap_err();
+    let err = svc.cancel("user_1", "no-such-id", &task_mgr).await.unwrap_err();
     assert!(matches!(err, AppError::NotFound(_)));
 }
 
@@ -1807,7 +1807,7 @@ async fn stop_stream_no_active_agent_returns_conflict() {
 
     let conv = svc.create("user_1", make_create_req()).await.unwrap();
 
-    let err = svc.stop_stream("user_1", &conv.id, &task_mgr).await.unwrap_err();
+    let err = svc.cancel("user_1", &conv.id, &task_mgr).await.unwrap_err();
     assert!(matches!(err, AppError::Conflict(_)));
 }
 
@@ -1817,7 +1817,7 @@ async fn stop_stream_wrong_user_returns_not_found() {
     let task_mgr: Arc<dyn IWorkerTaskManager> = Arc::new(MockTaskManager::new());
 
     let conv = svc.create("user_1", make_create_req()).await.unwrap();
-    let err = svc.stop_stream("user_2", &conv.id, &task_mgr).await.unwrap_err();
+    let err = svc.cancel("user_2", &conv.id, &task_mgr).await.unwrap_err();
     assert!(matches!(err, AppError::NotFound(_)));
 }
 
