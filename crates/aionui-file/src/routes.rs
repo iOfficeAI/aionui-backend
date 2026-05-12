@@ -115,11 +115,9 @@ async fn browse_directory(
     let raw_path = query.path.clone();
     let roots = state.browse_roots.clone();
 
-    let response = tokio::task::spawn_blocking(move || {
-        browse::browse(raw_path.as_deref(), show_files, &roots)
-    })
-    .await
-    .map_err(|e| AppError::Internal(format!("browse task failed: {}", e)))??;
+    let response = tokio::task::spawn_blocking(move || browse::browse(raw_path.as_deref(), show_files, &roots))
+        .await
+        .map_err(|e| AppError::Internal(format!("browse task failed: {}", e)))??;
 
     Ok(Json(ApiResponse::ok(response)))
 }

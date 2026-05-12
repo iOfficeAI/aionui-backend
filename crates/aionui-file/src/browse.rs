@@ -125,12 +125,10 @@ pub fn resolve_browse_path(raw: &str, allowed_roots: &[PathBuf]) -> Result<PathB
         _ => AppError::BadRequest(format!("cannot resolve path '{}': {}", raw, e)),
     })?;
 
-    let allowed = allowed_roots
-        .iter()
-        .any(|root| match fs::canonicalize(root) {
-            Ok(canonical_root) => canonical.starts_with(&canonical_root),
-            Err(_) => false,
-        });
+    let allowed = allowed_roots.iter().any(|root| match fs::canonicalize(root) {
+        Ok(canonical_root) => canonical.starts_with(&canonical_root),
+        Err(_) => false,
+    });
 
     if !allowed {
         return Err(AppError::Forbidden(format!(
@@ -143,15 +141,11 @@ pub fn resolve_browse_path(raw: &str, allowed_roots: &[PathBuf]) -> Result<PathB
 }
 
 fn expand_tilde(input: &str) -> PathBuf {
-    if let Some(stripped) = input.strip_prefix('~') {
-        if let Some(home) = dirs::home_dir() {
-            let relative = stripped.trim_start_matches(['/', '\\']);
-            return if relative.is_empty() {
-                home
-            } else {
-                home.join(relative)
-            };
-        }
+    if let Some(stripped) = input.strip_prefix('~')
+        && let Some(home) = dirs::home_dir()
+    {
+        let relative = stripped.trim_start_matches(['/', '\\']);
+        return if relative.is_empty() { home } else { home.join(relative) };
     }
     PathBuf::from(input)
 }
@@ -170,8 +164,7 @@ pub fn list_directory(
     show_files: bool,
     allowed_roots: &[PathBuf],
 ) -> Result<BrowseDirectoryResponse, AppError> {
-    let metadata = fs::metadata(dir)
-        .map_err(|e| AppError::NotFound(format!("cannot access directory: {}", e)))?;
+    let metadata = fs::metadata(dir).map_err(|e| AppError::NotFound(format!("cannot access directory: {}", e)))?;
     if !metadata.is_dir() {
         return Err(AppError::BadRequest("path is not a directory".into()));
     }
@@ -255,12 +248,10 @@ fn navigation_hints(dir: &Path, allowed_roots: &[PathBuf]) -> (Option<String>, b
         return (None, false);
     }
 
-    let parent_allowed = allowed_roots
-        .iter()
-        .any(|root| match fs::canonicalize(root) {
-            Ok(canonical_root) => parent.starts_with(&canonical_root),
-            Err(_) => false,
-        });
+    let parent_allowed = allowed_roots.iter().any(|root| match fs::canonicalize(root) {
+        Ok(canonical_root) => parent.starts_with(&canonical_root),
+        Err(_) => false,
+    });
 
     (Some(parent.to_string_lossy().into_owned()), parent_allowed)
 }
@@ -389,7 +380,10 @@ mod tests {
         let roots = roots_from(&[tmp.path()]);
 
         let err = browse(Some(file.to_str().unwrap()), false, &roots).unwrap_err();
-        assert!(matches!(err, AppError::BadRequest(_)), "expected bad-request, got {err}");
+        assert!(
+            matches!(err, AppError::BadRequest(_)),
+            "expected bad-request, got {err}"
+        );
     }
 
     #[test]
