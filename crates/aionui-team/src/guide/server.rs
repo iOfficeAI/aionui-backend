@@ -224,8 +224,7 @@ async fn exec_create_team(
     if let Some(ref conv_id) = caller_conversation_id {
         let repo = svc.conversation_service_ref().conversation_repo().clone();
         if let Ok(Some(row)) = repo.get(conv_id).await {
-            let extra: serde_json::Value =
-                serde_json::from_str(&row.extra).unwrap_or(serde_json::Value::Null);
+            let extra: serde_json::Value = serde_json::from_str(&row.extra).unwrap_or(serde_json::Value::Null);
             if extra
                 .get("teamId")
                 .and_then(serde_json::Value::as_str)

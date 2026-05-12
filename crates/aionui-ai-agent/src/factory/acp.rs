@@ -51,7 +51,10 @@ pub(super) async fn build(
     if config.team_mcp_stdio_config.is_some() {
         debug!(ctx.conversation_id, "guide_mcp: skipped: has team_mcp");
     } else if belongs_to_team {
-        debug!(ctx.conversation_id, "guide_mcp: skipped: conversation belongs to a team (extra.teamId)");
+        debug!(
+            ctx.conversation_id,
+            "guide_mcp: skipped: conversation belongs to a team (extra.teamId)"
+        );
     } else if config.guide_mcp_config.is_some() {
         debug!(
             ctx.conversation_id,
