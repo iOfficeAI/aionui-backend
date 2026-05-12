@@ -1,5 +1,6 @@
 use aionui_common::{AppError, CommandSpec};
 use aionui_runtime::Builder as CmdBuilder;
+use std::path::Path;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Child;
@@ -15,14 +16,19 @@ impl CliAgentProcess {
     /// Instead, the raw stdin/stdout handles are available via [`take_stdio`](Self::take_stdio)
     /// for the ACP SDK transport to own.
     ///
+    /// `data_dir` is the backend's `AppConfig.data_dir` — used as the root
+    /// for child-process bun cache / tmp directories so they honour the
+    /// operator's `--data-dir` choice instead of falling back to the OS
+    /// local data dir.
+    ///
     /// Background tasks are still spawned for:
     /// - stderr buffering
     /// - Process exit monitoring
-    pub async fn spawn_for_sdk(config: CommandSpec) -> Result<Self, AppError> {
+    pub async fn spawn_for_sdk(config: CommandSpec, data_dir: &Path) -> Result<Self, AppError> {
         let mut cmd = CmdBuilder::new(&config.command);
         cmd.args(&config.args)
             .envs(config.env.iter().map(|e| (&e.name, &e.value)))
-            .envs(Self::agent_spawn_env())
+            .envs(Self::agent_spawn_env(data_dir))
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
@@ -115,12 +121,10 @@ impl CliAgentProcess {
 
     /// Build environment variables for agent subprocess spawn.
     /// Mirrors the frontend `acpConnectors.ts::getCleanAgentEnv` logic:
-    /// - Set BUN_INSTALL_CACHE_DIR / BUN_TMPDIR to stable paths
+    /// - Set BUN_INSTALL_CACHE_DIR / BUN_TMPDIR to stable paths under
+    ///   the backend's `AppConfig.data_dir`
     /// - Set CLAUDE_CODE_EXECUTABLE so claude-agent-sdk finds the CLI
-    fn agent_spawn_env() -> Vec<(String, String)> {
-        let data_dir = dirs::data_local_dir()
-            .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join("aionui");
+    fn agent_spawn_env(data_dir: &Path) -> Vec<(String, String)> {
         let bun_cache = data_dir.join("bun-cache");
         let bun_tmp = data_dir.join("bun-tmp");
 
@@ -171,7 +175,8 @@ mod tests {
     #[tokio::test]
     async fn spawn_for_sdk_take_stdio() {
         let config = simple_script_config("read line && echo \"$line\"");
-        let proc = CliAgentProcess::spawn_for_sdk(config).await.unwrap();
+        let tmp = std::env::temp_dir();
+        let proc = CliAgentProcess::spawn_for_sdk(config, &tmp).await.unwrap();
 
         let stdio = proc.take_stdio().await;
         assert!(stdio.is_some(), "First take_stdio should succeed");

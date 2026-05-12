@@ -11,6 +11,7 @@ mod extract;
 mod resolver;
 mod shell_env;
 
+pub use cache::init;
 pub use resolver::{ResolveError, bun_bin_dir, resolve_bun, resolve_command_path};
 pub use shell_env::enhance_process_path;
 mod spawn;

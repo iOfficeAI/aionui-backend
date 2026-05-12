@@ -13,7 +13,7 @@
 //! Both paths produce identical outcomes / error text.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use aionui_api_types::TryConnectCustomAgentResponse;
@@ -39,6 +39,7 @@ pub async fn try_connect_custom_agent(
     command: &str,
     args: &[String],
     env: &HashMap<String, String>,
+    data_dir: &Path,
 ) -> TryConnectCustomAgentResponse {
     // ── Step 1 — which check ────────────────────────────────────────
     let head = first_token(command);
@@ -50,7 +51,7 @@ pub async fn try_connect_custom_agent(
     debug!(?resolved, "probe step 1 ok");
 
     // ── Step 2 — spawn + ACP initialize ─────────────────────────────
-    match tokio::time::timeout(STEP2_TIMEOUT, acp_initialize(resolved, args, env)).await {
+    match tokio::time::timeout(STEP2_TIMEOUT, acp_initialize(resolved, args, env, data_dir)).await {
         Ok(Ok(())) => TryConnectCustomAgentResponse::Success,
         Ok(Err(msg)) => TryConnectCustomAgentResponse::FailAcp { error: msg },
         Err(_) => TryConnectCustomAgentResponse::FailAcp {
@@ -63,7 +64,12 @@ fn first_token(command: &str) -> &str {
     command.split_whitespace().next().unwrap_or(command)
 }
 
-async fn acp_initialize(resolved: PathBuf, args: &[String], env: &HashMap<String, String>) -> Result<(), String> {
+async fn acp_initialize(
+    resolved: PathBuf,
+    args: &[String],
+    env: &HashMap<String, String>,
+    data_dir: &Path,
+) -> Result<(), String> {
     let spec = CommandSpec {
         command: resolved,
         args: args.to_vec(),
@@ -77,7 +83,7 @@ async fn acp_initialize(resolved: PathBuf, args: &[String], env: &HashMap<String
         cwd: Some(std::env::temp_dir().to_string_lossy().into_owned()),
     };
 
-    let proc = CliAgentProcess::spawn_for_sdk(spec)
+    let proc = CliAgentProcess::spawn_for_sdk(spec, data_dir)
         .await
         .map_err(|e| format!("spawn failed: {e}"))?;
 
@@ -130,7 +136,8 @@ mod tests {
 
     #[tokio::test]
     async fn probe_returns_fail_cli_when_command_missing() {
-        let resp = try_connect_custom_agent("aionui-definitely-does-not-exist-xyz", &[], &HashMap::new()).await;
+        let tmp = std::env::temp_dir();
+        let resp = try_connect_custom_agent("aionui-definitely-does-not-exist-xyz", &[], &HashMap::new(), &tmp).await;
         match resp {
             TryConnectCustomAgentResponse::FailCli { error } => {
                 let lower = error.to_lowercase();
@@ -152,7 +159,8 @@ mod tests {
             // `true` is a cmd builtin on Windows, not a standalone exe.
             return;
         }
-        let resp = try_connect_custom_agent("true", &[], &HashMap::new()).await;
+        let tmp = std::env::temp_dir();
+        let resp = try_connect_custom_agent("true", &[], &HashMap::new(), &tmp).await;
         assert!(
             matches!(resp, TryConnectCustomAgentResponse::FailAcp { .. }),
             "expected FailAcp, got {resp:?}"

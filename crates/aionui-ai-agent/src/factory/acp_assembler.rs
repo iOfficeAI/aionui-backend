@@ -4,6 +4,7 @@ use agent_client_protocol::schema::{EnvVariable, McpServer, McpServerStdio, NewS
 use aionui_api_types::AgentMetadata;
 use aionui_api_types::{AcpBuildExtra, GuideMcpConfig, TeamMcpStdioConfig};
 use aionui_common::CommandSpec;
+use std::path::PathBuf;
 
 use aionui_common::constants::TEAM_CAPABLE_BACKENDS;
 
@@ -30,6 +31,10 @@ pub struct AcpSessionParams {
     pub mcp_servers: Vec<McpServer>,
     pub preset_context: Option<String>,
     pub session_snapshot: Option<PersistedSessionState>,
+    /// Backend data directory (`AppConfig.data_dir`). Passed through to
+    /// `CliAgentProcess::spawn_for_sdk` so bun cache / tmp directories
+    /// land under the operator-chosen path rather than the OS default.
+    pub data_dir: PathBuf,
 }
 
 impl AcpSessionParams {
@@ -56,6 +61,7 @@ pub async fn assemble_acp_params(
     command_spec: CommandSpec,
     config: AcpBuildExtra,
     session_snapshot: Option<PersistedSessionState>,
+    data_dir: PathBuf,
 ) -> AcpSessionParams {
     let mcp_servers = resolve_mcp_servers(&config, &conversation_id);
     let preset_context = compose_preset_context(
@@ -73,6 +79,7 @@ pub async fn assemble_acp_params(
         mcp_servers,
         preset_context,
         session_snapshot,
+        data_dir,
     }
 }
 

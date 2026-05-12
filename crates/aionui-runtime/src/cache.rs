@@ -1,16 +1,52 @@
 //! Cross-platform cache directory resolution for the bundled bun runtime.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+
+/// Override for [`runtime_root`], set by [`init`] from the backend
+/// startup path so cached bun binaries land under `AppConfig.data_dir`
+/// instead of the OS-default cache location.
+///
+/// Lifecycle: written once by `aionui-app`'s `main()` before
+/// [`crate::enhance_process_path`] / [`crate::resolve_bun`] run, read
+/// every time [`runtime_root`] is queried thereafter. Callers that miss
+/// the init window (e.g. the `mcp-*` subcommands, unit tests,
+/// `build.rs`) transparently fall back to `dirs::cache_dir()`.
+static RUNTIME_ROOT_OVERRIDE: OnceLock<PathBuf> = OnceLock::new();
+
+/// Anchor the runtime root to a caller-supplied data directory — typically
+/// the backend's `AppConfig.data_dir`. Idempotent on repeat calls (only
+/// the first value wins); a warning is logged if a second path is
+/// attempted so unexpected double-inits are visible.
+pub fn init(data_dir: impl AsRef<Path>) {
+    let path = data_dir.as_ref().join("runtime");
+    if let Err(existing) = RUNTIME_ROOT_OVERRIDE.set(path.clone())
+        && existing != path
+    {
+        tracing::warn!(
+            attempted = %path.display(),
+            existing = %existing.display(),
+            "aionui_runtime::init called twice with different paths; keeping first"
+        );
+    }
+}
 
 /// Returns the root cache directory used for all aionui runtime artifacts.
 ///
-/// Platform mapping (via `dirs::cache_dir()`):
-/// - macOS:   `~/Library/Caches/aionui/runtime`
-/// - Linux:   `$XDG_CACHE_HOME/aionui/runtime` (fallback `~/.cache/aionui/runtime`)
-/// - Windows: `%LOCALAPPDATA%\aionui\runtime`
+/// Priority:
+/// 1. Path supplied via [`init`] (`{data_dir}/runtime`) when the backend
+///    started with `--data-dir`.
+/// 2. Platform cache dir (via `dirs::cache_dir()`):
+///    - macOS:   `~/Library/Caches/aionui/runtime`
+///    - Linux:   `$XDG_CACHE_HOME/aionui/runtime` (fallback `~/.cache/aionui/runtime`)
+///    - Windows: `%LOCALAPPDATA%\aionui\runtime`
 ///
-/// Returns `None` if no cache directory can be determined (exotic envs).
+/// Returns `None` only when neither [`init`] has run nor a platform cache
+/// dir is determinable (exotic envs).
 pub fn runtime_root() -> Option<PathBuf> {
+    if let Some(p) = RUNTIME_ROOT_OVERRIDE.get() {
+        return Some(p.clone());
+    }
     dirs::cache_dir().map(|d| d.join("aionui").join("runtime"))
 }
 

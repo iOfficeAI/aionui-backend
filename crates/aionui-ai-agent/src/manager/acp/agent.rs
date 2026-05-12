@@ -136,7 +136,7 @@ impl AcpAgentManager {
         ),
         AppError,
     > {
-        let process = CliAgentProcess::spawn_for_sdk(params.command_spec.clone()).await?;
+        let process = CliAgentProcess::spawn_for_sdk(params.command_spec.clone(), &params.data_dir).await?;
         let (stdin, stdout) = process
             .take_stdio()
             .await

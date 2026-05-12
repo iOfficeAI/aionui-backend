@@ -90,6 +90,7 @@ pub async fn build_module_states(services: &AppServices) -> (ModuleStates, Chann
         services.agent_registry.clone(),
         services.conversation_repo.clone(),
         services.acp_session_sync.clone(),
+        std::path::PathBuf::from(&services.data_dir),
     );
 
     let states = ModuleStates {

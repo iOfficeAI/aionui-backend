@@ -78,28 +78,49 @@ fn init_tracing(log_dir: &Path, log_level: Option<&str>) -> tracing_appender::no
 }
 
 fn main() -> Result<ExitCode> {
+    // mcp-* subcommands route into short-lived stdio helpers that don't
+    // accept `--data-dir`. Detect them via argv[1] BEFORE `Cli::parse`
+    // (which rejects unknown positional args) so those paths can bypass
+    // both `aionui_runtime::init` and the full CLI parse.
+    let mcp_subcommand: Option<&str> = match std::env::args().nth(1).as_deref() {
+        Some("mcp-bridge") => Some("mcp-bridge"),
+        Some("mcp-guide-stdio") => Some("mcp-guide-stdio"),
+        Some("mcp-team-stdio") => Some("mcp-team-stdio"),
+        _ => None,
+    };
+
+    // Anchor the bun runtime cache under --data-dir BEFORE any code path
+    // that resolves it (enhance_process_path below + every later
+    // resolve_bun call). MCP subcommands fall back to the OS default
+    // cache, which is fine — they're short-lived helpers, not agent hosts.
+    let cli = if mcp_subcommand.is_some() {
+        None
+    } else {
+        let parsed = Cli::parse();
+        aionui_runtime::init(&parsed.data_dir);
+        Some(parsed)
+    };
+
     // SAFETY: called before any worker thread exists (including the tokio
     // runtime constructed below). Rust 2024 requires `unsafe` for
     // `std::env::set_var` invoked inside `enhance_process_path`.
     let merged_path = unsafe { aionui_runtime::enhance_process_path() };
 
     let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
-    runtime.block_on(async_main(merged_path))
+    runtime.block_on(async_main(merged_path, mcp_subcommand, cli))
 }
 
-async fn async_main(merged_path: String) -> Result<ExitCode> {
+async fn async_main(merged_path: String, mcp_subcommand: Option<&str>, cli: Option<Cli>) -> Result<ExitCode> {
     // mcp-bridge / mcp-guide-stdio subcommands: live entirely outside the main
     // HTTP server and must not touch the database, logging setup, or `AppServices`.
-    let mut argv = std::env::args();
-    let _prog = argv.next();
-    match argv.next().as_deref() {
+    match mcp_subcommand {
         Some("mcp-bridge") => return Ok(bridge::run_mcp_bridge().await),
         Some("mcp-guide-stdio") => return Ok(guide_stdio::run_guide_stdio().await),
         Some("mcp-team-stdio") => return Ok(team_stdio::run_team_stdio().await),
         _ => {}
     }
 
-    let cli = Cli::parse();
+    let cli = cli.expect("non-mcp entry guarantees cli is parsed");
 
     let log_dir = cli.log_dir.unwrap_or_else(|| Path::new(&cli.data_dir).join("logs"));
     let _log_guard = init_tracing(&log_dir, cli.log_level.as_deref());

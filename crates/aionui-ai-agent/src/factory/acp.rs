@@ -110,6 +110,7 @@ pub(super) async fn build(
             command_spec,
             config,
             session_snapshot,
+            deps.data_dir.clone(),
         )
         .await,
     );

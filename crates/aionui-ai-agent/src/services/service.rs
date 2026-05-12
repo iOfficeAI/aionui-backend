@@ -5,7 +5,7 @@
 //! only extract inputs, call methods on this service, and wrap the
 //! result in `ApiResponse`. Methods will be added in Stage 2b–2f.
 
-use std::path::Component;
+use std::path::{Component, PathBuf};
 use std::sync::Arc;
 
 use agent_client_protocol::schema::SessionModelState;
@@ -32,6 +32,10 @@ pub struct AgentService {
     conversation_repo: Arc<dyn IConversationRepository>,
     #[allow(dead_code)]
     acp_session_sync: Arc<AcpSessionSyncService>,
+    /// Backend data directory (`AppConfig.data_dir`), forwarded to the
+    /// custom-agent probe so its child `spawn_for_sdk` call uses the
+    /// operator-chosen root for bun cache / tmp paths.
+    data_dir: PathBuf,
 }
 
 impl AgentService {
@@ -40,13 +44,19 @@ impl AgentService {
         registry: Arc<AgentRegistry>,
         conversation_repo: Arc<dyn IConversationRepository>,
         acp_session_sync: Arc<AcpSessionSyncService>,
+        data_dir: PathBuf,
     ) -> Arc<Self> {
         Arc::new(Self {
             task_manager,
             registry,
             conversation_repo,
             acp_session_sync,
+            data_dir,
         })
+    }
+
+    pub(crate) fn data_dir(&self) -> &std::path::Path {
+        &self.data_dir
     }
 
     pub(crate) fn registry(&self) -> &std::sync::Arc<crate::registry::AgentRegistry> {

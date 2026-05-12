@@ -12,6 +12,7 @@
 //! manual "Test connection" button.
 
 use std::collections::HashMap;
+use std::path::Path;
 
 use aionui_api_types::{
     AgentMetadata, CustomAgentUpsertRequest, TryConnectCustomAgentRequest, TryConnectCustomAgentResponse,
@@ -36,12 +37,12 @@ impl AgentService {
         if req.command.trim().is_empty() {
             return Err(AppError::BadRequest("command must not be empty".into()));
         }
-        Ok(probe(&req.command, &req.acp_args, &req.env).await)
+        Ok(probe(&req.command, &req.acp_args, &req.env, self.data_dir()).await)
     }
 
     pub async fn create_custom_agent(&self, req: CustomAgentUpsertRequest) -> Result<AgentMetadata, AppError> {
         validate_upsert(&req)?;
-        probe_or_reject(&req).await?;
+        probe_or_reject(&req, self.data_dir()).await?;
 
         let id = generate_short_id();
         self.upsert_custom_row(&id, &req, /* keep_enabled = */ true).await
@@ -65,7 +66,7 @@ impl AgentService {
                 "Only custom agents can be edited via this endpoint".into(),
             ));
         }
-        probe_or_reject(&req).await?;
+        probe_or_reject(&req, self.data_dir()).await?;
 
         let keep_enabled = existing.enabled;
         self.upsert_custom_row(id, &req, keep_enabled).await
@@ -202,7 +203,7 @@ fn validate_upsert(req: &CustomAgentUpsertRequest) -> Result<(), AppError> {
     Ok(())
 }
 
-async fn probe_or_reject(req: &CustomAgentUpsertRequest) -> Result<(), AppError> {
+async fn probe_or_reject(req: &CustomAgentUpsertRequest, data_dir: &Path) -> Result<(), AppError> {
     // Test-only bypass — real probe spawns a child process and relies
     // on a working ACP CLI on PATH, which is not present in CI.
     // Gated behind cfg(test) / the `test-support` feature so production
@@ -214,7 +215,7 @@ async fn probe_or_reject(req: &CustomAgentUpsertRequest) -> Result<(), AppError>
     }
 
     let env_map: HashMap<String, String> = req.env.iter().map(|e| (e.name.clone(), e.value.clone())).collect();
-    match probe(&req.command, &req.args, &env_map).await {
+    match probe(&req.command, &req.args, &env_map, data_dir).await {
         TryConnectCustomAgentResponse::Success => Ok(()),
         TryConnectCustomAgentResponse::FailCli { error } => {
             Err(AppError::BadRequest(format!("cli_not_found: {error}")))
