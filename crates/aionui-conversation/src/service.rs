@@ -457,6 +457,17 @@ impl ConversationService {
             return Err(AppError::BadRequest("extra.skills is immutable post-creation".into()));
         }
 
+        // Type-aware rule: top-level `model` is aionrs-only. For non-aionrs
+        // conversations, model/mode must be updated via `extra` (see spec
+        // 2026-05-12).
+        let existing_type: AgentType = string_to_enum(&existing.r#type)?;
+        if existing_type != AgentType::Aionrs && req.model.is_some() {
+            return Err(AppError::BadRequest(format!(
+                "top-level `model` is only accepted for aionrs conversations; pass model via `extra` for {}",
+                existing.r#type
+            )));
+        }
+
         let now = now_ms();
 
         // Merge extra if provided
