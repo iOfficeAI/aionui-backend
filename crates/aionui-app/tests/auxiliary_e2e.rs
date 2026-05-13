@@ -1,6 +1,6 @@
 //! E2E integration tests for auxiliary conversation routes.
 //!
-//! Tests cover: workspace browse, side-question, reload-context,
+//! Tests cover: workspace browse, side-question,
 //! slash-commands, and openclaw-runtime endpoints.
 
 mod common;
@@ -199,6 +199,9 @@ async fn side_question_empty_question() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "user1", "pass123").await;
 
+    // side-question is now dispatched to AgentInstance after the
+    // conversation lookup, so a missing conversation surfaces as 404
+    // before the empty-question check gets a chance to fire.
     let req = json_with_token(
         "POST",
         "/api/conversations/some-conv/side-question",
@@ -207,7 +210,7 @@ async fn side_question_empty_question() {
         &csrf,
     );
     let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
@@ -225,38 +228,6 @@ async fn side_question_no_active_task() {
     );
     let resp = app.oneshot(req).await.unwrap();
     // No active agent → 404
-    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-}
-
-// ── 9.3 Reload context ─────────────────────────────────────────
-
-#[tokio::test]
-async fn reload_context_requires_auth() {
-    let (app, _) = build_app().await;
-    let req = axum::http::Request::builder()
-        .method("POST")
-        .uri("/api/conversations/test-conv/reload-context")
-        .header("content-type", "application/json")
-        .body(axum::body::Body::from("{}"))
-        .unwrap();
-    let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
-}
-
-#[tokio::test]
-async fn reload_context_no_active_task() {
-    let (mut app, services) = build_app().await;
-    let (token, csrf) = setup_and_login(&mut app, &services, "user1", "pass123").await;
-    let conv_id = create_conversation(&mut app, &token, &csrf, "Reload Test", "acp").await;
-
-    let req = json_with_token(
-        "POST",
-        &format!("/api/conversations/{conv_id}/reload-context"),
-        json!({}),
-        &token,
-        &csrf,
-    );
-    let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
 
@@ -370,7 +341,7 @@ async fn stop_stream_no_task() {
 
     let req = json_with_token(
         "POST",
-        &format!("/api/conversations/{conv_id}/stop"),
+        &format!("/api/conversations/{conv_id}/cancel"),
         json!({}),
         &token,
         &csrf,

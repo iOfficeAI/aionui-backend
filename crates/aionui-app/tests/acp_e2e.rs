@@ -1,7 +1,7 @@
 //! E2E integration tests for ACP management routes.
 //!
-//! Tests cover: detect-cli, agents list, agents/refresh, agents/test,
-//! health-check, env, probe-model, and session-bound routes (mode/model/config).
+//! Tests cover: agents list, agents/refresh, agents/test, health-check,
+//! and session-bound routes (mode/model).
 
 mod common;
 
@@ -12,62 +12,6 @@ use tower::ServiceExt;
 use common::{body_json, build_app, get_with_token, json_with_token, setup_and_login};
 
 // ── Global ACP routes ────────────────────────────────────────────
-
-#[tokio::test]
-async fn detect_cli_requires_auth() {
-    let (app, _services) = build_app().await;
-    let req = axum::http::Request::builder()
-        .method("POST")
-        .uri("/api/acp/detect-cli")
-        .header("content-type", "application/json")
-        .body(axum::body::Body::from(r#"{"backend":"claude"}"#))
-        .unwrap();
-    let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
-}
-
-#[tokio::test]
-async fn detect_cli_returns_path_or_null() {
-    let (mut app, services) = build_app().await;
-    let (token, csrf) = setup_and_login(&mut app, &services, "user1", "pass123").await;
-
-    let req = json_with_token(
-        "POST",
-        "/api/acp/detect-cli",
-        json!({ "backend": "claude" }),
-        &token,
-        &csrf,
-    );
-    let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-
-    let body = body_json(resp).await;
-    assert_eq!(body["success"], true);
-    // path is either a string or absent (null) — both are valid
-}
-
-#[tokio::test]
-async fn detect_cli_unknown_backend_returns_null_path() {
-    let (mut app, services) = build_app().await;
-    let (token, csrf) = setup_and_login(&mut app, &services, "user1", "pass123").await;
-
-    // Unknown vendor labels succeed at the HTTP layer and surface as a
-    // null `path` — the service no longer validates against a closed
-    // enum, so "backend not in catalog" and "backend present but CLI
-    // missing" share the same response shape.
-    let req = json_with_token(
-        "POST",
-        "/api/acp/detect-cli",
-        json!({ "backend": "nonexistent_backend" }),
-        &token,
-        &csrf,
-    );
-    let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-    let body = body_json(resp).await;
-    assert_eq!(body["success"], true);
-    assert!(body["data"]["path"].is_null());
-}
 
 #[tokio::test]
 async fn list_agents_returns_array() {
@@ -129,7 +73,7 @@ async fn health_check_returns_status() {
 
     let req = json_with_token(
         "POST",
-        "/api/acp/health-check",
+        "/api/agents/health-check",
         json!({ "backend": "claude" }),
         &token,
         &csrf,
@@ -155,7 +99,7 @@ async fn health_check_unknown_backend_reports_unavailable() {
     // `available: false` with an error string.
     let req = json_with_token(
         "POST",
-        "/api/acp/health-check",
+        "/api/agents/health-check",
         json!({ "backend": "iFlow" }),
         &token,
         &csrf,
@@ -167,37 +111,6 @@ async fn health_check_unknown_backend_reports_unavailable() {
     assert_eq!(body["data"]["available"], false);
 }
 
-#[tokio::test]
-async fn get_env_returns_env_map() {
-    let (mut app, services) = build_app().await;
-    let (token, _csrf) = setup_and_login(&mut app, &services, "user1", "pass123").await;
-
-    let req = get_with_token("/api/acp/env", &token);
-    let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-
-    let body = body_json(resp).await;
-    assert_eq!(body["success"], true);
-    assert!(body["data"]["env"].is_object());
-}
-
-#[tokio::test]
-async fn probe_model_non_cli_backend() {
-    let (mut app, services) = build_app().await;
-    let (token, csrf) = setup_and_login(&mut app, &services, "user1", "pass123").await;
-
-    let req = json_with_token(
-        "POST",
-        "/api/acp/probe-model",
-        json!({ "backend": "custom" }),
-        &token,
-        &csrf,
-    );
-    let resp = app.oneshot(req).await.unwrap();
-    // custom backend has no CLI, so probe fails
-    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
-}
-
 // ── Session-bound ACP routes (no active task → 404) ──────────────
 
 #[tokio::test]
@@ -205,7 +118,7 @@ async fn get_mode_no_active_task() {
     let (mut app, services) = build_app().await;
     let (token, _csrf) = setup_and_login(&mut app, &services, "user1", "pass123").await;
 
-    let req = get_with_token("/api/conversations/nonexistent/acp/mode", &token);
+    let req = get_with_token("/api/conversations/nonexistent/mode", &token);
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
@@ -217,7 +130,7 @@ async fn set_mode_no_active_task() {
 
     let req = json_with_token(
         "PUT",
-        "/api/conversations/nonexistent/acp/mode",
+        "/api/conversations/nonexistent/mode",
         json!({ "mode": "code" }),
         &token,
         &csrf,
@@ -231,7 +144,7 @@ async fn get_model_no_active_task() {
     let (mut app, services) = build_app().await;
     let (token, _csrf) = setup_and_login(&mut app, &services, "user1", "pass123").await;
 
-    let req = get_with_token("/api/conversations/nonexistent/acp/model", &token);
+    let req = get_with_token("/api/conversations/nonexistent/model", &token);
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
@@ -243,7 +156,7 @@ async fn set_model_no_active_task() {
 
     let req = json_with_token(
         "PUT",
-        "/api/conversations/nonexistent/acp/model",
+        "/api/conversations/nonexistent/model",
         json!({ "model_id": "claude-sonnet-4" }),
         &token,
         &csrf,
@@ -252,28 +165,3 @@ async fn set_model_no_active_task() {
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
 
-#[tokio::test]
-async fn get_config_no_active_task() {
-    let (mut app, services) = build_app().await;
-    let (token, _csrf) = setup_and_login(&mut app, &services, "user1", "pass123").await;
-
-    let req = get_with_token("/api/conversations/nonexistent/acp/config", &token);
-    let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-}
-
-#[tokio::test]
-async fn set_config_no_active_task() {
-    let (mut app, services) = build_app().await;
-    let (token, csrf) = setup_and_login(&mut app, &services, "user1", "pass123").await;
-
-    let req = json_with_token(
-        "PUT",
-        "/api/conversations/nonexistent/acp/config/theme",
-        json!({ "value": "dark" }),
-        &token,
-        &csrf,
-    );
-    let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
-}

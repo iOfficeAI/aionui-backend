@@ -240,7 +240,7 @@ async fn stop_stream_with_mock_agent() {
 
     let req = json_with_token(
         "POST",
-        &format!("/api/conversations/{conv_id}/stop"),
+        &format!("/api/conversations/{conv_id}/cancel"),
         json!({}),
         &token,
         &csrf,
@@ -368,27 +368,6 @@ async fn slash_commands_with_mock_returns_empty() {
 }
 
 #[tokio::test]
-async fn reload_context_with_mock_agent() {
-    let (mut app, services, mock_tm) = build_app_with_mock_tasks().await;
-    let (token, csrf) = setup_and_login(&mut app, &services, "admin", "Pass123!").await;
-    let conv_id = create_conversation(&mut app, &token, &csrf, "Reload Mock Test").await;
-    mock_tm.insert(&conv_id, "/mock-workspace");
-
-    let req = json_with_token(
-        "POST",
-        &format!("/api/conversations/{conv_id}/reload-context"),
-        json!({}),
-        &token,
-        &csrf,
-    );
-    let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-
-    let json = body_json(resp).await;
-    assert_eq!(json["success"], true);
-}
-
-#[tokio::test]
 async fn openclaw_runtime_wrong_agent_type() {
     let (mut app, services, mock_tm) = build_app_with_mock_tasks().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "Pass123!").await;
@@ -397,11 +376,14 @@ async fn openclaw_runtime_wrong_agent_type() {
 
     let req = get_with_token(&format!("/api/conversations/{conv_id}/openclaw/runtime"), &token);
     let resp = app.oneshot(req).await.unwrap();
-    // Mock agent is type Acp, not OpenclawGateway → 400
-    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    // Non-OpenClaw agents return a JSON null payload instead of an
+    // error — the endpoint is a best-effort diagnostic; callers that
+    // need stricter typing check the payload shape themselves.
+    assert_eq!(resp.status(), StatusCode::OK);
 
     let json = body_json(resp).await;
-    assert!(json["error"].as_str().unwrap().contains("OpenClaw"));
+    assert_eq!(json["success"], true);
+    assert!(json["data"].is_null());
 }
 
 #[tokio::test]
