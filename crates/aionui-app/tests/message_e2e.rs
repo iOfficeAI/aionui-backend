@@ -604,7 +604,13 @@ async fn t2_2_stop_stream_conversation_not_found() {
     let (mut app, services) = build_app().await;
     let (token, csrf) = setup_and_login(&mut app, &services, "admin", "StrongP@ss1").await;
 
-    let req = common::json_with_token("POST", "/api/conversations/non-existent/cancel", json!({}), &token, &csrf);
+    let req = common::json_with_token(
+        "POST",
+        "/api/conversations/non-existent/cancel",
+        json!({}),
+        &token,
+        &csrf,
+    );
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }

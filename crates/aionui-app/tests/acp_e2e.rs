@@ -164,4 +164,3 @@ async fn set_model_no_active_task() {
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
-
