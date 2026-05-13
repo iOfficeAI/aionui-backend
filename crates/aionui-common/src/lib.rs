@@ -17,7 +17,7 @@ pub use enums::{
     McpSource, MessagePosition, MessageStatus, MessageType, PreviewContentType, ProtocolType, RemoteAgentAuthType,
     RemoteAgentProtocol, RemoteAgentStatus,
 };
-pub use error::AppError;
+pub use error::{AppError, ErrorChain};
 pub use id::{fnv1a_hex8, generate_id, generate_id_with_length, generate_prefixed_id, generate_short_id};
 pub use pagination::PaginatedResult;
 pub use timestamp::{TimestampMs, now_ms};

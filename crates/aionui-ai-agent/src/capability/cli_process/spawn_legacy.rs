@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use aionui_common::{AppError, CommandSpec};
+use aionui_common::{AppError, CommandSpec, ErrorChain};
 use aionui_runtime::Builder as CmdBuilder;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Child;
 use tokio::sync::{Mutex, broadcast, watch};
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use super::{CliAgentProcess, EVENT_CHANNEL_CAPACITY, STDERR_BUFFER_MAX};
 
@@ -32,7 +32,7 @@ impl CliAgentProcess {
         }
 
         let mut child: Child = cmd.spawn().map_err(|e| {
-            error!(command = %config.command.display(), error = %e, "Failed to spawn CLI process");
+            error!(command = %config.command.display(), error = %ErrorChain(&e), "Failed to spawn CLI process");
             AppError::Internal(format!(
                 "Failed to spawn CLI process '{}': {}",
                 config.command.display(),
@@ -43,7 +43,7 @@ impl CliAgentProcess {
         let pid = child
             .id()
             .ok_or_else(|| AppError::Internal("Failed to obtain PID from spawned process".into()))?;
-        debug!(pid, command = %config.command.display(), "CLI process spawned");
+        info!(pid, command = %config.command.display(), "CLI process spawned");
 
         let stdout = child
             .stdout
@@ -117,11 +117,11 @@ impl CliAgentProcess {
         let exit_handle = tokio::spawn(async move {
             match child.wait().await {
                 Ok(status) => {
-                    debug!(pid, ?status, "CLI process exited");
+                    info!(pid, ?status, "CLI process exited");
                     let _ = exit_tx.send(Some(status));
                 }
                 Err(e) => {
-                    error!(pid, error = %e, "Failed to wait on CLI process");
+                    error!(pid, error = %ErrorChain(&e), "Failed to wait on CLI process");
                     // Signal exit even on error so callers don't hang
                     let _ = exit_tx.send(None);
                 }

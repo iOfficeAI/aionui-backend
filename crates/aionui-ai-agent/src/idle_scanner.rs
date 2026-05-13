@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use aionui_common::AgentKillReason;
+use aionui_common::{AgentKillReason, ErrorChain};
 use tracing::{debug, info, warn};
 
 use crate::task_manager::IWorkerTaskManager;
@@ -66,7 +66,7 @@ fn scan_and_cleanup(manager: &Arc<dyn IWorkerTaskManager>, threshold_ms: i64) {
         if let Err(e) = manager.kill(&id, Some(AgentKillReason::IdleTimeout)) {
             warn!(
                 conversation_id = %id,
-                error = %e,
+                error = %ErrorChain(&e),
                 "Failed to kill idle agent"
             );
         }

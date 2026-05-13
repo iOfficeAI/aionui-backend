@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use aionui_common::{AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, TimestampMs};
+use aionui_common::{AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, ErrorChain, TimestampMs};
 use serde_json::{Value, json};
 use tokio::sync::{Mutex, RwLock, broadcast};
 use tracing::{debug, error, info, warn};
@@ -209,7 +209,7 @@ impl crate::agent_task::IAgentTask for NanobotAgentManager {
         let grace = Duration::from_millis(NANOBOT_KILL_GRACE_MS);
         tokio::spawn(async move {
             if let Err(e) = process.kill(grace).await {
-                error!(error = %e, "Failed to kill Nanobot process");
+                error!(error = %ErrorChain(&e), "Failed to kill Nanobot process");
             }
         });
 

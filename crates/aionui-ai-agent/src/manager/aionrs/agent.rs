@@ -10,7 +10,9 @@ use aion_mcp::manager::McpManager;
 use aion_protocol::commands::SessionMode;
 use aion_protocol::{ToolApprovalManager, ToolApprovalResult};
 use aionui_api_types::AgentModeResponse;
-use aionui_common::{AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, TimestampMs, now_ms};
+use aionui_common::{
+    AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, ErrorChain, TimestampMs, now_ms,
+};
 use serde_json::Value;
 use tokio::sync::{Mutex, broadcast};
 use tracing::{debug, error, info};
@@ -110,7 +112,7 @@ impl AionrsAgentManager {
         if !is_resume && let Err(e) = engine.init_session(&provider_label, &workspace, Some(&conversation_id)) {
             error!(
                 conversation_id = %conversation_id,
-                error = %e,
+                error = %ErrorChain(&*e),
                 "Failed to init session, continuing without persistence"
             );
         }
@@ -204,7 +206,7 @@ impl crate::agent_task::IAgentTask for AionrsAgentManager {
                 error!(
                     conversation_id = %self.runtime.conversation_id(),
                     elapsed_ms,
-                    error = %e,
+                    error = %ErrorChain(&e),
                     "Aionrs engine.run() failed, emitting Error+Finish"
                 );
                 self.runtime.emit_error(error_msg.clone());

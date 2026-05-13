@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use aionui_common::{
-    AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, RemoteAgentStatus, TimestampMs,
+    AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, ErrorChain, RemoteAgentStatus, TimestampMs,
 };
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
@@ -86,7 +86,7 @@ impl RemoteAgentManager {
         let url = &self.remote_config.url;
 
         let (ws_stream, _response) = tokio_tungstenite::connect_async(url).await.map_err(|e| {
-            error!(url = url, error = %e, "Failed to connect to remote agent");
+            error!(url = url, error = %ErrorChain(&e), "Failed to connect to remote agent");
             AppError::Internal(format!("WebSocket connection failed: {e}"))
         })?;
 
@@ -134,7 +134,7 @@ impl RemoteAgentManager {
                         Err(e) => {
                             debug!(
                                 conversation_id = %self.runtime.conversation_id(),
-                                error = %e,
+                                error = %ErrorChain(&e),
                                 "Non-JSON WebSocket message, skipping"
                             );
                         }
@@ -150,7 +150,7 @@ impl RemoteAgentManager {
                 Err(e) => {
                     warn!(
                         conversation_id = %self.runtime.conversation_id(),
-                        error = %e,
+                        error = %ErrorChain(&e),
                         "WebSocket read error"
                     );
                     break;
@@ -231,7 +231,7 @@ impl RemoteAgentManager {
         sink.send(Message::Text(text.into())).await.map_err(|e| {
             error!(
                 conversation_id = %self.runtime.conversation_id(),
-                error = %e,
+                error = %ErrorChain(&e),
                 "Failed to send WebSocket message"
             );
             AppError::Internal(format!("WebSocket send failed: {e}"))

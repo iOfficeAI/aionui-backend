@@ -13,7 +13,7 @@ use aionui_api_types::{
     WebSocketMessage,
 };
 use aionui_common::{
-    AgentType, AppError, ConversationSource, ConversationStatus, PaginatedResult, generate_short_id, now_ms,
+    AgentType, AppError, ConversationSource, ConversationStatus, ErrorChain, PaginatedResult, generate_short_id, now_ms,
 };
 use aionui_db::models::MessageRow;
 use aionui_db::{
@@ -21,7 +21,7 @@ use aionui_db::{
     IAgentMetadataRepository, IConversationRepository, SaveRuntimeStateParams, SortOrder,
 };
 use aionui_realtime::EventBroadcaster;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::convert::{
     row_to_artifact_response, row_to_message_response, row_to_response, row_to_response_with_extra, search_row_to_item,
@@ -119,6 +119,7 @@ impl ConversationService {
     ///
     /// Generates a UUID v7, sets status to `pending`, defaults source
     /// to `aionui`, and broadcasts `conversation.listChanged(created)`.
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, agent_type = ?req.r#type))]
     pub async fn create(
         &self,
         user_id: &str,
@@ -148,10 +149,7 @@ impl ConversationService {
             && let Some(obj) = extra.as_object_mut()
             && obj.remove("model").is_some()
         {
-            warn!(
-                user_id = %user_id,
-                "aionrs create: stripped legacy `extra.model`; top-level `model` is canonical"
-            );
+            warn!("aionrs create: stripped legacy `extra.model`; top-level `model` is canonical");
         }
 
         // Determine whether the user chose this workspace ("custom") or we
@@ -288,10 +286,15 @@ impl ConversationService {
 
         self.broadcast_list_changed(&response.id, "created", response.source.as_ref());
 
+        info!(conversation_id = %response.id, "Conversation created");
+
         Ok(response)
     }
 
+    #[tracing::instrument(skip_all, fields(conversation_id = %conversation_id))]
     async fn create_acp_session_row(&self, conversation_id: &str, extra: &serde_json::Value) -> Result<(), AppError> {
+        debug!("Creating acp_session row");
+
         // Identity comes from the user's agent choice in `extra`.
         // `agent_id` is the catalog row id; `backend` is the vendor
         // label; `agent_source` says builtin/extension/custom. The
@@ -361,6 +364,7 @@ impl ConversationService {
     ///
     /// Returns `NotFound` if the conversation does not exist or does not
     /// belong to the given user (avoids leaking existence to other users).
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, conversation_id = %id))]
     pub async fn get(&self, user_id: &str, id: &str) -> Result<ConversationResponse, AppError> {
         let row = self
             .conversation_repo
@@ -376,6 +380,7 @@ impl ConversationService {
     }
 
     /// List conversations with cursor-based pagination and optional filters.
+    #[tracing::instrument(skip_all, fields(user_id = %user_id))]
     pub async fn list(
         &self,
         user_id: &str,
@@ -403,7 +408,7 @@ impl ConversationService {
                 Err(err) => {
                     warn!(
                         conversation_id = %row_id,
-                        error = %err,
+                        error = %ErrorChain(&err),
                         "Skipping unreadable conversation row in list"
                     );
                     continue;
@@ -414,7 +419,7 @@ impl ConversationService {
                 Ok(resp) => items.push(resp),
                 Err(err) => warn!(
                     conversation_id = %row_id,
-                    error = %err,
+                    error = %ErrorChain(&err),
                     "Skipping unreadable conversation row in list"
                 ),
             }
@@ -432,6 +437,7 @@ impl ConversationService {
     /// If `extra` is provided, it is merged into the existing extra JSON
     /// (top-level keys are overwritten, unlisted keys are preserved).
     /// Broadcasts `conversation.listChanged(updated)`.
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, conversation_id = %id))]
     pub async fn update(
         &self,
         user_id: &str,
@@ -478,10 +484,7 @@ impl ConversationService {
                 && let Some(obj) = existing_extra.as_object_mut()
                 && obj.remove("model").is_some()
             {
-                warn!(
-                    conversation_id = %id,
-                    "aionrs update: stripped legacy `extra.model` from merged extra"
-                );
+                warn!("aionrs update: stripped legacy `extra.model` from merged extra");
             }
             Some(
                 serde_json::to_string(&existing_extra)
@@ -522,7 +525,13 @@ impl ConversationService {
         self.conversation_repo.update(id, &updates).await?;
 
         if model_changed {
-            let _ = task_manager.kill(id, None);
+            info!(
+                model_changed = true,
+                "Conversation updated, killing agent task due to model change"
+            );
+            if let Err(e) = task_manager.kill(id, None) {
+                warn!(error = %ErrorChain(&e), "Failed to kill agent after model change");
+            }
         }
 
         // Re-fetch to return the updated version
@@ -534,6 +543,7 @@ impl ConversationService {
 
         let response = row_to_response(updated, &self.workspace_root)?;
 
+        info!("Conversation updated");
         self.broadcast_list_changed(id, "updated", response.source.as_ref());
 
         Ok(response)
@@ -544,6 +554,7 @@ impl ConversationService {
     /// (e.g. `TeamSessionService::ensure_session` writing
     /// `team_mcp_stdio_config`) where a full `update()` would kill the agent
     /// on a spurious model comparison.
+    #[tracing::instrument(skip_all, fields(conversation_id = %conversation_id))]
     pub async fn update_extra(&self, conversation_id: &str, patch: serde_json::Value) -> Result<(), AppError> {
         let existing = self
             .conversation_repo
@@ -564,12 +575,14 @@ impl ConversationService {
             ..Default::default()
         };
         self.conversation_repo.update(conversation_id, &updates).await?;
+        debug!("Conversation extra merged");
         Ok(())
     }
 
     /// Delete a conversation (messages cascade via FK).
     ///
     /// Broadcasts `conversation.listChanged(deleted)`.
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, conversation_id = %id))]
     pub async fn delete(&self, user_id: &str, id: &str) -> Result<(), AppError> {
         // Get existing to retrieve source for broadcast and verify ownership
         let existing = self
@@ -590,8 +603,7 @@ impl ConversationService {
         // cheap to cover) still drop their orphaned session row.
         if let Err(err) = self.acp_session_repo.delete(id).await {
             warn!(
-                conversation_id = %id,
-                error = %err,
+                error = %ErrorChain(&err),
                 "Failed to delete acp_session row on conversation delete"
             );
         }
@@ -600,6 +612,7 @@ impl ConversationService {
             hook.on_conversation_deleted(id).await;
         }
 
+        info!("Conversation deleted");
         self.broadcast_list_changed(id, "deleted", source.as_ref());
 
         Ok(())
@@ -622,6 +635,7 @@ impl ConversationService {
     }
 
     /// Reset a conversation: clear messages and set status back to pending.
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, conversation_id = %id))]
     pub async fn reset(&self, user_id: &str, id: &str) -> Result<(), AppError> {
         // Verify existence and ownership
         self.conversation_repo
@@ -643,6 +657,7 @@ impl ConversationService {
         };
         self.conversation_repo.update(id, &updates).await?;
 
+        info!("Conversation reset");
         Ok(())
     }
 
@@ -914,6 +929,7 @@ impl ConversationService {
     /// 4. Sends the message to the agent
     /// 5. Spawns a background relay (agent events → WebSocket + DB)
     /// 6. Returns immediately (202 Accepted semantics)
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, conversation_id = %conversation_id))]
     pub async fn send_message(
         &self,
         user_id: &str,
@@ -974,7 +990,12 @@ impl ConversationService {
             hidden: req.hidden,
             created_at: now_ms(),
         };
-        self.conversation_repo.insert_message(&user_msg).await?;
+        if let Err(e) = self.conversation_repo.insert_message(&user_msg).await {
+            warn!(msg_id = %user_msg_id, error = %ErrorChain(&e), "Failed to insert user message");
+            return Err(e.into());
+        }
+
+        info!(msg_id = %user_msg_id, "User message persisted");
 
         self.broadcaster.broadcast(WebSocketMessage::new(
             "message.userCreated",
@@ -999,6 +1020,8 @@ impl ConversationService {
         self.maybe_persist_workspace(conversation_id, &stored_workspace, agent.workspace())
             .await?;
 
+        info!(agent_type = ?agent.agent_type(), "Agent task ready");
+
         // TODO: 好蠢的设计, status 写数据库, 最好干掉啦
         let update = ConversationRowUpdate {
             status: Some(enum_to_db(&ConversationStatus::Running)?),
@@ -1006,7 +1029,10 @@ impl ConversationService {
             ..Default::default()
         };
 
-        self.conversation_repo.update(conversation_id, &update).await?;
+        if let Err(e) = self.conversation_repo.update(conversation_id, &update).await {
+            warn!(error = %ErrorChain(&e), "Failed to set conversation status to Running");
+            return Err(e.into());
+        }
         let conv_id = conversation_id.to_owned();
         let repo = Arc::clone(&self.conversation_repo);
         let broadcaster = Arc::clone(&self.broadcaster);
@@ -1060,7 +1086,7 @@ impl ConversationService {
                 // 1. Send the message to the agent and concurrently run the relay to stream events.
                 tokio::spawn(async move {
                     if let Err(e) = send_agent.send_message(current_send).await {
-                        tracing::error!(conversation_id = %conv_id_send, error = %e, "Agent send_message failed");
+                        error!(conversation_id = %conv_id_send, error = %ErrorChain(&e), "Agent send_message failed");
                     }
                 });
                 // 2. Wait for the agent to process the message and complete the turn, while the relay streams events in real time.
@@ -1089,7 +1115,7 @@ impl ConversationService {
             StreamRelay::complete_conversation(&repo, &broadcaster, &conv_id).await;
         });
 
-        info!(conversation_id, msg_id = %user_msg_id_ret, "Message dispatched, stream relay started");
+        info!(msg_id = %user_msg_id_ret, "Message dispatched, stream relay started");
         Ok(user_msg_id_ret)
     }
 
@@ -1122,6 +1148,7 @@ impl ConversationService {
     }
 
     /// Stop the current streaming response for a conversation.
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, conversation_id = %conversation_id))]
     pub async fn cancel(
         &self,
         user_id: &str,
@@ -1139,9 +1166,12 @@ impl ConversationService {
             .get_task(conversation_id)
             .ok_or_else(|| AppError::Conflict("No active agent for this conversation".into()))?;
 
-        agent.cancel().await?;
+        if let Err(e) = agent.cancel().await {
+            warn!(error = %ErrorChain(&e), "Failed to cancel agent");
+            return Err(e);
+        }
 
-        info!(conversation_id, "Stream canceled");
+        info!("Stream canceled");
         Ok(())
     }
 
@@ -1149,6 +1179,7 @@ impl ConversationService {
     ///
     /// This builds the agent task without sending a message, so the
     /// first real message can be processed faster.
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, conversation_id = %conversation_id))]
     pub async fn warmup(
         &self,
         user_id: &str,
@@ -1170,7 +1201,7 @@ impl ConversationService {
         self.maybe_persist_workspace(conversation_id, &stored_workspace, agent.workspace())
             .await?;
 
-        debug!(conversation_id, "Agent warmed up");
+        debug!("Agent warmed up");
         Ok(())
     }
 }
@@ -1294,7 +1325,7 @@ impl ConversationService {
             Err(e) => {
                 warn!(
                     conversation_id,
-                    error = %e,
+                    error = %ErrorChain(&e),
                     "backfill serialize failed; returning in-memory value"
                 );
                 return;
@@ -1307,7 +1338,7 @@ impl ConversationService {
         if let Err(e) = self.conversation_repo.update(conversation_id, &update).await {
             warn!(
                 conversation_id,
-                error = %e,
+                error = %ErrorChain(&e),
                 "backfill persist failed; returning in-memory value"
             );
         }
@@ -1418,7 +1449,7 @@ async fn persist_session_key(repo: &Arc<dyn IConversationRepository>, conversati
     let extra_json = match serde_json::to_string(&extra) {
         Ok(j) => j,
         Err(e) => {
-            warn!(conversation_id, error = %e, "Failed to serialize extra for session key persist");
+            warn!(conversation_id, error = %ErrorChain(&e), "Failed to serialize extra for session key persist");
             return;
         }
     };
@@ -1429,7 +1460,7 @@ async fn persist_session_key(repo: &Arc<dyn IConversationRepository>, conversati
         ..Default::default()
     };
     if let Err(e) = repo.update(conversation_id, &update).await {
-        warn!(conversation_id, error = %e, "Failed to persist session key");
+        warn!(conversation_id, error = %ErrorChain(&e), "Failed to persist session key");
     } else {
         debug!(conversation_id, "Persisted session key to conversation.extra");
     }

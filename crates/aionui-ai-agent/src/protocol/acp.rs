@@ -35,6 +35,7 @@ use agent_client_protocol::schema::{
 use agent_client_protocol::{
     Agent, ByteStreams, Client, ConnectionTo, Responder, on_receive_notification, on_receive_request,
 };
+use aionui_common::ErrorChain;
 use tokio::process::{ChildStdin, ChildStdout};
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -462,7 +463,7 @@ async fn run_sdk_background(
 
     match result {
         Ok(_) => debug!("ACP SDK connection closed normally"),
-        Err(e) => warn!(error = %e, "ACP SDK connection closed with error"),
+        Err(e) => warn!(error = %ErrorChain(&e), "ACP SDK connection closed with error"),
     }
 }
 
@@ -475,7 +476,12 @@ async fn handle_session_notification(
 
     let events = stream_event::session_notification_to_events(&notification);
     for event in events {
-        let _ = event_tx.send(event);
+        if let Err(e) = event_tx.send(event) {
+            // broadcast::SendError means no active receivers — expected when
+            // no subscribers are attached to this agent. Log at debug so it
+            // doesn't spam after a turn finishes.
+            debug!(error = %e, "Dropping ACP event: no active broadcast receivers");
+        }
     }
 }
 

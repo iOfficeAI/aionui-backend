@@ -107,6 +107,21 @@ impl IntoResponse for AppError {
     }
 }
 
+/// Wrap an error to display its full `source()` chain as "outer: inner1: inner2" in a single log line.
+pub struct ErrorChain<'a>(pub &'a (dyn std::error::Error + 'static));
+
+impl std::fmt::Display for ErrorChain<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)?;
+        let mut src = self.0.source();
+        while let Some(inner) = src {
+            write!(f, ": {inner}")?;
+            src = inner.source();
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,5 +207,32 @@ mod tests {
         assert_eq!(json["success"], false);
         assert_eq!(json["error"], "Rate limited");
         assert_eq!(json["code"], "RATE_LIMITED");
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("inner cause")]
+    struct Inner;
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("outer: {message}")]
+    struct Outer {
+        message: String,
+        #[source]
+        source: Inner,
+    }
+
+    #[test]
+    fn test_error_chain_single_error() {
+        let err = AppError::NotFound("x".into());
+        assert_eq!(format!("{}", ErrorChain(&err)), err.to_string());
+    }
+
+    #[test]
+    fn test_error_chain_nested() {
+        let err = Outer {
+            message: "boom".into(),
+            source: Inner,
+        };
+        assert_eq!(format!("{}", ErrorChain(&err)), "outer: boom: inner cause");
     }
 }

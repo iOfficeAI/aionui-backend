@@ -14,13 +14,13 @@ use agent_client_protocol::schema::{
 };
 use aionui_api_types::{AgentHandshake, SlashCommandItem};
 use aionui_common::{
-    AgentKillReason, AgentType, AppError, ConversationStatus, TimestampMs, normalize_keys_to_snake_case,
+    AgentKillReason, AgentType, AppError, ConversationStatus, ErrorChain, TimestampMs, normalize_keys_to_snake_case,
 };
 use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
-use tracing::{error, info};
+use tracing::{debug, error, info, warn};
 
 use super::mode_normalize::normalize_requested_mode;
 
@@ -136,10 +136,10 @@ impl AcpAgentManager {
         AppError,
     > {
         let process = CliAgentProcess::spawn_for_sdk(params.command_spec.clone(), &params.data_dir).await?;
-        let (stdin, stdout) = process
-            .take_stdio()
-            .await
-            .ok_or_else(|| AppError::Internal("Failed to take stdio from CLI process".into()))?;
+        let (stdin, stdout) = process.take_stdio().await.ok_or_else(|| {
+            error!(conversation_id = %params.conversation_id, "Failed to take stdio from CLI process");
+            AppError::Internal("Failed to take stdio from CLI process".into())
+        })?;
 
         // Dedicated channel for raw SDK SessionNotifications → session tracker.
         // This channel is separate from event_tx so the tracker never re-applies
@@ -154,7 +154,7 @@ impl AcpAgentManager {
             .map_err(|e| {
                 error!(
                     conversation_id = %params.conversation_id,
-                    error = %e,
+                    error = %ErrorChain(&e),
                     "Failed to establish ACP protocol connection"
                 );
                 AppError::from(e)
@@ -380,7 +380,9 @@ impl AcpAgentManager {
     /// 1. No sid at all → `open_session_new`
     /// 2. Sid present but CLI has not opened it (fresh task) → `open_session_resume`
     /// 3. Already opened → noop, return the existing sid
+    #[tracing::instrument(skip_all, fields(conversation_id = %self.params.conversation_id))]
     async fn ensure_session_opened(&self) -> Result<String, AppError> {
+        debug!("Ensuring ACP session is opened");
         let _lock = self.session_lock.lock().await;
 
         let (session_id, opened) = {
@@ -449,8 +451,15 @@ impl AcpAgentManager {
     /// factory after `AcpAgentManager::build` so `POST /warmup` returns
     /// only after the session is ready to accept `set_mode` / `set_model`
     /// / `prompt`. Idempotent — if already opened, returns immediately.
+    #[tracing::instrument(skip_all, fields(conversation_id = %self.params.conversation_id))]
     pub async fn warmup_session(&self) -> Result<(), AppError> {
-        self.ensure_session_opened().await.map(|_sid| ())
+        info!("Warming up ACP session");
+        let result = self.ensure_session_opened().await.map(|_sid| ());
+        match &result {
+            Ok(()) => info!("ACP session warmed up"),
+            Err(e) => warn!(error = %ErrorChain(e), "ACP session warmup failed"),
+        }
+        result
     }
 }
 
@@ -480,25 +489,30 @@ impl crate::agent_task::IAgentTask for AcpAgentManager {
         self.runtime.subscribe()
     }
 
+    #[tracing::instrument(skip_all, fields(conversation_id = %self.params.conversation_id, msg_id = %data.msg_id))]
     async fn send_message(&self, data: SendMessageData) -> Result<(), AppError> {
         self.runtime.bump_activity();
 
         let result = self.ensure_session_and_send(&data).await;
         match &result {
             Ok(()) => {
+                info!("ACP send_message completed");
                 // ACP pattern: Finish with session_id = None (default).
                 // If ACP later wants to include the session_id in Finish,
                 // read it from `self.session.read().await.session_id()`.
                 self.runtime.emit_finish(None);
             }
             Err(err) => {
+                warn!(error = %ErrorChain(err), "ACP send_message failed");
                 self.runtime.emit_error(err.to_string());
             }
         }
         result
     }
 
+    #[tracing::instrument(skip_all, fields(conversation_id = %self.params.conversation_id))]
     async fn cancel(&self) -> Result<(), AppError> {
+        info!("Cancelling ACP session");
         let session_id = self.session.read().await.session_id().map(ToOwned::to_owned);
         if let Some(sid) = session_id {
             self.protocol.cancel(CancelNotification::new(SessionId::new(sid)));
@@ -534,7 +548,7 @@ impl crate::agent_task::IAgentTask for AcpAgentManager {
 
         tokio::spawn(async move {
             if let Err(e) = process.kill(grace).await {
-                error!(error = %e, "Failed to kill ACP process");
+                error!(error = %ErrorChain(&e), "Failed to kill ACP process");
             }
         });
 

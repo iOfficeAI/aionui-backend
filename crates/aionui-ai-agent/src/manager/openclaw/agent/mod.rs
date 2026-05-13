@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use aionui_common::{AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, TimestampMs};
+use aionui_common::{AgentKillReason, AgentType, AppError, Confirmation, ConversationStatus, ErrorChain, TimestampMs};
 use serde_json::{Value, json};
 use tokio::sync::{Mutex, RwLock, broadcast};
 use tracing::{debug, error, info, warn};
@@ -126,14 +126,13 @@ impl OpenClawAgentManager {
 
         let (connection, hello) = OpenClawConnection::connect(&ws_url, auth, &identity)
             .await
-            .map_err(|e| {
+            .inspect_err(|e| {
                 error!(
                     conversation_id = %conversation_id,
                     url = %ws_url,
-                    error = %e,
+                    error = %ErrorChain(e),
                     "Failed to connect to OpenClaw gateway"
                 );
-                e
             })?;
 
         if let Some(ref auth_info) = hello.auth
@@ -321,7 +320,7 @@ impl OpenClawAgentManager {
                 Err(e) => {
                     warn!(
                         conversation_id = %self.runtime.conversation_id(),
-                        error = %e,
+                        error = %ErrorChain(&e),
                         "Failed to resume OpenClaw session, falling back to sessions.reset"
                     );
                 }
@@ -414,7 +413,7 @@ impl crate::agent_task::IAgentTask for OpenClawAgentManager {
         if let Err(ref e) = result {
             error!(
                 conversation_id = %self.runtime.conversation_id(),
-                error = %e,
+                error = %ErrorChain(e),
                 "OpenClaw send_message failed, emitting Error+Finish"
             );
             self.runtime.emit_error(format!("OpenClaw send failed: {e}"));
@@ -479,7 +478,7 @@ impl crate::agent_task::IAgentTask for OpenClawAgentManager {
             let grace = Duration::from_millis(OPENCLAW_KILL_GRACE_MS);
             tokio::spawn(async move {
                 if let Err(e) = process.kill(grace).await {
-                    error!(error = %e, "Failed to kill OpenClaw gateway process");
+                    error!(error = %ErrorChain(&e), "Failed to kill OpenClaw gateway process");
                 }
             });
         }

@@ -10,7 +10,7 @@ use aionui_ai_agent::{
 
 use crate::response_middleware::{ICronService, MessageMiddleware, MiddlewareResult};
 use aionui_api_types::WebSocketMessage;
-use aionui_common::{normalize_keys_to_snake_case, now_ms};
+use aionui_common::{ErrorChain, normalize_keys_to_snake_case, now_ms};
 
 use crate::service::ConversationService;
 use aionui_db::IConversationRepository;
@@ -69,13 +69,16 @@ impl StreamRelay {
     }
 
     /// Run the relay loop. Consumes `self` and runs until the agent stream ends.
-    pub async fn consume(self, mut rx: broadcast::Receiver<AgentStreamEvent>) -> RelayOutcome {
-        let started_at = now_ms();
-        info!(
+    #[tracing::instrument(
+        skip_all,
+        fields(
             conversation_id = %self.conversation_id,
             msg_id = %self.msg_id,
-            "StreamRelay started"
-        );
+        )
+    )]
+    pub async fn consume(self, mut rx: broadcast::Receiver<AgentStreamEvent>) -> RelayOutcome {
+        let started_at = now_ms();
+        info!("StreamRelay started");
 
         let mut text_buffer = String::new();
         let mut thinking_buffer = String::new();
@@ -115,7 +118,6 @@ impl StreamRelay {
                                 "Error"
                             };
                             info!(
-                                conversation_id = %self.conversation_id,
                                 event_type,
                                 elapsed_ms,
                                 text_len = text_buffer.len(),
@@ -156,7 +158,6 @@ impl StreamRelay {
                 Err(broadcast::error::RecvError::Closed) => {
                     let elapsed_ms = now_ms() - started_at;
                     warn!(
-                        conversation_id = %self.conversation_id,
                         elapsed_ms,
                         text_len = text_buffer.len(),
                         "StreamRelay channel closed without terminal event"
@@ -179,22 +180,19 @@ impl StreamRelay {
                     break outcome;
                 }
                 Err(broadcast::error::RecvError::Lagged(n)) => {
-                    warn!(
-                        conversation_id = %self.conversation_id,
-                        lagged = n,
-                        "Stream relay lagged, some events dropped"
-                    );
+                    warn!(lagged = n, "Stream relay lagged, some events dropped");
                 }
             }
         }
     }
 
     /// Forward an agent event to connected WebSocket clients.
+    #[tracing::instrument(skip_all)]
     fn forward_to_websocket(&self, event: &AgentStreamEvent) {
         let mut event_data = match serde_json::to_value(event) {
             Ok(v) => v,
             Err(e) => {
-                warn!(error = %e, "Failed to serialize agent event for WebSocket");
+                warn!(error = %ErrorChain(&e), "Failed to serialize agent event for WebSocket");
                 return;
             }
         };
@@ -215,6 +213,7 @@ impl StreamRelay {
     }
 
     /// Flush accumulated text to the database (create or update).
+    #[tracing::instrument(skip_all)]
     async fn flush_text(&self, text: &str, record_created: &mut bool) {
         if text.is_empty() {
             return;
@@ -229,7 +228,7 @@ impl StreamRelay {
                 hidden: None,
             };
             if let Err(e) = self.repo.update_message(&self.msg_id, &update).await {
-                error!(error = %e, "Failed to update streaming message");
+                error!(error = %ErrorChain(&e), "Failed to update streaming message");
             }
         } else {
             // `id` and `msg_id` share the same value: primary key is the
@@ -248,13 +247,14 @@ impl StreamRelay {
                 created_at: now_ms(),
             };
             if let Err(e) = self.repo.insert_message(&row).await {
-                error!(error = %e, "Failed to create streaming message");
+                error!(error = %ErrorChain(&e), "Failed to create streaming message");
             }
             *record_created = true;
         }
     }
 
     /// Finalize the assistant message on stream end.
+    #[tracing::instrument(skip_all)]
     async fn finalize(&self, text: &str, record_created: &bool, event: &AgentStreamEvent) -> RelayOutcome {
         let mut outcome = RelayOutcome::default();
         let status = match event {
@@ -276,7 +276,7 @@ impl StreamRelay {
                         hidden: Some(hidden),
                     };
                     if let Err(e) = self.repo.update_message(&self.msg_id, &update).await {
-                        error!(error = %e, "Failed to finalize streaming message");
+                        error!(error = %ErrorChain(&e), "Failed to finalize streaming message");
                     }
                 } else {
                     let row = MessageRow {
@@ -291,7 +291,7 @@ impl StreamRelay {
                         created_at: now_ms(),
                     };
                     if let Err(e) = self.repo.insert_message(&row).await {
-                        error!(error = %e, "Failed to create final message");
+                        error!(error = %ErrorChain(&e), "Failed to create final message");
                     }
                 }
 
@@ -317,7 +317,7 @@ impl StreamRelay {
                 created_at: now_ms(),
             };
             if let Err(e) = self.repo.insert_message(&row).await {
-                error!(error = %e, "Failed to store error message");
+                error!(error = %ErrorChain(&e), "Failed to store error message");
             }
         }
 
@@ -326,6 +326,7 @@ impl StreamRelay {
 
     /// Persist accumulated thinking content as a message in the database.
     /// This ensures thinking blocks survive page refreshes.
+    #[tracing::instrument(skip_all)]
     async fn persist_thinking(&self, thinking_buffer: &str, started_at: Option<i64>) {
         if thinking_buffer.is_empty() {
             return;
@@ -349,11 +350,12 @@ impl StreamRelay {
             created_at: started_at.unwrap_or_else(now_ms),
         };
         if let Err(e) = self.repo.insert_message(&row).await {
-            error!(error = %e, "Failed to persist thinking message");
+            error!(error = %ErrorChain(&e), "Failed to persist thinking message");
         }
     }
 
     /// Persist a Gemini-style tool_call event.
+    #[tracing::instrument(skip_all)]
     async fn persist_tool_call(&self, data: &aionui_ai_agent::protocol::events::tool_call::ToolCallEventData) {
         let status = match data.status {
             ToolCallStatus::Running => "work",
@@ -376,7 +378,7 @@ impl StreamRelay {
                 hidden: None,
             };
             if let Err(e) = self.repo.update_message(&data.call_id, &update).await {
-                error!(error = %e, "Failed to update tool_call message");
+                error!(error = %ErrorChain(&e), "Failed to update tool_call message");
             }
         } else {
             let row = MessageRow {
@@ -391,13 +393,14 @@ impl StreamRelay {
                 created_at: now_ms(),
             };
             if let Err(e) = self.repo.insert_message(&row).await {
-                error!(error = %e, "Failed to persist tool_call message");
+                error!(error = %ErrorChain(&e), "Failed to persist tool_call message");
             }
         }
     }
 
     /// Persist an ACP (Claude CLI) tool call event.
     /// First event (ToolCall) inserts; subsequent events (ToolCallUpdate) update.
+    #[tracing::instrument(skip_all)]
     async fn persist_acp_tool_call(&self, data: &aionui_ai_agent::protocol::events::tool_call::AcpToolCallEventData) {
         let tool_call_id = &data.update.tool_call_id;
         let status = match data.update.status {
@@ -425,7 +428,7 @@ impl StreamRelay {
                     created_at: now_ms(),
                 };
                 if let Err(e) = self.repo.insert_message(&row).await {
-                    error!(error = %e, "Failed to persist acp_tool_call message");
+                    error!(error = %ErrorChain(&e), "Failed to persist acp_tool_call message");
                 }
             }
             AcpToolCallSessionUpdateKind::ToolCallUpdate => {
@@ -436,7 +439,7 @@ impl StreamRelay {
                     hidden: None,
                 };
                 if let Err(e) = self.repo.update_message(tool_call_id, &update).await {
-                    error!(error = %e, "Failed to update acp_tool_call message");
+                    error!(error = %ErrorChain(&e), "Failed to update acp_tool_call message");
                 }
             }
         }
@@ -487,6 +490,7 @@ impl StreamRelay {
     }
 
     /// Persist a tool_group event (array of tool summaries).
+    #[tracing::instrument(skip_all)]
     async fn persist_tool_group(&self, entries: &[aionui_ai_agent::protocol::events::tool_call::ToolGroupEntry]) {
         let all_done = entries
             .iter()
@@ -512,7 +516,7 @@ impl StreamRelay {
                 hidden: None,
             };
             if let Err(e) = self.repo.update_message(&group_id, &update).await {
-                error!(error = %e, "Failed to update tool_group message");
+                error!(error = %ErrorChain(&e), "Failed to update tool_group message");
             }
         } else {
             let row = MessageRow {
@@ -527,7 +531,7 @@ impl StreamRelay {
                 created_at: now_ms(),
             };
             if let Err(e) = self.repo.insert_message(&row).await {
-                error!(error = %e, "Failed to persist tool_group message");
+                error!(error = %ErrorChain(&e), "Failed to persist tool_group message");
             }
         }
     }
@@ -582,6 +586,7 @@ impl StreamRelay {
         self.broadcaster.broadcast(msg);
     }
 
+    #[tracing::instrument(skip_all, fields(conversation_id = %conversation_id))]
     pub async fn complete_conversation(
         repo: &Arc<dyn IConversationRepository>,
         broadcaster: &Arc<dyn EventBroadcaster>,
@@ -593,7 +598,7 @@ impl StreamRelay {
             ..Default::default()
         };
         if let Err(e) = repo.update(conversation_id, &update).await {
-            error!(error = %e, "Failed to update conversation status");
+            error!(error = %ErrorChain(&e), "Failed to update conversation status");
         }
 
         let payload = json!({
