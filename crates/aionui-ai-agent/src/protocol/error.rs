@@ -10,11 +10,9 @@ use aionui_common::AppError;
 pub(crate) enum AcpError {
     // ── Process lifecycle ──────────────────────────────────────────
     /// CLI binary not found or not executable.
-    #[error("Failed to spawn agent process: {message}")]
     SpawnFailed { message: String },
 
     /// Process exited before the initialize handshake completed.
-    #[error("Agent process exited during startup (exit={exit_code:?}, signal={signal:?})")]
     StartupCrash {
         exit_code: Option<i32>,
         signal: Option<String>,
@@ -22,7 +20,6 @@ pub(crate) enum AcpError {
     },
 
     /// Process crashed while a request was in flight.
-    #[error("Agent process disconnected (exit={exit_code:?}, signal={signal:?})")]
     Disconnected {
         exit_code: Option<i32>,
         signal: Option<String>,
@@ -31,33 +28,96 @@ pub(crate) enum AcpError {
 
     // ── ACP protocol errors (from SDK ErrorCode) ──────────────────
     /// Agent requires authentication first.
-    #[error("Authentication required")]
     AuthRequired,
 
     /// Agent-side session not found.
-    #[error("Session not found: {session_id}")]
     SessionNotFound { session_id: String },
 
     /// Agent does not support the requested method.
-    #[error("Method not supported: {method}")]
     MethodNotFound { method: String },
 
     /// Invalid request parameters.
-    #[error("Invalid parameters: {message}")]
     InvalidParams { message: String },
 
-    /// Agent reported an internal error.
-    #[error("Agent internal error: {message}")]
-    AgentInternal { message: String, code: i32 },
+    /// Agent reported an internal error. `data` carries the optional JSON-RPC
+    /// `error.data` payload from the agent — see [`AcpError::display`] for how
+    /// it is rendered.
+    AgentInternal {
+        message: String,
+        code: i32,
+        data: Option<serde_json::Value>,
+    },
 
     // ── Local errors ──────────────────────────────────────────────
     /// Protocol not connected (used before connect or after disconnect).
-    #[error("ACP protocol not connected")]
     NotConnected,
 
     /// Initialize handshake timed out.
-    #[error("Initialize handshake timed out after {timeout_secs}s")]
     InitTimeout { timeout_secs: u64 },
+}
+
+/// JSON-RPC default message strings that carry no useful information.
+/// When `AgentInternal` arrives with one of these as its `message`, we fall
+/// back to a diagnostic display ("Agent internal error (code -32603)").
+const SDK_DEFAULT_MESSAGES: &[&str] = &[
+    "Parse error",
+    "Invalid request",
+    "Method not found",
+    "Invalid params",
+    "Internal error",
+];
+
+impl std::fmt::Display for AcpError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AcpError::SpawnFailed { message } => {
+                write!(f, "Failed to spawn agent process: {message}")
+            }
+            AcpError::StartupCrash { exit_code, signal, .. } => {
+                // stderr intentionally NOT included — may carry secrets.
+                write!(
+                    f,
+                    "Agent process exited during startup (exit={exit_code:?}, signal={signal:?})"
+                )
+            }
+            AcpError::Disconnected { exit_code, signal, .. } => {
+                write!(
+                    f,
+                    "Agent process disconnected (exit={exit_code:?}, signal={signal:?})"
+                )
+            }
+            AcpError::AuthRequired => f.write_str("Authentication required"),
+            AcpError::SessionNotFound { session_id } => {
+                write!(f, "Session not found: {session_id}")
+            }
+            AcpError::MethodNotFound { method } => {
+                write!(f, "Method not supported: {method}")
+            }
+            AcpError::InvalidParams { message } => {
+                write!(f, "Invalid parameters: {message}")
+            }
+            AcpError::AgentInternal { message, code, data } => {
+                let trimmed = message.trim();
+                let is_default = trimmed.is_empty()
+                    || SDK_DEFAULT_MESSAGES.iter().any(|d| d.eq_ignore_ascii_case(trimmed));
+                if is_default {
+                    write!(f, "Agent internal error (code {code})")?;
+                } else {
+                    f.write_str(trimmed)?;
+                }
+                if let Some(data) = data {
+                    let compact = serde_json::to_string(data)
+                        .unwrap_or_else(|_| "<unserializable data>".to_owned());
+                    write!(f, " ({compact})")?;
+                }
+                Ok(())
+            }
+            AcpError::NotConnected => f.write_str("ACP protocol not connected"),
+            AcpError::InitTimeout { timeout_secs } => {
+                write!(f, "Initialize handshake timed out after {timeout_secs}s")
+            }
+        }
+    }
 }
 
 impl AcpError {
@@ -88,10 +148,13 @@ impl AcpError {
                 method: context.to_owned(),
             },
             ErrorCode::InvalidParams => AcpError::InvalidParams { message: err.message },
-            ErrorCode::ParseError | ErrorCode::InvalidRequest | ErrorCode::InternalError => AcpError::AgentInternal {
-                message: err.message,
-                code: i32::from(err.code),
-            },
+            ErrorCode::ParseError | ErrorCode::InvalidRequest | ErrorCode::InternalError => {
+                AcpError::AgentInternal {
+                    message: err.message,
+                    code: i32::from(err.code),
+                    data: err.data,
+                }
+            }
             _ => {
                 let code = i32::from(err.code);
                 // -32001, -32002: additional session-not-found codes used by some agents
@@ -103,6 +166,7 @@ impl AcpError {
                     AcpError::AgentInternal {
                         message: err.message,
                         code,
+                        data: err.data,
                     }
                 }
             }
@@ -182,6 +246,7 @@ mod tests {
             AcpError::AgentInternal {
                 message: "oops".into(),
                 code: -32603,
+                data: None,
             }
             .is_retryable()
         );
@@ -258,7 +323,7 @@ mod tests {
         let sdk_err = SdkError::new(-32099, "custom error");
         let acp = AcpError::from_sdk(sdk_err, "ctx");
         match acp {
-            AcpError::AgentInternal { code, message } => {
+            AcpError::AgentInternal { code, message, .. } => {
                 assert_eq!(code, -32099);
                 assert_eq!(message, "custom error");
             }
@@ -281,6 +346,7 @@ mod tests {
                 AcpError::AgentInternal {
                     message: "e".into(),
                     code: -1,
+                    data: None,
                 },
                 StatusCode::BAD_GATEWAY,
             ),
@@ -305,6 +371,84 @@ mod tests {
         assert!(
             !display.contains("SUPER SECRET"),
             "Display should not leak stderr: {display}"
+        );
+    }
+
+    #[test]
+    fn from_sdk_captures_data_payload() {
+        let sdk_err = SdkError::internal_error()
+            .data(serde_json::json!({"reason": "rate_limited", "retry_after": 30}));
+        let acp = AcpError::from_sdk(sdk_err, "context");
+        match acp {
+            AcpError::AgentInternal { code, message, data } => {
+                assert_eq!(code, -32603);
+                assert_eq!(message, "Internal error");
+                let data = data.expect("data must be preserved");
+                assert_eq!(data["reason"], "rate_limited");
+                assert_eq!(data["retry_after"], 30);
+            }
+            other => panic!("Expected AgentInternal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn from_sdk_no_data_yields_none() {
+        let sdk_err = SdkError::internal_error();
+        let acp = AcpError::from_sdk(sdk_err, "context");
+        match acp {
+            AcpError::AgentInternal { data, .. } => assert!(data.is_none()),
+            other => panic!("Expected AgentInternal, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn agent_internal_display_uses_message_only_when_no_data() {
+        let err = AcpError::AgentInternal {
+            message: "API Error: Internal server error".into(),
+            code: -32603,
+            data: None,
+        };
+        assert_eq!(
+            err.to_string(),
+            "API Error: Internal server error",
+            "Display must NOT prefix with 'Agent internal error:' when message carries upstream context"
+        );
+    }
+
+    #[test]
+    fn agent_internal_display_falls_back_when_message_is_sdk_default() {
+        // SDK default for ErrorCode::InternalError is the plain string "Internal error".
+        // When that's all we have, the user sees nothing useful, so add a hint.
+        let err = AcpError::AgentInternal {
+            message: "Internal error".into(),
+            code: -32603,
+            data: None,
+        };
+        let display = err.to_string();
+        assert!(
+            display.contains("Agent internal error"),
+            "Display must include 'Agent internal error' hint when SDK gave us its default message; got {display}"
+        );
+        assert!(
+            display.contains("-32603"),
+            "Display must include the JSON-RPC code as a diagnostic when message is empty/default; got {display}"
+        );
+    }
+
+    #[test]
+    fn agent_internal_display_appends_data_inline() {
+        let err = AcpError::AgentInternal {
+            message: "API Error".into(),
+            code: -32603,
+            data: Some(serde_json::json!({"upstream_status": 503})),
+        };
+        let display = err.to_string();
+        assert!(display.contains("API Error"), "got {display}");
+        assert!(display.contains("upstream_status"), "got {display}");
+        assert!(display.contains("503"), "got {display}");
+        assert!(
+            !display.contains('\n'),
+            "data must be appended on a single line, not pretty-printed; got {display}"
         );
     }
 }

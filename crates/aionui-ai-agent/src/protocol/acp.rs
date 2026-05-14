@@ -272,6 +272,7 @@ impl AcpProtocol {
         let raw = serde_json::value::to_raw_value(&value).map_err(|e| AcpError::AgentInternal {
             message: format!("Failed to convert ext response: {e}"),
             code: -32603,
+            data: None,
         })?;
         Ok(ExtResponse::new(raw.into()))
     }
