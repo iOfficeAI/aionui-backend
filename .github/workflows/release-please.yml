@@ -41,7 +41,38 @@ jobs:
     if: "!startsWith(github.event.head_commit.message, 'chore: release') && !startsWith(github.event.head_commit.message, 'chore(main): release')"
     steps:
       - uses: googleapis/release-please-action@v5
+        id: release-please
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      - name: Checkout release PR branch
+        if: steps.release-please.outputs.pr
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ fromJSON(steps.release-please.outputs.pr).headBranchName }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Rust toolchain
+        if: steps.release-please.outputs.pr
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.95.0"
+
+      - name: Update Cargo.lock for workspace version bump
+        if: steps.release-please.outputs.pr
+        run: cargo update --workspace
+
+      - name: Commit and push Cargo.lock if changed
+        if: steps.release-please.outputs.pr
+        run: |
+          if git diff --quiet Cargo.lock; then
+            echo "Cargo.lock is already up to date"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add Cargo.lock
+            git commit -m "chore: update Cargo.lock for workspace version bump"
+            git push
+          fi
