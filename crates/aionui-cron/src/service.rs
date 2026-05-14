@@ -814,7 +814,7 @@ impl CronService {
 // ---------------------------------------------------------------------------
 
 #[async_trait::async_trait]
-impl aionui_conversation::OnConversationDelete for CronService {
+impl aionui_common::OnConversationDelete for CronService {
     async fn on_conversation_deleted(&self, conversation_id: &str) {
         self.delete_jobs_by_conversation(conversation_id).await;
     }

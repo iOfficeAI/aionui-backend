@@ -500,6 +500,7 @@ name = "aionui-common"
 version = "0.1.1"
 dependencies = [
  "aes-gcm",
+ "async-trait",
  "axum",
  "base64",
  "getrandom 0.2.17",

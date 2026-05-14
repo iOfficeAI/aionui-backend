@@ -13,7 +13,8 @@ use aionui_api_types::{
     WebSocketMessage,
 };
 use aionui_common::{
-    AgentType, AppError, ConversationSource, ConversationStatus, ErrorChain, PaginatedResult, generate_short_id, now_ms,
+    AgentType, AppError, ConversationSource, ConversationStatus, ErrorChain, OnConversationDelete, PaginatedResult,
+    generate_short_id, now_ms,
 };
 use aionui_db::models::MessageRow;
 use aionui_db::{
@@ -34,18 +35,18 @@ use std::sync::RwLock;
 
 const MAX_CRON_CONTINUATIONS_PER_TURN: usize = 4;
 
-#[async_trait::async_trait]
-pub trait OnConversationDelete: Send + Sync {
-    async fn on_conversation_deleted(&self, conversation_id: &str);
-}
-
 #[derive(Clone)]
 pub struct ConversationService {
     workspace_root: std::path::PathBuf,
     broadcaster: Arc<dyn EventBroadcaster>,
     skill_resolver: Arc<dyn SkillResolver>,
     task_manager: Arc<dyn IWorkerTaskManager>,
-    delete_hooks: Vec<Arc<dyn OnConversationDelete>>,
+    /// Hooks invoked at the end of `delete()` so other services
+    /// (`WorkerTaskManagerImpl`, `CronService`, …) can clean up their
+    /// per-conversation state. Wrapped in `Arc<RwLock<…>>` so registration
+    /// can happen post-construction without breaking the `Clone` impl —
+    /// mirrors the `cron_service` slot pattern below.
+    delete_hooks: Arc<RwLock<Vec<Arc<dyn OnConversationDelete>>>>,
     cron_service: Arc<RwLock<Option<Arc<dyn ICronService>>>>,
 
     // Repos for conversation, acp_session and agent_metadata access.
@@ -72,7 +73,7 @@ impl ConversationService {
             broadcaster,
             skill_resolver,
             task_manager,
-            delete_hooks: Vec::new(),
+            delete_hooks: Arc::new(RwLock::new(Vec::new())),
             cron_service: Arc::new(RwLock::new(None)),
 
             conversation_repo,
@@ -84,6 +85,17 @@ impl ConversationService {
     pub fn with_cron_service(&self, cron_service: Option<Arc<dyn ICronService>>) {
         if let Ok(mut guard) = self.cron_service.write() {
             *guard = cron_service;
+        }
+    }
+
+    /// Register a hook to be notified when a conversation is deleted.
+    ///
+    /// Hooks are dispatched sequentially in registration order from
+    /// `delete()`. Used by `aionui-app` to wire up `WorkerTaskManagerImpl`
+    /// (kill the agent process) and `CronService` (cascade-delete cron jobs).
+    pub fn with_delete_hook(&self, hook: Arc<dyn OnConversationDelete>) {
+        if let Ok(mut guard) = self.delete_hooks.write() {
+            guard.push(hook);
         }
     }
 
@@ -608,7 +620,12 @@ impl ConversationService {
             );
         }
 
-        for hook in &self.delete_hooks {
+        // Snapshot the hook list under the read lock, then drop the guard
+        // before awaiting — `RwLockReadGuard` is not `Send`, so holding it
+        // across `.await` would make this future non-`Send`.
+        let hooks: Vec<Arc<dyn OnConversationDelete>> =
+            self.delete_hooks.read().map(|guard| guard.clone()).unwrap_or_default();
+        for hook in hooks {
             hook.on_conversation_deleted(id).await;
         }
 

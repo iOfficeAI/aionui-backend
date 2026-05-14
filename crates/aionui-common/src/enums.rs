@@ -211,6 +211,10 @@ pub enum AgentKillReason {
     /// Team is being deleted; every agent process under it must be torn
     /// down before the team's conversations / rows are removed.
     TeamDeleted,
+    /// The owning conversation was deleted via `DELETE /api/conversations/{id}`.
+    /// The agent process must be torn down so it stops emitting stream events
+    /// for a conversation row that no longer exists.
+    ConversationDeleted,
 }
 
 /// Preview content type for document preview history.

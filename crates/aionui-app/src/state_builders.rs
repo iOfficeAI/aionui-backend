@@ -164,7 +164,11 @@ pub fn build_conversation_state(
         agent_metadata_repo,
         acp_session_repo,
     );
+    if let Some(hook) = services.task_manager_delete_hook.clone() {
+        conversation_service.with_delete_hook(hook);
+    }
     if let Some(cron_service) = cron_service {
+        conversation_service.with_delete_hook(cron_service.clone());
         conversation_service.with_cron_service(Some(cron_service));
     }
     ConversationRouterState {
@@ -301,6 +305,9 @@ pub async fn build_channel_state(
         agent_metadata_repo,
         acp_session_repo,
     ));
+    if let Some(hook) = services.task_manager_delete_hook.clone() {
+        conversation_svc.with_delete_hook(hook);
+    }
 
     let owner_user_id = services
         .user_repo
@@ -376,7 +383,11 @@ pub fn build_team_state(
         agent_metadata_repo,
         acp_session_repo,
     );
+    if let Some(hook) = services.task_manager_delete_hook.clone() {
+        conv_service.with_delete_hook(hook);
+    }
     if let Some(cron_service) = cron_service {
+        conv_service.with_delete_hook(cron_service.clone());
         conv_service.with_cron_service(Some(cron_service));
     }
     let service = TeamSessionService::new(

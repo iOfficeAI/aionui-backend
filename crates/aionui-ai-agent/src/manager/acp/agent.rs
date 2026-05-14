@@ -555,6 +555,7 @@ impl crate::agent_task::IAgentTask for AcpAgentManager {
             Some(AgentKillReason::IdleTimeout) => "Agent killed: idle timeout".to_owned(),
             Some(AgentKillReason::TeamMcpRebuild) => "Agent killed: team MCP rebuild".to_owned(),
             Some(AgentKillReason::TeamDeleted) => "Agent killed: team deleted".to_owned(),
+            Some(AgentKillReason::ConversationDeleted) => "Agent killed: conversation deleted".to_owned(),
             None => "Agent killed".to_owned(),
         };
         self.runtime.emit_error(message);

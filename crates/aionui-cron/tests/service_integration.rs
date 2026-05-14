@@ -1591,7 +1591,7 @@ async fn cd2_cascade_delete_no_matching_jobs() {
 
 #[tokio::test]
 async fn cd3_on_conversation_delete_trait() {
-    use aionui_conversation::OnConversationDelete;
+    use aionui_common::OnConversationDelete;
 
     let (svc, _repo, bc) = setup().await;
 

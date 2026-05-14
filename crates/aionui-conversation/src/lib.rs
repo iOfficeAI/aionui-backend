@@ -16,7 +16,7 @@ pub use response_middleware::{
 };
 pub use routes::conversation_routes;
 pub use routes_aux::conversation_ops_routes;
-pub use service::{ConversationService, OnConversationDelete};
+pub use service::ConversationService;
 pub use state::ConversationRouterState;
 
 #[cfg(test)]

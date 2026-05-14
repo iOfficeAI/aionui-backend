@@ -783,6 +783,29 @@ async fn delete_not_found() {
     assert!(matches!(err, AppError::NotFound(_)));
 }
 
+#[tokio::test]
+async fn delete_invokes_registered_hook() {
+    use aionui_common::OnConversationDelete;
+
+    struct RecordingHook(Mutex<Vec<String>>);
+    #[async_trait::async_trait]
+    impl OnConversationDelete for RecordingHook {
+        async fn on_conversation_deleted(&self, conversation_id: &str) {
+            self.0.lock().unwrap().push(conversation_id.to_owned());
+        }
+    }
+
+    let (svc, _broadcaster, _repo, _task_mgr) = make_service();
+    let hook = Arc::new(RecordingHook(Mutex::new(vec![])));
+    svc.with_delete_hook(hook.clone());
+
+    let conv = svc.create("user_1", make_create_req()).await.unwrap();
+    svc.delete("user_1", &conv.id).await.unwrap();
+
+    let calls = hook.0.lock().unwrap();
+    assert_eq!(calls.as_slice(), &[conv.id]);
+}
+
 // ── Broadcast payload tests ────────────────────────────────────────
 
 #[tokio::test]

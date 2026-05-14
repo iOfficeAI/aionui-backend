@@ -1,11 +1,13 @@
 use std::sync::Arc;
 
-use aionui_common::{AgentKillReason, AgentType, AppError, ConversationStatus, TimestampMs, now_ms};
+use aionui_common::{
+    AgentKillReason, AgentType, AppError, ConversationStatus, ErrorChain, OnConversationDelete, TimestampMs, now_ms,
+};
 use async_trait::async_trait;
 use dashmap::DashMap;
 use futures_util::future::BoxFuture;
 use tokio::sync::OnceCell;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::agent_task::AgentInstance;
 use crate::types::BuildTaskOptions;
@@ -174,6 +176,23 @@ impl IWorkerTaskManager for WorkerTaskManagerImpl {
                     .then(|| entry.key().clone())
             })
             .collect()
+    }
+}
+
+/// Wired up by `aionui-app` so deleting a conversation tears down its
+/// agent process. Without this hook, ACP/aionrs/nanobot subprocesses keep
+/// streaming events for a `conversation_id` whose DB row is already gone
+/// (Sentry ELECTRON-1BD).
+#[async_trait]
+impl OnConversationDelete for WorkerTaskManagerImpl {
+    async fn on_conversation_deleted(&self, conversation_id: &str) {
+        if let Err(e) = self.kill(conversation_id, Some(AgentKillReason::ConversationDeleted)) {
+            warn!(
+                conversation_id,
+                error = %ErrorChain(&e),
+                "Failed to kill agent task on conversation delete (non-fatal)",
+            );
+        }
     }
 }
 

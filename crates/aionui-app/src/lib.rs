@@ -31,6 +31,7 @@ use aionui_auth::{
 #[cfg(feature = "weixin")]
 use aionui_channel::weixin_login_route;
 use aionui_channel::{ChannelRouterState, channel_routes};
+use aionui_common::OnConversationDelete;
 use aionui_conversation::{ConversationRouterState, conversation_ops_routes, conversation_routes};
 use aionui_cron::{CronRouterState, cron_routes};
 use aionui_db::{
@@ -101,6 +102,11 @@ pub struct AppServices {
     pub ws_manager: Arc<WebSocketManager>,
     pub event_bus: Arc<BroadcastEventBus>,
     pub worker_task_manager: Arc<dyn IWorkerTaskManager>,
+    /// Same instance as `worker_task_manager`, exposed through the
+    /// `OnConversationDelete` trait so `ConversationService::with_delete_hook`
+    /// can wire it up. Optional because tests construct `AppServices` with a
+    /// mock `worker_task_manager` that does not implement the trait.
+    pub task_manager_delete_hook: Option<Arc<dyn OnConversationDelete>>,
     pub agent_registry: Arc<AgentRegistry>,
     pub conversation_repo: Arc<dyn IConversationRepository>,
     pub acp_session_sync: Arc<AcpSessionSyncService>,
@@ -238,7 +244,9 @@ impl AppServices {
         // Agent factory is now wired. Future extension/custom agents
         // that get written to `agent_metadata` will show up after the
         // relevant service calls `AgentRegistry::hydrate`.
-        let worker_task_manager: Arc<dyn IWorkerTaskManager> = Arc::new(WorkerTaskManagerImpl::new(factory));
+        let task_manager_concrete = Arc::new(WorkerTaskManagerImpl::new(factory));
+        let worker_task_manager: Arc<dyn IWorkerTaskManager> = task_manager_concrete.clone();
+        let task_manager_delete_hook: Arc<dyn OnConversationDelete> = task_manager_concrete;
 
         Ok(Self {
             database,
@@ -249,6 +257,7 @@ impl AppServices {
             ws_manager: Arc::new(WebSocketManager::new()),
             event_bus: Arc::new(BroadcastEventBus::new(256)),
             worker_task_manager,
+            task_manager_delete_hook: Some(task_manager_delete_hook),
             agent_registry,
             conversation_repo,
             acp_session_sync: acp_agent_service,
