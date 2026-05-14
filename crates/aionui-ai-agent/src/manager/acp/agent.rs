@@ -633,10 +633,18 @@ impl AcpAgentManager {
     /// changes.
     async fn augment_with_stderr(&self, err: &AppError) -> Option<String> {
         const SDK_DEFAULT_BAD_GATEWAY_PREFIX: &str = "Bad gateway: Agent internal error (code ";
+        /// How many trailing stderr lines we hand to the extractor.
+        /// 32 lines is well below the 8 KiB ring-buffer cap and comfortably
+        /// covers a tracing event with its preceding context.
+        const STDERR_PEEK_LINES: usize = 32;
 
         let display = err.to_string();
-        // Match the Display produced by Task 1 for `AgentInternal { message=SDK
-        // default, data=None }` after wrapping in `AppError::BadGateway`.
+        // Match the Display produced by Task 1 for `AgentInternal` whenever the
+        // SDK gave us its default "Internal error" message — with or without
+        // `data`. When `data=Some`, Display ends in ") ({json})" which still
+        // satisfies `ends_with(')')`, so we augment in that case too. That is
+        // intentional: stderr context is generally more user-friendly than the
+        // raw `data` JSON, and the operator log retains both via `ErrorChain`.
         // Examples that match:  "Bad gateway: Agent internal error (code -32603)"
         //                       "Bad gateway: Agent internal error (code -32099)"
         // Do NOT match anything that has a real upstream message after the prefix.
@@ -646,9 +654,9 @@ impl AcpAgentManager {
             return None;
         }
 
-        // Read the last 32 lines of the child's stderr (cheap; ring buffer is
-        // bounded to 8 KiB ≈ a few hundred lines max).
-        let tail = self.process.peek_stderr_tail(32).await;
+        // Read the last STDERR_PEEK_LINES lines of the child's stderr (cheap;
+        // ring buffer is bounded to 8 KiB ≈ a few hundred lines max).
+        let tail = self.process.peek_stderr_tail(STDERR_PEEK_LINES).await;
         super::stderr_error_extractor::extract_error_message(&tail)
     }
 }
@@ -735,6 +743,7 @@ mod tests {
         if !is_default_internal {
             return None;
         }
+        // Mirror the production STDERR_PEEK_LINES (32). If you change one, change both.
         let tail = proc.peek_stderr_tail(32).await;
         super::super::stderr_error_extractor::extract_error_message(&tail)
     }
