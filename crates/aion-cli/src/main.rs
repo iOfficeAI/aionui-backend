@@ -1,4 +1,11 @@
+mod app;
+mod client;
+mod config;
+mod event;
+mod ui;
+
 use clap::{Parser, Subcommand};
+use config::CliConfig;
 
 #[derive(Parser)]
 #[command(name = "aion", version, about = "Aion AI CLI")]
@@ -34,10 +41,12 @@ async fn main() -> anyhow::Result<()> {
         None => ("acp".to_string(), None),
     };
 
-    println!(
-        "Starting chat with agent={agent}, model={model:?}, server={}",
-        cli.server_url
-    );
+    let config = CliConfig {
+        server_url: cli.server_url,
+        agent_type: agent,
+        model,
+    };
+    println!("Config: {config:?}");
 
     Ok(())
 }
