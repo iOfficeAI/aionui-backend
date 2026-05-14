@@ -7,6 +7,7 @@ pub mod hooks;
 mod mode_normalize;
 pub mod permission_router;
 pub mod session;
+mod stderr_error_extractor;
 
 pub use agent::AcpAgentManager;
 pub use agent_event_tracker::AcpSessionEvent;
