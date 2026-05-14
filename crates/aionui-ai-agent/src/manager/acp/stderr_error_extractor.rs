@@ -26,6 +26,9 @@ const ERROR_KEYWORDS: &[&str] = &[
     "connection reset",
     "tls",
     "dns",
+    // HIGH-RISK: may surface token/key values from stderr (e.g. "credentials:
+    // Bearer eyJ..."). The 240-char cap does not protect a 40-60 char secret.
+    // Keep matched lines out of operator logs that get exfiltrated.
     "credentials",
     "api key",
     "quota",
@@ -207,5 +210,14 @@ mod tests {
         let stderr = "\u{1b}[2m2026-05-13T20:01:21Z\u{1b}[0m \u{1b}[31mERROR\u{1b}[0m foo::bar: ctx=abc: usage limit exceeded";
         let result = extract_error_message(stderr).expect("must match");
         assert_eq!(result, "usage limit exceeded");
+    }
+
+    #[test]
+    fn handles_line_without_colon_separator() {
+        // Some logs aren't tracing-formatted; we should still surface the line
+        // when it matches the allowlist, instead of silently mangling it.
+        let stderr = "usage limit exceeded no colon here";
+        let result = extract_error_message(stderr).expect("should match");
+        assert_eq!(result, "usage limit exceeded no colon here");
     }
 }
