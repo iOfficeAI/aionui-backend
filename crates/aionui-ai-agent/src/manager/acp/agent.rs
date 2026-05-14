@@ -25,6 +25,23 @@ use std::time::Duration;
 use tokio::sync::{Mutex, RwLock, broadcast, mpsc};
 use tracing::{debug, error, info, warn};
 
+/// The user-visible body inside an [`AppError`].
+///
+/// `AppError`'s `Display` prefixes every variant with its HTTP status name
+/// (`"Bad gateway: ..."`, `"Not found: ..."`, etc.). That's correct for HTTP
+/// response bodies, but the WebSocket `error` event we broadcast goes straight
+/// to the renderer and gets shown verbatim — the prefix only adds noise. Strip
+/// it so the user sees the upstream message.
+fn user_facing_message(err: &AppError) -> String {
+    let full = err.to_string();
+    // Each variant's Display starts with `"<Tag>: "`. Find the first ": " and
+    // return what follows. Variants without a colon (e.g. `RateLimited` →
+    // "Rate limited") fall through to the full string.
+    full.split_once(": ")
+        .map(|(_, rest)| rest.to_owned())
+        .unwrap_or(full)
+}
+
 use super::mode_normalize::normalize_requested_mode;
 
 /// Grace period before force-killing an ACP process (ms).
@@ -499,7 +516,7 @@ impl crate::agent_task::IAgentTask for AcpAgentManager {
             }
             Err(err) => {
                 warn!(error = %ErrorChain(err), "ACP send_message failed");
-                self.runtime.emit_error(err.to_string());
+                self.runtime.emit_error(user_facing_message(err));
             }
         }
         result
@@ -593,5 +610,42 @@ impl AcpAgentManager {
 
         self.permission_router
             .confirm(call_id, option_id, &self.params.conversation_id)
+    }
+}
+
+#[cfg(test)]
+mod user_facing_message_tests {
+    use super::user_facing_message;
+    use aionui_common::AppError;
+
+    #[test]
+    fn strips_bad_gateway_prefix() {
+        let err = AppError::BadGateway("API Error: Internal server error".into());
+        assert_eq!(
+            user_facing_message(&err),
+            "API Error: Internal server error"
+        );
+    }
+
+    #[test]
+    fn strips_not_found_prefix() {
+        let err = AppError::NotFound("user 42".into());
+        assert_eq!(user_facing_message(&err), "user 42");
+    }
+
+    #[test]
+    fn rate_limited_has_no_colon_returns_full_string() {
+        let err = AppError::RateLimited;
+        assert_eq!(user_facing_message(&err), "Rate limited");
+    }
+
+    #[test]
+    fn nested_colons_only_strip_first() {
+        // "Bad gateway: Internal error: API Error: ..." → keep everything after the first ": "
+        let err = AppError::BadGateway("Internal error: API Error: Internal server error".into());
+        assert_eq!(
+            user_facing_message(&err),
+            "Internal error: API Error: Internal server error"
+        );
     }
 }
