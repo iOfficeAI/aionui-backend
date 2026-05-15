@@ -251,6 +251,7 @@ async fn exec_create_team(
             custom_agent_id: None,
             conversation_id: caller_conversation_id,
         }],
+        workspace: None,
     };
 
     let team = match svc.create_team(&user_id, req).await {

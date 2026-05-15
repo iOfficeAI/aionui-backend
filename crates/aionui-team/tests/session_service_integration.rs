@@ -745,6 +745,7 @@ async fn tc1_create_team_with_multiple_agents() {
             CreateTeamRequest {
                 name: "Alpha".into(),
                 agents: two_agent_input(),
+                workspace: None,
             },
         )
         .await
@@ -779,6 +780,7 @@ async fn tc_create_team_uses_custom_agent_id_icon_lookup() {
                     custom_agent_id: Some("2d23ff1c".into()),
                     conversation_id: None,
                 }],
+                workspace: None,
             },
         )
         .await
@@ -811,6 +813,7 @@ async fn ta_add_agent_uses_model_fallback_for_acp_backend() {
                     custom_agent_id: None,
                     conversation_id: None,
                 }],
+                workspace: None,
             },
         )
         .await
@@ -850,6 +853,7 @@ async fn tc2_create_single_agent_team() {
                     custom_agent_id: None,
                     conversation_id: None,
                 }],
+                workspace: None,
             },
         )
         .await
@@ -885,6 +889,7 @@ async fn tc4_first_agent_is_lead() {
                         conversation_id: None,
                     },
                 ],
+                workspace: None,
             },
         )
         .await
@@ -903,6 +908,7 @@ async fn tc5_empty_agents_returns_error() {
             CreateTeamRequest {
                 name: "Empty".into(),
                 agents: vec![],
+                workspace: None,
             },
         )
         .await;
@@ -918,6 +924,7 @@ async fn tc3_each_agent_has_conversation_id() {
             CreateTeamRequest {
                 name: "T".into(),
                 agents: two_agent_input(),
+                workspace: None,
             },
         )
         .await
@@ -946,6 +953,7 @@ async fn tl2_list_multiple_teams() {
         CreateTeamRequest {
             name: "A".into(),
             agents: two_agent_input(),
+            workspace: None,
         },
     )
     .await
@@ -955,6 +963,7 @@ async fn tl2_list_multiple_teams() {
         CreateTeamRequest {
             name: "B".into(),
             agents: two_agent_input(),
+            workspace: None,
         },
     )
     .await
@@ -975,6 +984,7 @@ async fn tg1_get_existing_team() {
             CreateTeamRequest {
                 name: "Alpha".into(),
                 agents: two_agent_input(),
+                workspace: None,
             },
         )
         .await
@@ -1004,6 +1014,7 @@ async fn td1_delete_existing_team() {
             CreateTeamRequest {
                 name: "T".into(),
                 agents: two_agent_input(),
+                workspace: None,
             },
         )
         .await
@@ -1032,6 +1043,7 @@ async fn tr1_rename_existing_team() {
             CreateTeamRequest {
                 name: "Old".into(),
                 agents: two_agent_input(),
+                workspace: None,
             },
         )
         .await
@@ -1069,6 +1081,7 @@ async fn aa1_add_agent_to_team() {
                     custom_agent_id: None,
                     conversation_id: None,
                 }],
+                workspace: None,
             },
         )
         .await
@@ -1125,6 +1138,7 @@ async fn ar1_remove_agent_from_team() {
             CreateTeamRequest {
                 name: "T".into(),
                 agents: two_agent_input(),
+                workspace: None,
             },
         )
         .await
@@ -1147,6 +1161,7 @@ async fn ar4_remove_nonexistent_agent() {
             CreateTeamRequest {
                 name: "T".into(),
                 agents: two_agent_input(),
+                workspace: None,
             },
         )
         .await
@@ -1165,6 +1180,7 @@ async fn an1_rename_agent() {
             CreateTeamRequest {
                 name: "T".into(),
                 agents: two_agent_input(),
+                workspace: None,
             },
         )
         .await
@@ -1187,6 +1203,7 @@ async fn an3_rename_nonexistent_agent() {
             CreateTeamRequest {
                 name: "T".into(),
                 agents: two_agent_input(),
+                workspace: None,
             },
         )
         .await
@@ -1209,6 +1226,7 @@ async fn es1_ensure_session_creates_session() {
             CreateTeamRequest {
                 name: "T".into(),
                 agents: two_agent_input(),
+                workspace: None,
             },
         )
         .await
@@ -1226,6 +1244,7 @@ async fn es2_ensure_session_is_idempotent() {
             CreateTeamRequest {
                 name: "T".into(),
                 agents: two_agent_input(),
+                workspace: None,
             },
         )
         .await
@@ -1286,6 +1305,7 @@ async fn ss1_stop_session() {
             CreateTeamRequest {
                 name: "T".into(),
                 agents: two_agent_input(),
+                workspace: None,
             },
         )
         .await
@@ -1304,6 +1324,7 @@ async fn ss3_stop_session_without_active_is_noop() {
             CreateTeamRequest {
                 name: "T".into(),
                 agents: two_agent_input(),
+                workspace: None,
             },
         )
         .await
@@ -1332,6 +1353,7 @@ async fn sm1_send_message_with_active_session() {
             CreateTeamRequest {
                 name: "T".into(),
                 agents: two_agent_input(),
+                workspace: None,
             },
         )
         .await
@@ -1350,6 +1372,7 @@ async fn sa_send_message_to_agent_with_active_session() {
             CreateTeamRequest {
                 name: "T".into(),
                 agents: two_agent_input(),
+                workspace: None,
             },
         )
         .await
@@ -1371,6 +1394,7 @@ async fn sa3_send_message_to_nonexistent_agent() {
             CreateTeamRequest {
                 name: "T".into(),
                 agents: two_agent_input(),
+                workspace: None,
             },
         )
         .await
@@ -1396,6 +1420,7 @@ async fn dispose_all_cleans_up_sessions() {
             CreateTeamRequest {
                 name: "A".into(),
                 agents: two_agent_input(),
+                workspace: None,
             },
         )
         .await
@@ -1406,6 +1431,7 @@ async fn dispose_all_cleans_up_sessions() {
             CreateTeamRequest {
                 name: "B".into(),
                 agents: two_agent_input(),
+                workspace: None,
             },
         )
         .await
@@ -1433,6 +1459,7 @@ async fn td_delete_team_stops_session() {
             CreateTeamRequest {
                 name: "T".into(),
                 agents: two_agent_input(),
+                workspace: None,
             },
         )
         .await
@@ -1458,6 +1485,7 @@ async fn d9_ensure_session_kills_and_rebuilds_every_agent() {
             CreateTeamRequest {
                 name: "T".into(),
                 agents: two_agent_input(),
+                workspace: None,
             },
         )
         .await
@@ -1509,6 +1537,7 @@ async fn d9_ensure_session_persists_team_mcp_stdio_config() {
             CreateTeamRequest {
                 name: "T".into(),
                 agents: two_agent_input(),
+                workspace: None,
             },
         )
         .await
@@ -1526,6 +1555,7 @@ async fn d9_ensure_session_is_idempotent() {
             CreateTeamRequest {
                 name: "T".into(),
                 agents: two_agent_input(),
+                workspace: None,
             },
         )
         .await
@@ -1556,6 +1586,7 @@ async fn d9_ensure_session_rollbacks_when_build_fails() {
             CreateTeamRequest {
                 name: "T".into(),
                 agents: two_agent_input(),
+                workspace: None,
             },
         )
         .await
@@ -1606,6 +1637,7 @@ async fn w4_d23_concurrent_add_agent_preserves_every_insertion() {
                     custom_agent_id: None,
                     conversation_id: None,
                 }],
+                workspace: None,
             },
         )
         .await
@@ -1672,6 +1704,7 @@ async fn d115_remove_team_kills_every_agent_process() {
             CreateTeamRequest {
                 name: "T".into(),
                 agents: two_agent_input(),
+                workspace: None,
             },
         )
         .await

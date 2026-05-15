@@ -35,6 +35,8 @@ pub struct TeamAgentInput {
 pub struct CreateTeamRequest {
     pub name: String,
     pub agents: Vec<TeamAgentInput>,
+    #[serde(default)]
+    pub workspace: Option<String>,
 }
 
 /// Request body for `PATCH /api/teams/:id/name`.

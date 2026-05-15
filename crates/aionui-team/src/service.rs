@@ -185,29 +185,38 @@ impl TeamSessionService {
                 // Top-level `model` is aionrs-only per spec 2026-05-12; for
                 // other agent types the model/provider ride along in `extra`.
                 let (top_level_model, extra) = if agent_type == AgentType::Aionrs {
+                    let mut extra = serde_json::json!({
+                        "teamId": team_id,
+                        "backend": input.backend,
+                        "session_mode": resolve_full_auto_mode(&input.backend),
+                    });
+                    if let Some(ref ws) = req.workspace
+                        && !ws.is_empty()
+                    {
+                        extra["workspace"] = serde_json::Value::String(ws.clone());
+                    }
                     (
                         Some(ProviderWithModel {
                             provider_id,
                             model: input.model.clone(),
                             use_model: None,
                         }),
-                        serde_json::json!({
-                            "teamId": team_id,
-                            "backend": input.backend,
-                            "session_mode": resolve_full_auto_mode(&input.backend),
-                        }),
+                        extra,
                     )
                 } else {
-                    (
-                        None,
-                        serde_json::json!({
-                            "teamId": team_id,
-                            "backend": input.backend,
-                            "session_mode": resolve_full_auto_mode(&input.backend),
-                            "provider_id": provider_id,
-                            "current_model_id": input.model.clone(),
-                        }),
-                    )
+                    let mut extra = serde_json::json!({
+                        "teamId": team_id,
+                        "backend": input.backend,
+                        "session_mode": resolve_full_auto_mode(&input.backend),
+                        "provider_id": provider_id,
+                        "current_model_id": input.model.clone(),
+                    });
+                    if let Some(ref ws) = req.workspace
+                        && !ws.is_empty()
+                    {
+                        extra["workspace"] = serde_json::Value::String(ws.clone());
+                    }
+                    (None, extra)
                 };
                 let conv_req = CreateConversationRequest {
                     r#type: agent_type,
@@ -246,7 +255,7 @@ impl TeamSessionService {
             id: team_id.clone(),
             user_id: user_id.to_owned(),
             name: req.name.clone(),
-            workspace: String::new(),
+            workspace: req.workspace.clone().unwrap_or_default(),
             workspace_mode: "shared".into(),
             agents: agents_json,
             lead_agent_id: lead_agent_id.clone(),
