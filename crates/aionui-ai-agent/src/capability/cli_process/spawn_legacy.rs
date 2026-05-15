@@ -31,19 +31,17 @@ impl CliAgentProcess {
             cmd.current_dir(cwd);
         }
 
+        let preview = cmd.to_string();
+        info!(command = %preview, "Spawning CLI process");
         let mut child: Child = cmd.spawn().map_err(|e| {
-            error!(command = %config.command.display(), error = %ErrorChain(&e), "Failed to spawn CLI process");
-            AppError::Internal(format!(
-                "Failed to spawn CLI process '{}': {}",
-                config.command.display(),
-                e
-            ))
+            error!(command = %preview, error = %ErrorChain(&e), "Failed to spawn CLI process");
+            AppError::Internal(format!("Failed to spawn CLI process '{preview}': {e}"))
         })?;
 
         let pid = child
             .id()
             .ok_or_else(|| AppError::Internal("Failed to obtain PID from spawned process".into()))?;
-        info!(pid, command = %config.command.display(), "CLI process spawned");
+        info!(pid, command = %preview, "CLI process spawned");
 
         let stdout = child
             .stdout

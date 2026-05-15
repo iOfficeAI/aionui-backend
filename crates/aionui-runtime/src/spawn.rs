@@ -53,6 +53,15 @@ impl std::fmt::Debug for Builder {
     }
 }
 
+/// Renders the configured spawn as a shell-style preview (`cd … && env -u
+/// X K=V <prog> <args>…`) suitable for logs and error messages. Format
+/// comes for free from `std::process::Command`'s `Debug` impl.
+impl std::fmt::Display for Builder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(self.inner.as_std(), f)
+    }
+}
+
 impl Builder {
     /// Builder for long-running agent subprocesses (ACP SDK, legacy CLI).
     ///
@@ -275,5 +284,34 @@ mod tests {
         assert!(child.id().is_some());
         let status = child.wait().await.unwrap();
         assert!(status.success());
+    }
+
+    #[test]
+    fn display_renders_shell_style_command() {
+        let mut b = Builder::new("/usr/local/bin/bun");
+        b.current_dir("/tmp/work dir")
+            .env("FOO", "bar baz")
+            .args(["x", "--flag", "with space"]);
+
+        let preview = format!("{b}");
+        // Format inherited from std Command Debug: `cd "..." && env -u X K=V "prog" "args"...`
+        assert!(
+            preview.starts_with(r#"cd "/tmp/work dir" &&"#),
+            "missing cwd prefix: {preview}"
+        );
+        assert!(preview.contains("env "), "expected env section: {preview}");
+        assert!(preview.contains(r#"FOO="bar baz""#), "FOO missing: {preview}");
+        // strip_pollution unsets these
+        assert!(
+            preview.contains("-u NODE_OPTIONS"),
+            "missing -u NODE_OPTIONS: {preview}"
+        );
+        assert!(preview.contains("-u CLAUDECODE"), "missing -u CLAUDECODE: {preview}");
+        assert!(
+            preview.contains(r#""/usr/local/bin/bun""#),
+            "program missing: {preview}"
+        );
+        assert!(preview.contains(r#""--flag""#), "arg --flag missing: {preview}");
+        assert!(preview.contains(r#""with space""#), "arg with space missing: {preview}");
     }
 }
