@@ -32,26 +32,35 @@ pub struct AssistantService {
 }
 
 impl AssistantService {
+    /// Construct an `AssistantService` pinned to the runtime data directory.
+    ///
+    /// `user_data_dir` is the on-disk root for user-authored rule and skill
+    /// `.md` files plus avatar uploads (`<user_data_dir>/assistant-rules/`,
+    /// `<user_data_dir>/assistant-skills/`, `<user_data_dir>/assistant-avatars/`).
+    /// Production code passes the same `services.data_dir` that the SQLite
+    /// database lives under, so dev / packaged / multi-instance launches
+    /// keep their rule files alongside the matching db. Tests pin a temp
+    /// directory.
+    ///
+    /// There is no implicit `~/.aionui` fallback on purpose: an earlier
+    /// version had one, and dev builds silently wrote rule files to the
+    /// release directory while the db lived under `~/.aionui-dev/`,
+    /// resulting in `read_rule` returning empty in dev mode. Forcing the
+    /// caller to pass a path makes the wiring explicit.
     pub fn new(
         repo: Arc<dyn IAssistantRepository>,
         override_repo: Arc<dyn IAssistantOverrideRepository>,
         builtin: Arc<BuiltinAssistantRegistry>,
         extension_registry: ExtensionRegistry,
+        user_data_dir: PathBuf,
     ) -> Self {
         Self {
             repo,
             override_repo,
             builtin,
             extension_registry,
-            user_data_dir: default_user_data_dir(),
+            user_data_dir,
         }
-    }
-
-    /// Override the user-data directory. Used by tests and callers that want
-    /// to pin a custom root (e.g. `~/.aionui-dev/`).
-    pub fn with_user_data_dir(mut self, dir: PathBuf) -> Self {
-        self.user_data_dir = dir;
-        self
     }
 
     // -----------------------------------------------------------------------
@@ -826,10 +835,6 @@ fn decode_list_map(raw: Option<&str>) -> Result<HashMap<String, Vec<String>>, Ap
 // Filesystem helpers
 // ---------------------------------------------------------------------------
 
-fn default_user_data_dir() -> PathBuf {
-    dirs::home_dir().unwrap_or_else(std::env::temp_dir).join(".aionui")
-}
-
 fn assistant_md_path(dir: &Path, id: &str, locale: Option<&str>) -> PathBuf {
     let filename = match locale {
         Some(loc) if !loc.is_empty() => format!("{id}.{loc}.md"),
@@ -959,8 +964,7 @@ mod tests {
         let ext_state_store = ExtensionStateStore::new(tmp.path().join("ext-states.json"));
         let extension_registry = ExtensionRegistry::new(ext_state_store, event_bus, "1.0.0".to_string());
 
-        let service = AssistantService::new(repo, orepo, builtin_reg, extension_registry)
-            .with_user_data_dir(tmp.path().to_path_buf());
+        let service = AssistantService::new(repo, orepo, builtin_reg, extension_registry, tmp.path().to_path_buf());
 
         Fixture {
             service,
@@ -1381,7 +1385,7 @@ mod tests {
         let ext_state_store = ExtensionStateStore::new(tmp.path().join("ext-states.json"));
         let extension_registry = ExtensionRegistry::new(ext_state_store, event_bus, "1.0.0".to_string());
 
-        let service = AssistantService::new(repo, orepo, builtin_reg, extension_registry);
+        let service = AssistantService::new(repo, orepo, builtin_reg, extension_registry, tmp.path().to_path_buf());
         let content = service.read_rule("builtin-office", Some("en-US")).await.unwrap();
         assert_eq!(content, "office rules");
     }

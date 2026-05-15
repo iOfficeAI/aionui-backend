@@ -121,7 +121,18 @@ pub fn build_assistant_state(services: &AppServices, extension_registry: Extensi
     let repo: Arc<dyn IAssistantRepository> = Arc::new(SqliteAssistantRepository::new(pool.clone()));
     let override_repo: Arc<dyn IAssistantOverrideRepository> = Arc::new(SqliteAssistantOverrideRepository::new(pool));
     let builtin = Arc::new(BuiltinAssistantRegistry::load());
-    let service = Arc::new(AssistantService::new(repo, override_repo, builtin, extension_registry));
+    // Pin user_data_dir to the runtime-resolved data directory so dev /
+    // packaged / multi-instance launches all keep their assistant rule files
+    // alongside the matching SQLite database (avoiding the historical bug
+    // where dev wrote rules to the release `~/.aionui/` while the db lived
+    // under `~/.aionui-dev/`).
+    let service = Arc::new(AssistantService::new(
+        repo,
+        override_repo,
+        builtin,
+        extension_registry,
+        services.data_dir.clone(),
+    ));
     AssistantRouterState { service }
 }
 

@@ -184,9 +184,13 @@ async fn fixture() -> Fixture {
     let repo: Arc<dyn IAssistantRepository> = Arc::new(SqliteAssistantRepository::new(pool.clone()));
     let override_repo: Arc<dyn IAssistantOverrideRepository> = Arc::new(SqliteAssistantOverrideRepository::new(pool));
     let builtin = Arc::new(BuiltinAssistantRegistry::load_from_dir(builtin_assets_dir.clone()));
-    let service = Arc::new(
-        AssistantService::new(repo, override_repo, builtin, registry).with_user_data_dir(user_data_dir.clone()),
-    );
+    let service = Arc::new(AssistantService::new(
+        repo,
+        override_repo,
+        builtin,
+        registry,
+        user_data_dir.clone(),
+    ));
     states.assistant = AssistantRouterState {
         service: service.clone(),
     };
