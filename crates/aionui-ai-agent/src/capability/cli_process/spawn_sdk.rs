@@ -36,21 +36,18 @@ impl CliAgentProcess {
         if let Some(ref cwd) = config.cwd {
             cmd.current_dir(cwd);
         }
-        info!(command = %config.command.display(), "Spawning CLI process (SDK mode)");
+        let preview = cmd.to_string();
+        info!(command = %preview, "Spawning CLI process (SDK mode)");
         let mut child: Child = cmd.spawn().map_err(|e| {
-            error!(command = %config.command.display(), error = %ErrorChain(&e), "Failed to spawn CLI process");
-            AppError::Internal(format!(
-                "Failed to spawn CLI process '{}': {}",
-                config.command.display(),
-                e
-            ))
+            error!(command = %preview, error = %ErrorChain(&e), "Failed to spawn CLI process");
+            AppError::Internal(format!("Failed to spawn CLI process '{preview}': {e}"))
         })?;
 
         let pid = child.id().ok_or_else(|| {
-            error!(command = %config.command.display(), "Failed to obtain PID from spawned process");
+            error!(command = %preview, "Failed to obtain PID from spawned process");
             AppError::Internal("Failed to obtain PID from spawned process".into())
         })?;
-        info!(pid, command = %config.command.display(), "CLI process spawned (SDK mode)");
+        info!(pid, command = %preview, "CLI process spawned (SDK mode)");
 
         let stdout = child.stdout.take().ok_or_else(|| {
             error!(pid, "Failed to capture stdout from child process");
