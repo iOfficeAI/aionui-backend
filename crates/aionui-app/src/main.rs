@@ -121,12 +121,71 @@ fn main() -> Result<ExitCode> {
 async fn async_main(merged_path: String, cli: Cli) -> Result<ExitCode> {
     // MCP stdio helpers must not touch the database, logging setup, or `AppServices`.
     match cli.command {
-        Some(Command::McpBridge) => return Ok(bridge::run_mcp_bridge().await),
-        Some(Command::McpGuideStdio) => return Ok(guide_stdio::run_guide_stdio().await),
-        Some(Command::McpTeamStdio) => return Ok(team_stdio::run_team_stdio().await),
-        None => {}
+        Some(Command::McpBridge) => Ok(bridge::run_mcp_bridge().await),
+        Some(Command::McpGuideStdio) => Ok(guide_stdio::run_guide_stdio().await),
+        Some(Command::McpTeamStdio) => Ok(team_stdio::run_team_stdio().await),
+        None => run_server(cli, merged_path).await,
+    }
+}
+
+/// Resolve the conversation workspace directory.
+///
+/// Priority: `--work-dir` CLI flag → `AIONUI_WORK_DIR` env (when non-empty) →
+/// `--data-dir` fallback.
+fn resolve_work_dir(cli_work_dir: Option<PathBuf>, data_dir: &Path) -> PathBuf {
+    cli_work_dir.unwrap_or_else(|| {
+        std::env::var("AIONUI_WORK_DIR")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| data_dir.to_path_buf())
+    })
+}
+
+/// Materialize the embedded builtin-skills corpus to disk and clean up
+/// pre-symlink era stale directories.
+///
+/// Gated by a `.version` file so this is a no-op on subsequent starts with
+/// the same binary. When `AIONUI_BUILTIN_SKILLS_PATH` is set, skip
+/// materialization — the override path is the source of truth in that mode.
+async fn materialize_builtin_skills(data_dir: &Path) -> Result<()> {
+    let skip = std::env::var(aionui_extension::BUILTIN_SKILLS_ENV_VAR)
+        .map(|v| !v.is_empty())
+        .unwrap_or(false);
+    if skip {
+        return Ok(());
     }
 
+    aionui_extension::materialize_if_needed(
+        data_dir,
+        aionui_extension::builtin_skills_corpus(),
+        env!("CARGO_PKG_VERSION"),
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("Failed to materialize builtin skills: {e}"))?;
+
+    // Best-effort cleanup of directories left behind by pre-symlink
+    // refactors. Failures are non-fatal — stale empty dirs are harmless.
+    // Runs ONLY after `materialize_if_needed` succeeded so we never touch
+    // data_dir until the builtin skills tree is in place. Do NOT
+    // generalize this list — it is an explicit allowlist of known-dead
+    // directories.
+    for stale in ["builtin-skills-view", "tmp", "agent-skills"] {
+        let path = data_dir.join(stale);
+        if path.exists()
+            && let Err(e) = std::fs::remove_dir_all(&path)
+        {
+            tracing::warn!(
+                path = %path.display(),
+                error = %e,
+                "failed to clean up stale data dir entry",
+            );
+        }
+    }
+    Ok(())
+}
+
+async fn run_server(cli: Cli, merged_path: String) -> Result<ExitCode> {
     let log_dir = cli.log_dir.unwrap_or_else(|| cli.data_dir.join("logs"));
     let _log_guard = init_tracing(&log_dir, cli.log_level.as_deref());
 
@@ -136,13 +195,7 @@ async fn async_main(merged_path: String, cli: Cli) -> Result<ExitCode> {
         "startup: PATH ready"
     );
 
-    let work_dir = cli.work_dir.unwrap_or_else(|| {
-        std::env::var("AIONUI_WORK_DIR")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .map(PathBuf::from)
-            .unwrap_or_else(|| cli.data_dir.clone())
-    });
+    let work_dir = resolve_work_dir(cli.work_dir, &cli.data_dir);
 
     // SAFETY: called before any service initialization; no concurrent reads.
     unsafe {
@@ -157,65 +210,24 @@ async fn async_main(merged_path: String, cli: Cli) -> Result<ExitCode> {
         app_version: cli.app_version,
         local: cli.local,
     };
+    if config.local {
+        info!("Running in local mode — authentication is disabled");
+    }
 
     let boot = Instant::now();
 
-    // Initialize database and all services
     let db_path = config.database_path();
     aionui_db::maybe_copy_legacy_database(&db_path)?;
     info!("Initializing database at {}", db_path.display());
     let database = aionui_db::init_database(&db_path).await?;
     info!(elapsed_ms = boot.elapsed().as_millis(), "startup: database initialized");
 
-    // Materialize the embedded builtin-skills corpus to disk before any
-    // service can read from it. Gated by a .version file so this is a
-    // no-op on subsequent starts with the same binary. When
-    // `AIONUI_BUILTIN_SKILLS_PATH` is set, skip materialization — the
-    // override path is the source of truth in that mode.
-    if std::env::var(aionui_extension::BUILTIN_SKILLS_ENV_VAR)
-        .map(|v| v.is_empty())
-        .unwrap_or(true)
-    {
-        aionui_extension::materialize_if_needed(
-            &config.data_dir,
-            aionui_extension::builtin_skills_corpus(),
-            env!("CARGO_PKG_VERSION"),
-        )
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to materialize builtin skills: {e}"))?;
-
-        // Best-effort cleanup of directories left behind by pre-symlink
-        // refactors. Failures are non-fatal — stale empty dirs are
-        // harmless. Runs ONLY after `materialize_if_needed` succeeded so
-        // we never touch data_dir until the builtin skills tree is in
-        // place. Do NOT generalize this list — it is an explicit
-        // allowlist of known-dead directories.
-        for stale in ["builtin-skills-view", "tmp", "agent-skills"] {
-            let path = config.data_dir.join(stale);
-            if path.exists()
-                && let Err(e) = std::fs::remove_dir_all(&path)
-            {
-                tracing::warn!(
-                    path = %path.display(),
-                    error = %e,
-                    "failed to clean up stale data dir entry",
-                );
-            }
-        }
-    }
-    info!(
-        elapsed_ms = boot.elapsed().as_millis(),
-        "startup: builtin skills materialized"
-    );
+    materialize_builtin_skills(&config.data_dir).await?;
+    info!(elapsed_ms = boot.elapsed().as_millis(), "startup: builtin skills materialized");
 
     let services = AppServices::from_config(database, &config).await?;
     info!(elapsed_ms = boot.elapsed().as_millis(), "startup: services constructed");
 
-    if config.local {
-        info!("Running in local mode — authentication is disabled");
-    }
-
-    // Check bootstrap status
     let has_users = services.user_repo.has_users().await?;
     if !has_users {
         info!("No configured users detected — initial setup required via /api/auth/status");
@@ -253,7 +265,6 @@ async fn async_main(merged_path: String, cli: Cli) -> Result<ExitCode> {
         tracing::warn!(error = %e, "idle scanner join failed");
     }
 
-    // Graceful shutdown: close database connections
     services.database.close().await;
     info!("Server shut down gracefully");
 
