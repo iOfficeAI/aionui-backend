@@ -1,7 +1,11 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const OPENCLAW_PROTOCOL_VERSION: u32 = 3;
+// Negotiated protocol range. Gateway 2026.5.12+ requires v4 (chat events become a
+// discriminated union with required `deltaText` on delta frames); older Gateways still
+// speak v3. Advertising `min=3, max=4` lets the same client connect to both.
+pub const OPENCLAW_MIN_PROTOCOL_VERSION: u32 = 3;
+pub const OPENCLAW_MAX_PROTOCOL_VERSION: u32 = 4;
 
 pub const CLIENT_ID: &str = "gateway-client";
 pub const CLIENT_DISPLAY_NAME: &str = "AionUI-Backend";
@@ -212,6 +216,14 @@ pub struct ChatEvent {
     pub state: ChatEventState,
     #[serde(default)]
     pub message: Option<Value>,
+    /// v4-only: incremental delta text on `state == "delta"` frames. Required by the
+    /// v4 schema (`ChatDeltaEventSchema`), absent on v3 Gateways. When present it is
+    /// the authoritative delta — `message` may be missing or carry only metadata.
+    #[serde(default)]
+    pub delta_text: Option<String>,
+    /// v4-only: when true the delta replaces the accumulated text instead of appending.
+    #[serde(default)]
+    pub replace: Option<bool>,
     #[serde(default)]
     pub error_message: Option<String>,
 }
@@ -382,13 +394,32 @@ mod tests {
         });
         let event: ChatEvent = serde_json::from_value(json).unwrap();
         assert_eq!(event.state, ChatEventState::Delta);
+        assert!(event.delta_text.is_none());
+        assert!(event.replace.is_none());
+    }
+
+    #[test]
+    fn chat_event_v4_delta_with_delta_text() {
+        let json = serde_json::json!({
+            "runId": "run-1",
+            "sessionKey": "sk-1",
+            "seq": 0,
+            "state": "delta",
+            "deltaText": "Hello",
+            "replace": false,
+        });
+        let event: ChatEvent = serde_json::from_value(json).unwrap();
+        assert_eq!(event.state, ChatEventState::Delta);
+        assert_eq!(event.delta_text.as_deref(), Some("Hello"));
+        assert_eq!(event.replace, Some(false));
+        assert!(event.message.is_none());
     }
 
     #[test]
     fn connect_params_serializes() {
         let params = ConnectParams {
-            min_protocol: 3,
-            max_protocol: 3,
+            min_protocol: OPENCLAW_MIN_PROTOCOL_VERSION,
+            max_protocol: OPENCLAW_MAX_PROTOCOL_VERSION,
             client: ClientInfo {
                 id: CLIENT_ID,
                 display_name: CLIENT_DISPLAY_NAME,
@@ -404,6 +435,7 @@ mod tests {
         };
         let json = serde_json::to_value(&params).unwrap();
         assert_eq!(json["minProtocol"], 3);
+        assert_eq!(json["maxProtocol"], 4);
         assert_eq!(json["client"]["id"], "gateway-client");
         assert_eq!(json["caps"][0], "tool-events");
     }

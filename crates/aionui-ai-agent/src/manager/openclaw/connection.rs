@@ -14,7 +14,7 @@ use tracing::{debug, error, warn};
 use super::device_identity::{DeviceIdentity, build_device_auth_params};
 use super::protocol::{
     AuthParams, CLIENT_DISPLAY_NAME, CLIENT_ID, CLIENT_MODE, CLIENT_VERSION, ClientInfo, ConnectParams, EventFrame,
-    HelloOk, IncomingFrame, OPENCLAW_PROTOCOL_VERSION, RequestFrame,
+    HelloOk, IncomingFrame, OPENCLAW_MAX_PROTOCOL_VERSION, OPENCLAW_MIN_PROTOCOL_VERSION, RequestFrame,
 };
 
 type WsSink = futures_util::stream::SplitSink<
@@ -149,8 +149,8 @@ impl OpenClawConnection {
         let device_params = build_device_auth_params(identity, nonce, auth.as_ref().and_then(|a| a.token.as_deref()));
 
         let params = ConnectParams {
-            min_protocol: OPENCLAW_PROTOCOL_VERSION,
-            max_protocol: OPENCLAW_PROTOCOL_VERSION,
+            min_protocol: OPENCLAW_MIN_PROTOCOL_VERSION,
+            max_protocol: OPENCLAW_MAX_PROTOCOL_VERSION,
             client: ClientInfo {
                 id: CLIENT_ID,
                 display_name: CLIENT_DISPLAY_NAME,

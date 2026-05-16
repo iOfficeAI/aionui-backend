@@ -88,7 +88,21 @@ fn map_chat_event(
                 }));
             }
 
-            if let Some(delta) = compute_text_delta(&chat.message, &mut text_state.accumulated_text) {
+            // v4 schema delivers the incremental chunk in `deltaText` (with optional
+            // `replace=true` meaning the whole accumulated text should be reset to it).
+            // v3 schema instead sends cumulative text on `message` — we diff it.
+            let delta = if let Some(delta_text) = chat.delta_text.as_deref() {
+                if chat.replace == Some(true) {
+                    text_state.accumulated_text = delta_text.to_owned();
+                } else {
+                    text_state.accumulated_text.push_str(delta_text);
+                }
+                (!delta_text.is_empty()).then(|| delta_text.to_owned())
+            } else {
+                compute_text_delta(&chat.message, &mut text_state.accumulated_text)
+            };
+
+            if let Some(delta) = delta {
                 if text_state.current_msg_id.is_none() {
                     text_state.current_msg_id = Some(uuid::Uuid::new_v4().to_string());
                 }
@@ -317,6 +331,41 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert!(matches!(&events[0], AgentStreamEvent::Text(d) if d.content == "Hello"));
         assert_eq!(state.accumulated_text, "Hello");
+    }
+
+    #[test]
+    fn chat_delta_v4_uses_delta_text() {
+        let mut state = TextFallbackState::new();
+        state.reset_for_new_turn();
+
+        let e1 = make_event("chat", json!({ "state": "delta", "deltaText": "He" }));
+        let e2 = make_event("chat", json!({ "state": "delta", "deltaText": "llo" }));
+
+        let events1 = map_openclaw_event(&e1, &mut state, None);
+        assert_eq!(events1.len(), 1);
+        assert!(matches!(&events1[0], AgentStreamEvent::Text(d) if d.content == "He"));
+
+        let events2 = map_openclaw_event(&e2, &mut state, None);
+        assert_eq!(events2.len(), 1);
+        assert!(matches!(&events2[0], AgentStreamEvent::Text(d) if d.content == "llo"));
+        assert_eq!(state.accumulated_text, "Hello");
+    }
+
+    #[test]
+    fn chat_delta_v4_replace_resets_buffer() {
+        let mut state = TextFallbackState::new();
+        state.reset_for_new_turn();
+        state.accumulated_text = "stale draft".into();
+
+        let event = make_event(
+            "chat",
+            json!({ "state": "delta", "deltaText": "fresh", "replace": true }),
+        );
+        let events = map_openclaw_event(&event, &mut state, None);
+
+        assert_eq!(events.len(), 1);
+        assert!(matches!(&events[0], AgentStreamEvent::Text(d) if d.content == "fresh"));
+        assert_eq!(state.accumulated_text, "fresh");
     }
 
     #[test]
