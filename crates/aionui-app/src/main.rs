@@ -17,7 +17,13 @@ fn main() -> Result<ExitCode> {
     // outside the main HTTP server. They share the global flags so clap can
     // parse a uniform CLI, but bypass `aionui_runtime::init` (which would
     // anchor the bun cache under --data-dir) — these helpers don't host agents.
-    if cli.command.is_none() {
+    //
+    // `doctor`, in contrast, is meant to mirror the real server's CLI
+    // detection path exactly. It must hit the same `aionui_runtime::init`
+    // (so the bundled `bun` resolves through the same cache the server
+    // uses) before falling through to PATH probing.
+    let needs_runtime = matches!(cli.command, None | Some(Command::Doctor));
+    if needs_runtime {
         aionui_runtime::init(&cli.data_dir);
     }
 
@@ -36,6 +42,7 @@ async fn async_main(merged_path: String, cli: Cli) -> Result<ExitCode> {
         Some(Command::McpBridge) => Ok(commands::run_mcp_bridge().await),
         Some(Command::McpGuideStdio) => Ok(commands::run_team_guide().await),
         Some(Command::McpTeamStdio) => Ok(commands::run_team_stdio().await),
+        Some(Command::Doctor) => commands::run_doctor(&cli, &merged_path).await,
         None => {
             let env = bootstrap::init_environment(&cli, &merged_path)?;
             let database = bootstrap::init_data_layer(&env.config).await?;

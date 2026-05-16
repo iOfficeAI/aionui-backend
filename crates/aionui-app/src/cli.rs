@@ -48,11 +48,11 @@ pub(crate) struct Cli {
     pub command: Option<Command>,
 }
 
-// `Mcp` prefix is load-bearing — clap derives kebab-case subcommand names
-// (`mcp-bridge`, `mcp-guide-stdio`, `mcp-team-stdio`) that external callers
-// (ACP agent CLI, team MCP bridge spec) depend on verbatim.
+// `Mcp` prefix is load-bearing on Mcp* variants — clap derives kebab-case
+// subcommand names (`mcp-bridge`, `mcp-guide-stdio`, `mcp-team-stdio`)
+// that external callers (ACP agent CLI, team MCP bridge spec) depend on
+// verbatim.
 #[derive(Subcommand)]
-#[allow(clippy::enum_variant_names)]
 pub(crate) enum Command {
     /// Stdio ↔ TCP bridge for the team MCP server (spawned by the ACP agent CLI).
     McpBridge,
@@ -60,4 +60,10 @@ pub(crate) enum Command {
     McpGuideStdio,
     /// MCP stdio server for team tools (spawned by the ACP agent CLI).
     McpTeamStdio,
+    /// Self-check: hydrate the agent registry, probe every CLI on `$PATH`,
+    /// and print a per-agent availability table. Useful when the user
+    /// reports "no agent works" — running this from the same shell the
+    /// app launched from confirms whether each backend is detectable
+    /// before involving server logs.
+    Doctor,
 }
