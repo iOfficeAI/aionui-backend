@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.1.4](https://github.com/iOfficeAI/AionCLI/compare/v0.1.3...v0.1.4) (2026-05-16)
+
+
+### Features
+
+* **ai-agent:** log every CLI detection + add doctor subcommand ([#285](https://github.com/iOfficeAI/AionCLI/issues/285)) ([5ef6d0a](https://github.com/iOfficeAI/AionCLI/commit/5ef6d0a4d99345a502a9073dfdfa0d07cfa52a8c))
+* **runtime:** full shell-style command in spawn logs ([#278](https://github.com/iOfficeAI/AionCLI/issues/278)) ([dd51616](https://github.com/iOfficeAI/AionCLI/commit/dd516165ae9e22fcb0573ae9d8d3aa094e54cff2))
+
+
+### Bug Fixes
+
+* **ai-agent:** negotiate OpenClaw protocol v3..v4 ([#288](https://github.com/iOfficeAI/AionCLI/issues/288)) ([dfeece0](https://github.com/iOfficeAI/AionCLI/commit/dfeece0e6a465093090c0efdfa1f5aa93d9fa6e8))
+* **team:** model routing + schema unification + lazy warm mode persistence ([#286](https://github.com/iOfficeAI/AionCLI/issues/286)) ([199a392](https://github.com/iOfficeAI/AionCLI/commit/199a392caca600ef215bb2ae71bfd82bda7bb744))
+
+
+### Performance Improvements
+
+* **team:** lazy warm — only start agent processes on first message ([#282](https://github.com/iOfficeAI/AionCLI/issues/282)) ([6281f31](https://github.com/iOfficeAI/AionCLI/commit/6281f31ac6a2656c1af51891589770f4583e00c2))
+
+
+### Code Refactoring
+
+* **app:** extract CLI definitions to cli.rs ([#280](https://github.com/iOfficeAI/AionCLI/issues/280)) ([5685d52](https://github.com/iOfficeAI/AionCLI/commit/5685d5237b8f51c70e80895b1c654325c958196e))
+* **app:** introduce commands/ module with layered bootstrap for subcommands ([#283](https://github.com/iOfficeAI/AionCLI/issues/283)) ([1216597](https://github.com/iOfficeAI/AionCLI/commit/12165971cfae61d85376c102ef9f9afc5a7c5bbf))
+* **app:** replace argv sniffing with clap Subcommand for mcp-* helpers ([#277](https://github.com/iOfficeAI/AionCLI/issues/277)) ([c3d137c](https://github.com/iOfficeAI/AionCLI/commit/c3d137c9e5fdcb12e29d5ca7abd6a0585bbc6c8d))
+* **app:** split monolithic lib.rs/main.rs into per-module files ([#284](https://github.com/iOfficeAI/AionCLI/issues/284)) ([f3462cb](https://github.com/iOfficeAI/AionCLI/commit/f3462cbb1d6d830a3a368a76b2d9ea6424f21b64))
+* rename binary from aionui-backend to aioncli ([#289](https://github.com/iOfficeAI/AionCLI/issues/289)) ([30eeca3](https://github.com/iOfficeAI/AionCLI/commit/30eeca37661441ba9474aa7dc51ca911abda0bfb))
+
 ## [0.1.3](https://github.com/iOfficeAI/aionui-backend/compare/v0.1.2...v0.1.3) (2026-05-15)
 
 
