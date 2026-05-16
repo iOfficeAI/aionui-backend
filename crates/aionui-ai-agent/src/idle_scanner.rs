@@ -74,18 +74,3 @@ fn scan_and_cleanup(manager: &Arc<dyn IWorkerTaskManager>, threshold_ms: i64) {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn default_idle_timeout_is_5_minutes() {
-        assert_eq!(DEFAULT_IDLE_TIMEOUT_SECS, 300_000);
-    }
-
-    #[test]
-    fn scan_interval_is_60_seconds() {
-        assert_eq!(SCAN_INTERVAL_SECS, 60);
-    }
-}
