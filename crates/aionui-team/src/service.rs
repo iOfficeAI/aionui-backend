@@ -846,6 +846,7 @@ impl TeamSessionService {
         content: &str,
         files: Option<Vec<String>>,
     ) -> Result<(), TeamError> {
+        self.ensure_session(team_id).await?;
         let session = {
             let entry = self
                 .sessions
@@ -863,6 +864,7 @@ impl TeamSessionService {
         content: &str,
         files: Option<Vec<String>>,
     ) -> Result<(), TeamError> {
+        self.ensure_session(team_id).await?;
         let session = {
             let entry = self
                 .sessions
