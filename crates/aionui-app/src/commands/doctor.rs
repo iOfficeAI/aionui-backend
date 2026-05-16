@@ -32,7 +32,7 @@ pub async fn run_doctor(cli: &Cli, merged_path: &str) -> Result<ExitCode> {
 
     // Use the real on-disk DB so the report reflects the user's actual
     // catalog (including custom agents they've added via the UI).
-    let db_path = cli.data_dir.join("aioncli.db");
+    let db_path = cli.data_dir.join("aionui-backend.db");
     maybe_copy_legacy_database(&db_path)?;
     let database = init_database(&db_path).await?;
 
