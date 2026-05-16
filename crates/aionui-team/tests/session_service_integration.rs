@@ -1442,8 +1442,9 @@ async fn dispose_all_cleans_up_sessions() {
 
     svc.dispose_all();
 
-    let result = svc.send_message(&t1.id, "Hello", None).await;
-    assert!(result.is_err());
+    // After dispose, sessions are cleaned up.
+    assert!(svc.get_session_scheduler(&t1.id).is_none());
+    assert!(svc.get_session_scheduler(&t2.id).is_none());
 }
 
 // ===========================================================================
