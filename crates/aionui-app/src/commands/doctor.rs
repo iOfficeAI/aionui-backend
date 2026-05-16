@@ -7,7 +7,7 @@
 //! does for the server, so the bundled `bun` resolves through the
 //! same cache the server uses.
 //!
-//! Writes to stdout (not the rolling backend.log) — the user
+//! Writes to stdout (not the rolling aioncli.log) — the user
 //! typically runs `doctor` interactively after reporting "no agent
 //! works", and the answer needs to be visible in their terminal
 //! without grepping logs. We deliberately skip `init_environment` to
