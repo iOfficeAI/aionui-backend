@@ -77,7 +77,7 @@ pub(super) async fn build(
     // never had a command (e.g. remote-only). Either way the
     // caller needs to see a BadRequest, not a confusing
     // spawn-time error.
-    let (command, args, env, cwd) = (
+    let (command, args, mut env, cwd) = (
         meta.resolved_command
             .clone()
             .ok_or_else(|| AppError::BadRequest(format!("Agent '{}' CLI not found in PATH", meta.name)))?,
@@ -88,9 +88,36 @@ pub(super) async fn build(
                 name: e.name.clone(),
                 value: e.value.clone(),
             })
-            .collect(),
+            .collect::<Vec<_>>(),
         Some(ctx.workspace.clone()),
     );
+    if meta.backend.as_deref() == Some("claude") {
+        let cc_switch_env = crate::cc_switch::read_claude_provider_env();
+        if !cc_switch_env.is_empty() {
+            let mut injected: Vec<&str> = Vec::new();
+            let mut skipped: Vec<&str> = Vec::new();
+
+            for (name, value) in &cc_switch_env {
+                if std::env::var(name).is_err() {
+                    env.push(aionui_common::EnvVar {
+                        name: name.clone(),
+                        value: value.clone(),
+                    });
+                    injected.push(name.as_str());
+                } else {
+                    skipped.push(name.as_str());
+                }
+            }
+
+            if !injected.is_empty() {
+                tracing::info!(?injected, "cc-switch: env vars injected as fallback");
+            }
+            if !skipped.is_empty() {
+                tracing::info!(?skipped, "cc-switch: env vars skipped (already inherited from parent process)");
+            }
+        }
+    }
+
     let command_spec = CommandSpec {
         command,
         args,
