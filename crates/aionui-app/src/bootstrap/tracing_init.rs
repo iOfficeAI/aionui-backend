@@ -53,7 +53,7 @@ pub fn init_tracing(log_dir: &Path, log_level: Option<&str>) -> LogGuards {
     // Backend file layer — excludes aion_* targets
     let file_appender = tracing_appender::rolling::RollingFileAppender::builder()
         .rotation(tracing_appender::rolling::Rotation::DAILY)
-        .filename_suffix("aioncli.log")
+        .filename_suffix("aioncore.log")
         .build(log_dir)
         .expect("failed to create backend log file appender");
     let (non_blocking, backend_guard) = tracing_appender::non_blocking(file_appender);

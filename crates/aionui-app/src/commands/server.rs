@@ -1,4 +1,4 @@
-//! `aioncli` (no subcommand): the main HTTP server.
+//! `aioncore` (no subcommand): the main HTTP server.
 
 use std::process::ExitCode;
 use std::time::Instant;

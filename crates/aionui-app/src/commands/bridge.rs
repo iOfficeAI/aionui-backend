@@ -1,6 +1,6 @@
-//! `aioncli mcp-bridge` subcommand: stdio ↔ TCP bridge for the team MCP server.
+//! `aioncore mcp-bridge` subcommand: stdio ↔ TCP bridge for the team MCP server.
 //!
-//! Spawned by the ACP agent CLI as an MCP server with command `aioncli mcp-bridge`.
+//! Spawned by the ACP agent CLI as an MCP server with command `aioncore mcp-bridge`.
 //! stdio side speaks newline-delimited JSON-RPC 2.0 (the MCP stdio transport);
 //! TCP side speaks 4-byte big-endian length-prefixed JSON frames against
 //! `127.0.0.1:<TEAM_MCP_PORT>` (reusing `aionui_team::mcp::protocol`).
@@ -22,7 +22,7 @@ use tokio::net::TcpStream;
 
 const CONNECT_ADDR_HOST: &str = "127.0.0.1";
 
-/// Entry point for `aioncli mcp-bridge`. Returns an [`ExitCode`] so the
+/// Entry point for `aioncore mcp-bridge`. Returns an [`ExitCode`] so the
 /// binary surfaces non-zero on any failure (ACP CLI uses that to mark the MCP
 /// server as broken).
 pub async fn run_mcp_bridge() -> ExitCode {

@@ -356,7 +356,7 @@ fn probe_with_reason(meta: &AgentMetadata) -> (Option<PathBuf>, Option<Unavailab
 
 /// Emit a single per-row line summarizing the probe outcome. Available
 /// rows go to `debug!` (one per startup × N agents is noisy at info);
-/// unavailable rows go to `info!` so the default aioncli.log surfaces
+/// unavailable rows go to `info!` so the default aioncore.log surfaces
 /// the reason without needing `--log-level debug` after a user
 /// reports "no agent works".
 fn log_probe_result(meta: &AgentMetadata, reason: &Option<UnavailableReason>) {

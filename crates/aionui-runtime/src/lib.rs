@@ -1,4 +1,4 @@
-//! Bundled runtime (bun) resolver for aioncli.
+//! Bundled runtime (bun) resolver for aioncore.
 //!
 //! Embeds the bun runtime at build time (zstd-compressed) and extracts it
 //! to the user's OS cache directory on first call. Callers use

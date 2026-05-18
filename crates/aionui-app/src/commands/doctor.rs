@@ -1,4 +1,4 @@
-//! `aioncli doctor` subcommand: agent CLI detection self-check.
+//! `aioncore doctor` subcommand: agent CLI detection self-check.
 //!
 //! Hydrates the agent registry against the real on-disk database and
 //! prints a per-agent availability table to stdout. Mirrors the
@@ -7,7 +7,7 @@
 //! does for the server, so the bundled `bun` resolves through the
 //! same cache the server uses.
 //!
-//! Writes to stdout (not the rolling aioncli.log) — the user
+//! Writes to stdout (not the rolling aioncore.log) — the user
 //! typically runs `doctor` interactively after reporting "no agent
 //! works", and the answer needs to be visible in their terminal
 //! without grepping logs. We deliberately skip `init_environment` to
