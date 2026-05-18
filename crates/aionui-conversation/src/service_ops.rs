@@ -80,11 +80,7 @@ impl ConversationService {
     /// Get the workspace path for a conversation owned by `user_id`.
     ///
     /// Verifies user ownership and returns the resolved workspace path.
-    pub async fn get_workspace(
-        &self,
-        user_id: &str,
-        conversation_id: &str,
-    ) -> Result<std::path::PathBuf, AppError> {
+    pub async fn get_workspace(&self, user_id: &str, conversation_id: &str) -> Result<std::path::PathBuf, AppError> {
         let row = self
             .conversation_repo()
             .get(conversation_id)

@@ -14,9 +14,7 @@ pub struct AccessDenied {
 
 impl AccessDenied {
     pub fn new(reason: impl Into<String>) -> Self {
-        Self {
-            reason: reason.into(),
-        }
+        Self { reason: reason.into() }
     }
 }
 
@@ -46,14 +44,8 @@ pub struct RequestContext {
 /// - Return `Err(AccessDenied)` to reject it.
 ///
 /// When no guard is configured, the static file service allows all requests.
-pub type AccessGuardFn = Arc<
-    dyn Fn(
-            &RequestContext,
-            &Path,
-        ) -> Pin<Box<dyn Future<Output = GuardResult> + Send + 'static>>
-        + Send
-        + Sync,
->;
+pub type AccessGuardFn =
+    Arc<dyn Fn(&RequestContext, &Path) -> Pin<Box<dyn Future<Output = GuardResult> + Send + 'static>> + Send + Sync>;
 
 /// Helper to create an `AccessGuardFn` from any async function/closure.
 ///

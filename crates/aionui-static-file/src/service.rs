@@ -62,7 +62,6 @@ pub struct StaticFileConfig {
     pub max_file_size: Option<u64>,
 }
 
-
 /// A stateless static file service with pluggable access control.
 ///
 /// Resolves a (root, relative_path) pair into a validated file ready for
@@ -114,9 +113,7 @@ impl StaticFileService {
             .map_err(|_| ServeError::NotFound(relative_path.to_owned()))?;
 
         // Canonicalize root to handle symlinks (e.g. macOS /var → /private/var)
-        let canonical_root = fs::canonicalize(root)
-            .await
-            .map_err(ServeError::Io)?;
+        let canonical_root = fs::canonicalize(root).await.map_err(ServeError::Io)?;
 
         // Sandbox check
         if !canonical.starts_with(&canonical_root) {
@@ -125,9 +122,7 @@ impl StaticFileService {
 
         // Access guard
         if let Some(guard) = &self.config.guard {
-            guard(context, &canonical)
-                .await
-                .map_err(ServeError::Denied)?;
+            guard(context, &canonical).await.map_err(ServeError::Denied)?;
         }
 
         // File metadata
@@ -136,9 +131,7 @@ impl StaticFileService {
             .map_err(|_| ServeError::NotFound(relative_path.to_owned()))?;
 
         if metadata.is_dir() {
-            return Err(ServeError::NotFound(format!(
-                "{relative_path} is a directory"
-            )));
+            return Err(ServeError::NotFound(format!("{relative_path} is a directory")));
         }
 
         let size = metadata.len();
@@ -255,15 +248,13 @@ pub fn parse_range(header_value: &str, file_size: u64) -> Option<ByteRange> {
 
 /// Determine MIME type from file extension.
 fn mime_for_path(path: &Path) -> String {
-    mime_guess::from_path(path)
-        .first_or_octet_stream()
-        .to_string()
+    mime_guess::from_path(path).first_or_octet_stream().to_string()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::guard::{make_guard, AccessDenied};
+    use crate::guard::{AccessDenied, make_guard};
     use std::fs as stdfs;
 
     #[tokio::test]
@@ -347,9 +338,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         stdfs::write(dir.path().join("denied.txt"), "no").unwrap();
 
-        let guard = make_guard(|_ctx: &RequestContext, _path: &Path| async {
-            Err(AccessDenied::new("nope"))
-        });
+        let guard = make_guard(|_ctx: &RequestContext, _path: &Path| async { Err(AccessDenied::new("nope")) });
         let svc = StaticFileService::with_guard(guard);
         let ctx = RequestContext::default();
         let result = svc.resolve(dir.path(), "denied.txt", &ctx).await;

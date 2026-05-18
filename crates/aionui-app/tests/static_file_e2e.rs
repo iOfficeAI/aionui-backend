@@ -71,23 +71,11 @@ async fn serves_text_file_with_correct_content_type() {
     let resp = app.oneshot(req).await.unwrap();
 
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_eq!(
-        resp.headers().get(header::CONTENT_TYPE).unwrap(),
-        "text/plain"
-    );
-    assert_eq!(
-        resp.headers().get(header::CONTENT_LENGTH).unwrap(),
-        "5"
-    );
+    assert_eq!(resp.headers().get(header::CONTENT_TYPE).unwrap(), "text/plain");
+    assert_eq!(resp.headers().get(header::CONTENT_LENGTH).unwrap(), "5");
     assert!(resp.headers().get(header::ETAG).is_some());
-    assert_eq!(
-        resp.headers().get(header::CACHE_CONTROL).unwrap(),
-        "public, max-age=60"
-    );
-    assert_eq!(
-        resp.headers().get(header::ACCEPT_RANGES).unwrap(),
-        "bytes"
-    );
+    assert_eq!(resp.headers().get(header::CACHE_CONTROL).unwrap(), "public, max-age=60");
+    assert_eq!(resp.headers().get(header::ACCEPT_RANGES).unwrap(), "bytes");
 
     let bytes = resp.into_body().collect().await.unwrap().to_bytes();
     assert_eq!(&bytes[..], b"world");
@@ -106,10 +94,7 @@ async fn serves_svg_with_correct_content_type() {
     let resp = app.oneshot(req).await.unwrap();
 
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_eq!(
-        resp.headers().get(header::CONTENT_TYPE).unwrap(),
-        "image/svg+xml"
-    );
+    assert_eq!(resp.headers().get(header::CONTENT_TYPE).unwrap(), "image/svg+xml");
     let bytes = resp.into_body().collect().await.unwrap().to_bytes();
     assert_eq!(&bytes[..], svg.as_bytes());
 }
@@ -127,10 +112,7 @@ async fn serves_nested_path() {
     let resp = app.oneshot(req).await.unwrap();
 
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_eq!(
-        resp.headers().get(header::CONTENT_TYPE).unwrap(),
-        "application/json"
-    );
+    assert_eq!(resp.headers().get(header::CONTENT_TYPE).unwrap(), "application/json");
 }
 
 // ── Range Requests ──────────────────────────────────────────────────
@@ -147,14 +129,8 @@ async fn range_request_returns_partial_content() {
     let resp = app.oneshot(req).await.unwrap();
 
     assert_eq!(resp.status(), StatusCode::PARTIAL_CONTENT);
-    assert_eq!(
-        resp.headers().get(header::CONTENT_RANGE).unwrap(),
-        "bytes 5-9/10"
-    );
-    assert_eq!(
-        resp.headers().get(header::CONTENT_LENGTH).unwrap(),
-        "5"
-    );
+    assert_eq!(resp.headers().get(header::CONTENT_RANGE).unwrap(), "bytes 5-9/10");
+    assert_eq!(resp.headers().get(header::CONTENT_LENGTH).unwrap(), "5");
 
     let bytes = resp.into_body().collect().await.unwrap().to_bytes();
     assert_eq!(&bytes[..], b"56789");

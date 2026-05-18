@@ -27,10 +27,7 @@ pub struct StaticFileRouterState {
 /// Route: `GET /api/conversations/{id}/files/{*path}`
 pub fn conversation_static_file_routes(state: StaticFileRouterState) -> Router {
     Router::new()
-        .route(
-            "/api/conversations/{id}/files/{*path}",
-            get(serve_conversation_file),
-        )
+        .route("/api/conversations/{id}/files/{*path}", get(serve_conversation_file))
         .with_state(state)
 }
 
@@ -56,9 +53,7 @@ async fn serve_conversation_file(
         .await
         .map_err(map_serve_error)?;
 
-    let etag = served
-        .last_modified
-        .map(|t| format!("\"{:x}-{:x}\"", t, served.size));
+    let etag = served.last_modified.map(|t| format!("\"{:x}-{:x}\"", t, served.size));
 
     // Check Range header for partial content support
     let range = headers
@@ -88,15 +83,9 @@ async fn serve_conversation_file(
             builder = builder.header(header::ETAG, etag_val);
         }
 
-        builder
-            .body(body)
-            .map_err(|e| AppError::Internal(e.to_string()))
+        builder.body(body).map_err(|e| AppError::Internal(e.to_string()))
     } else {
-        let file = state
-            .static_file_service
-            .open(&served)
-            .await
-            .map_err(map_serve_error)?;
+        let file = state.static_file_service.open(&served).await.map_err(map_serve_error)?;
 
         let stream = ReaderStream::with_capacity(file, 64 * 1024);
         let body = Body::from_stream(stream);
@@ -112,9 +101,7 @@ async fn serve_conversation_file(
             builder = builder.header(header::ETAG, etag_val);
         }
 
-        builder
-            .body(body)
-            .map_err(|e| AppError::Internal(e.to_string()))
+        builder.body(body).map_err(|e| AppError::Internal(e.to_string()))
     }
 }
 
@@ -123,9 +110,9 @@ fn map_serve_error(e: ServeError) -> AppError {
         ServeError::Traversal(_) => AppError::Forbidden("Path traversal not allowed".into()),
         ServeError::Denied(d) => AppError::Forbidden(d.reason),
         ServeError::NotFound(p) => AppError::NotFound(format!("File not found: {p}")),
-        ServeError::TooLarge { size, limit } => AppError::BadRequest(format!(
-            "File too large: {size} bytes exceeds limit of {limit} bytes"
-        )),
+        ServeError::TooLarge { size, limit } => {
+            AppError::BadRequest(format!("File too large: {size} bytes exceeds limit of {limit} bytes"))
+        }
         ServeError::Io(io) => AppError::Internal(format!("IO error: {io}")),
     }
 }

@@ -10,7 +10,6 @@ use aionui_assistant::{AssistantRouterState, AssistantService, BuiltinAssistantR
 use aionui_auth::extract_token_from_ws_headers;
 use aionui_channel::ChannelRouterState;
 use aionui_conversation::{ConversationRouterState, ConversationService, StaticFileRouterState};
-use aionui_static_file::StaticFileService;
 use aionui_cron::{CronEventEmitter, CronRouterState};
 use aionui_db::{
     IAcpSessionRepository, IAgentMetadataRepository, IAssistantOverrideRepository, IAssistantRepository,
@@ -34,6 +33,7 @@ use aionui_office::{
 };
 use aionui_realtime::{NoopMessageRouter, WsHandlerState};
 use aionui_shell::ShellRouterState;
+use aionui_static_file::StaticFileService;
 use aionui_system::{
     ClientPrefService, ConnectionTestRouterState, ConnectionTestService, ModelFetchService, ProtocolDetectionService,
     ProviderService, SettingsService, SystemRouterState, VersionCheckService,
