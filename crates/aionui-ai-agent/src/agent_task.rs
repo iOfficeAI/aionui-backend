@@ -528,7 +528,10 @@ mod cc_switch_model_merge_tests {
         };
 
         let result = merge_model_info(Some(sdk_payload), Some(cc_switch_payload));
-        assert_eq!(result.unwrap().current_model_label.as_deref(), Some("Claude Sonnet 4.6"));
+        assert_eq!(
+            result.unwrap().current_model_label.as_deref(),
+            Some("Claude Sonnet 4.6")
+        );
     }
 
     #[test]

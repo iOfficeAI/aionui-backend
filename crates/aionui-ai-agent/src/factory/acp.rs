@@ -113,7 +113,10 @@ pub(super) async fn build(
                 tracing::info!(?injected, "cc-switch: env vars injected as fallback");
             }
             if !skipped.is_empty() {
-                tracing::info!(?skipped, "cc-switch: env vars skipped (already inherited from parent process)");
+                tracing::info!(
+                    ?skipped,
+                    "cc-switch: env vars skipped (already inherited from parent process)"
+                );
             }
         }
     }

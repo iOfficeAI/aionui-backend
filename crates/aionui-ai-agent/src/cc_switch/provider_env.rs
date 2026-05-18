@@ -22,12 +22,13 @@ struct ProviderSettingsConfig {
 pub(crate) fn normalize_env(raw: &serde_json::Map<String, serde_json::Value>) -> HashMap<String, String> {
     raw.iter()
         .filter_map(|(k, v)| {
-            if let serde_json::Value::String(s) = v {
-                if !s.trim().is_empty() {
-                    return Some((k.clone(), s.clone()));
-                }
+            if let serde_json::Value::String(s) = v
+                && !s.trim().is_empty()
+            {
+                Some((k.clone(), s.clone()))
+            } else {
+                None
             }
-            None
         })
         .collect()
 }
@@ -52,7 +53,10 @@ pub fn read_claude_provider_env_with_paths(paths: &CcSwitchPaths) -> HashMap<Str
     };
 
     if !paths.database_path.exists() {
-        warn!(provider_id, "cc-switch: settings.json references provider but database file not found");
+        warn!(
+            provider_id,
+            "cc-switch: settings.json references provider but database file not found"
+        );
         return HashMap::new();
     }
 
@@ -96,7 +100,10 @@ fn read_env_from_db(db_path: &Path, provider_id: &str) -> HashMap<String, String
     };
 
     if env.is_empty() {
-        info!(provider_id, "cc-switch: provider has no env vars configured (using native API)");
+        info!(
+            provider_id,
+            "cc-switch: provider has no env vars configured (using native API)"
+        );
     } else {
         let keys: Vec<&str> = env.keys().map(|k| k.as_str()).collect();
         info!(provider_id, ?keys, "cc-switch: provider env vars loaded");
@@ -136,7 +143,10 @@ mod tests {
         raw.insert("ANTHROPIC_API_KEY".into(), serde_json::Value::String("sk-123".into()));
         raw.insert("EMPTY".into(), serde_json::Value::String("".into()));
         raw.insert("NUMBER".into(), serde_json::Value::Number(42.into()));
-        raw.insert("VALID_URL".into(), serde_json::Value::String("https://api.example.com".into()));
+        raw.insert(
+            "VALID_URL".into(),
+            serde_json::Value::String("https://api.example.com".into()),
+        );
 
         let result = normalize_env(&raw);
         assert_eq!(result.len(), 2);

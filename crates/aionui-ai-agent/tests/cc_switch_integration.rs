@@ -1,5 +1,5 @@
 use aionui_ai_agent::cc_switch::{
-    build_model_info_from_env, read_claude_model_info_with_paths, read_claude_provider_env_with_paths, CcSwitchPaths,
+    CcSwitchPaths, build_model_info_from_env, read_claude_model_info_with_paths, read_claude_provider_env_with_paths,
 };
 use rusqlite::Connection;
 use std::collections::HashMap;

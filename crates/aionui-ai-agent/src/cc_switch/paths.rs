@@ -30,9 +30,15 @@ mod tests {
     #[test]
     fn resolves_paths_from_home() {
         let paths = CcSwitchPaths::from_home(Path::new("/home/testuser"));
-        assert_eq!(paths.settings_path, Path::new("/home/testuser/.cc-switch/settings.json"));
+        assert_eq!(
+            paths.settings_path,
+            Path::new("/home/testuser/.cc-switch/settings.json")
+        );
         assert_eq!(paths.database_path, Path::new("/home/testuser/.cc-switch/cc-switch.db"));
-        assert_eq!(paths.claude_settings_path, Path::new("/home/testuser/.claude/settings.json"));
+        assert_eq!(
+            paths.claude_settings_path,
+            Path::new("/home/testuser/.claude/settings.json")
+        );
     }
 
     #[test]

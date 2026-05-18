@@ -34,7 +34,9 @@ pub fn build_model_info_from_env(
         .filter(|s| !s.trim().is_empty())
         .or_else(|| env.get("ANTHROPIC_MODEL").filter(|s| !s.trim().is_empty()));
     let opus_model = env.get("ANTHROPIC_DEFAULT_OPUS_MODEL").filter(|s| !s.trim().is_empty());
-    let haiku_model = env.get("ANTHROPIC_DEFAULT_HAIKU_MODEL").filter(|s| !s.trim().is_empty());
+    let haiku_model = env
+        .get("ANTHROPIC_DEFAULT_HAIKU_MODEL")
+        .filter(|s| !s.trim().is_empty());
 
     let mut available = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -42,17 +44,17 @@ pub fn build_model_info_from_env(
     let candidates = [("default", default_model), ("opus", opus_model), ("haiku", haiku_model)];
 
     for (slot, model_id_opt) in &candidates {
-        if let Some(model_id) = model_id_opt {
-            if seen.insert(model_id.as_str()) {
-                let label = labels
-                    .get(model_id.as_str())
-                    .cloned()
-                    .unwrap_or_else(|| (*model_id).clone());
-                available.push(ModelInfoEntry {
-                    id: slot.to_string(),
-                    label,
-                });
-            }
+        if let Some(model_id) = model_id_opt
+            && seen.insert(model_id.as_str())
+        {
+            let label = labels
+                .get(model_id.as_str())
+                .cloned()
+                .unwrap_or_else(|| (*model_id).clone());
+            available.push(ModelInfoEntry {
+                id: slot.to_string(),
+                label,
+            });
         }
     }
 
@@ -66,7 +68,10 @@ pub fn build_model_info_from_env(
         .find(|m| m.id == preferred_slot)
         .map(|m| m.id.clone())
         .unwrap_or_else(|| available[0].id.clone());
-    let current_model_label = available.iter().find(|m| m.id == current_model_id).map(|m| m.label.clone());
+    let current_model_label = available
+        .iter()
+        .find(|m| m.id == current_model_id)
+        .map(|m| m.label.clone());
 
     Some(ModelInfoPayload {
         current_model_id: Some(current_model_id),
@@ -130,7 +135,11 @@ pub fn read_claude_model_info_with_paths(paths: &CcSwitchPaths) -> Option<ModelI
 
     let env: HashMap<String, String> = env_obj
         .iter()
-        .filter_map(|(k, v)| v.as_str().filter(|s| !s.trim().is_empty()).map(|s| (k.clone(), s.to_owned())))
+        .filter_map(|(k, v)| {
+            v.as_str()
+                .filter(|s| !s.trim().is_empty())
+                .map(|s| (k.clone(), s.to_owned()))
+        })
         .collect();
 
     let labels = read_model_labels(&conn);
