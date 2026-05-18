@@ -2,6 +2,7 @@
 pub(crate) mod agent_runtime;
 pub mod agent_task;
 pub mod capability;
+pub mod cc_switch;
 pub mod factory;
 pub(crate) mod idle_scanner;
 pub mod manager;
