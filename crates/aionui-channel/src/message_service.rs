@@ -117,7 +117,7 @@ impl ChannelMessageService {
         let agent_config = self.settings.get_agent_config(platform).await?;
         let model_config = self.settings.get_model_config(platform).await?;
         let model = resolved_model_to_provider(model_config.as_ref());
-        let extra = Self::build_channel_extra(agent_config.backend.as_deref());
+        let mut extra = Self::build_channel_extra(agent_config.backend.as_deref());
         let name = channel_conversation_name(
             platform,
             &session.agent_type,
@@ -125,10 +125,18 @@ impl ChannelMessageService {
             session.chat_id.as_deref(),
         );
 
+        // Top-level `model` is only accepted for aionrs; other types pass via `extra`.
+        let top_level_model = if agent_type == AgentType::Aionrs {
+            Some(model)
+        } else {
+            extra["model"] = serde_json::to_value(&model).unwrap_or_default();
+            None
+        };
+
         let req = CreateConversationRequest {
             r#type: agent_type,
             name: Some(name),
-            model: Some(model),
+            model: top_level_model,
             source: Some(source),
             channel_chat_id: session.chat_id.clone(),
             extra,
@@ -375,6 +383,7 @@ mod tests {
         ErrorEventData, FinishEventData, StartEventData, TextEventData, ThinkingEventData, ToolCallEventData,
         ToolCallStatus,
     };
+    use aionui_common::ProviderWithModel;
 
     // ── platform_to_source ─────────────────────────────────────────────
 
@@ -561,6 +570,52 @@ mod tests {
         let extra = ChannelMessageService::build_channel_extra(Some("claude"));
         assert_eq!(extra["session_mode"], "yolo");
         assert_eq!(extra["backend"], "claude");
+    }
+
+    // ── model placement by agent_type (regression: non-aionrs must not
+    //    use top-level model) ──────────────────────────────────────────
+
+    #[test]
+    fn acp_model_goes_into_extra_not_top_level() {
+        let agent_type = AgentType::Acp;
+        let model = ProviderWithModel {
+            provider_id: "prov1".into(),
+            model: "claude-sonnet".into(),
+            use_model: Some("global.anthropic.claude-sonnet-4-6".into()),
+        };
+        let mut extra = ChannelMessageService::build_channel_extra(Some("codex"));
+
+        let top_level_model = if agent_type == AgentType::Aionrs {
+            Some(model.clone())
+        } else {
+            extra["model"] = serde_json::to_value(&model).unwrap();
+            None
+        };
+
+        assert!(top_level_model.is_none(), "acp must not have top-level model");
+        assert_eq!(extra["model"]["provider_id"], "prov1");
+        assert_eq!(extra["model"]["use_model"], "global.anthropic.claude-sonnet-4-6");
+    }
+
+    #[test]
+    fn aionrs_model_stays_at_top_level() {
+        let agent_type = AgentType::Aionrs;
+        let model = ProviderWithModel {
+            provider_id: "prov2".into(),
+            model: "gpt-4o".into(),
+            use_model: None,
+        };
+        let mut extra = ChannelMessageService::build_channel_extra(None);
+
+        let top_level_model = if agent_type == AgentType::Aionrs {
+            Some(model.clone())
+        } else {
+            extra["model"] = serde_json::to_value(&model).unwrap();
+            None
+        };
+
+        assert!(top_level_model.is_some(), "aionrs must use top-level model");
+        assert!(extra.get("model").is_none() || extra["model"].is_null());
     }
 
     // ── channel_conversation_name ─────────────────────────────────────
